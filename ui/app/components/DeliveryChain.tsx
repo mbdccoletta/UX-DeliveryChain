@@ -13,6 +13,7 @@ import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
+import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
 import { davisCategory, verdictOf, worseOf, type Tone } from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import type { Forecast } from "../utils/forecast";
@@ -56,16 +57,29 @@ const LAYER_ICON = [
   ServicesIcon, ContainerIcon, HostsIcon, AutomationEngineIcon,
 ] as const;
 
+/**
+ * The classic serviceType, in words.
+ *
+ * The platform's own vocabulary, lowercased — DATABASE_SERVICE is a database
+ * and QUEUE_LISTENER_SERVICE is a queue listener, and inventing friendlier
+ * names for them would only stop the reader finding the same thing in the
+ * platform. Anything unmapped falls through as itself rather than as "other".
+ */
+const KIND_LABEL = (kind: string): string => kind
+  ? kind.replace(/_SERVICE$/, "").replace(/_/g, " ").toLowerCase()
+  : "service";
+
 /** The icon a node wears: its layer's, refined by what the node actually is. */
-function nodeIcon(ti: number, n: { nm: string; store?: string }): React.ComponentType<SvgIconProps> {
+function nodeIcon(ti: number, n: { nm: string; store?: string; gen2Db?: boolean }): React.ComponentType<SvgIconProps> {
   if (ti === 0) {
     if (n.nm === "Mobile") return MobileIcon;
     if (n.nm === "Robots") return AutomationEngineIcon;
     if (n.nm === "Synthetic") return SyntheticMonitoringSignetIcon;
     return DesktopIcon;
   }
-  // a store shares the Services layer but is not a service
-  if (n.store) return DatabaseIcon;
+  // a store shares the Services layer but is not a service — and a classic
+  // service that IS a database gets the same icon, since it is the same thing
+  if (n.store || n.gen2Db) return DatabaseIcon;
   if (ti === 6) return /host/i.test(n.nm) ? HostsIcon : NodeIcon;
   return LAYER_ICON[ti];
 }
@@ -83,11 +97,15 @@ interface Elo {
   vol?: number;
   /**
    * A data store drawn inside the Services layer, keyed by the address the
-   * caller dialled. The Serve layer holds two kinds of card now, and the edge
-   * pass has to tell them apart: a store is not fed by the ingress, it is fed
-   * by the service beside it.
+   * caller dialled. The Serve layer holds three kinds of card now, and the
+   * edge pass has to tell them apart: neither a store nor a classic-only
+   * service is fed by the ingress — both are fed by the service beside them.
    */
   store?: string;
+  /** A service only the classic topology knows: entered from its caller. */
+  gen2?: string;
+  /** …and whether that service is a data store, which decides its icon. */
+  gen2Db?: boolean;
 }
 
 /**
@@ -139,7 +157,7 @@ const problemIds = (p: { entityIds: string[] | null }) => p.entityIds ?? [];
 /** Builds the 7 layers from the loaded live data. */
 function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecast | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
-  stores: DataStore[] | null,
+  stores: DataStore[] | null, gen2: Gen2Service[] | null,
 ): { layers: Layer[]; edges: Edge[] } {
   const app = d.apps.find((a) => a.appId === appId);
   // Layers 1, 2 and 4 come from RUM, which now carries the application id —
@@ -346,6 +364,29 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       });
   })();
 
+  /* ── what only the classic topology knows ───────────────────────────────
+   * Same layer, same shape as any other service, because that is what these
+   * are — the only thing that differs is which model found them. The card
+   * says so: a box whose provenance is not the one every other box uses has
+   * to declare it, or the screen quietly mixes two sources.
+   */
+  /* Cap at ten, not six. Six was arbitrary and it truncated a real chain:
+   * the mainframe mobile application reaches its webserver, six services
+   * through it, and only then the database and CheckDestination — the last
+   * hop, the one the whole walk exists to find, fell off the end. Ten leaves
+   * the Serve layer room for at least two of its own services while letting
+   * a classic-only chain arrive whole. */
+  const gen2Cards: Elo[] = (gen2 ?? []).slice(0, 10).map<Elo>((g) => ({
+    nm: g.name, mt: `${KIND_LABEL(g.kind)} · Gen2 only`,
+    v: String(g.callers.length || "·"), tone: "info",
+    vol: Math.max(g.callers.length * 40, 1),
+    ids: [g.id], gen2: g.id, gen2Db: /DATABASE|DATASTORE/.test(g.kind),
+    det: [["Found in", "classic topology — Smartscape has no node for it"],
+          ["Classic type", g.kind || "—"],
+          ...(g.host ? [["Runs on", g.host] as [string, string]] : []),
+          ["Called by", `${g.callers.length} service(s) in this chain`]],
+  }));
+
   /* ── the Serve layer: services, and the stores they keep their data in ──
    * A store sits here rather than in a column of its own, because that is the
    * relation both Smartscape and the spans describe: a service CALLS a store,
@@ -372,11 +413,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
             ["Calls", d.calls.filter((c) => c.src === r.nm)
               .map((c) => c.dst.split(" - ")[0]).slice(0, 6).join(" · ") || "—"]],
     }));
-    if (!storeCards.length) return svc;
-    // at least one service stays visible — a store with nothing calling it
-    // would be the unconnected component all over again
-    const keep = Math.max(NODE_CAP - storeCards.length, 1);
-    return [...svc.slice(0, keep), ...storeCards, ...svc.slice(keep)];
+    const extra = [...gen2Cards, ...storeCards];
+    if (!extra.length) return svc;
+    // at least one service stays visible — an extra card with nothing calling
+    // it would be the unconnected component all over again
+    const keep = Math.max(NODE_CAP - extra.length, 1);
+    return [...svc.slice(0, keep), ...extra, ...svc.slice(keep)];
   })();
 
   const svcTotal = d.topology.find((t) => t.type === "SERVICE")?.nodes ?? 0;
@@ -450,7 +492,8 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
 
     L(scope.loading ? [measuring] : unlinked ? [noLink]
       : svcRows.length ? serveCards : [noData],
-      unlinked ? 1 : scope.resolved ? svcRows.length + storeCards.length
+      unlinked ? 1
+        : scope.resolved ? svcRows.length + storeCards.length + gen2Cards.length
         : scope.loading ? 0 : svcTotal,
       unlinked ? "0" : fmtN(d.calls.length), unlinked ? "linked services" : "call relations"),
 
@@ -635,10 +678,11 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     // ingress → each rendered service, weighted by its observed traces
     for (const [si, svcCard] of layers[4].items.slice(0, NODE_CAP).entries()) {
       if (svcCard.miss) continue;
-      // The Serve layer holds stores too now. A store is not entered from the
-      // ingress — it is entered from the service next to it — so it takes no
-      // edge here, and its own edge is drawn below.
-      if (svcCard.store) continue;
+      // The Serve layer holds stores and classic-only services too now.
+      // Neither is entered from the ingress — both are entered from the
+      // service next to them — so they take no edge here, and their own
+      // edges are drawn below.
+      if (svcCard.store || svcCard.gen2) continue;
       const sid = svcCard.ids?.[0];
       const v = sid ? scope.traces.get(sid) ?? 0 : 0;
       const from: [number, number] = layers[3].items[0]?.miss ? [2, 0] : [3, 0];
@@ -686,6 +730,20 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       for (const [k, v] of q) {
         const [si, di] = k.split(":").map(Number);
         edges.push({ s: [4, si], t: [4, di], v: Math.max(v, 1), label: "queries" });
+      }
+    }
+    /* caller → the service only the classic model knows.
+     *
+     * Drawn from `called_by` the classic topology reports, so the line exists
+     * for the same reason the node does. Where Smartscape has the pair, it has
+     * already drawn it and this card never appears. */
+    for (const g of gen2 ?? []) {
+      const di = idxIn(4, (e) => e.gen2 === g.id);
+      if (di === null) continue;
+      for (const caller of g.callers) {
+        const si = idxIn(4, (e) => !e.gen2 && !e.store && (e.ids ?? []).includes(caller));
+        if (si === null) continue;
+        edges.push({ s: [4, si], t: [4, di], v: 1, label: "calls (Gen2)" });
       }
     }
     // runtime → the machinery card, whatever kind of runtime it turned out
@@ -799,8 +857,13 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
   // the stores this application's services query, asked only once the scope
   // named them — no services, no question worth paying for
   const stores = useDataStores([...scope.services], scope.resolved);
-  const built = useMemo(() => buildTiers(data, appId, scope, ahead, impacted, cloud, stores),
-    [data, appId, scope, ahead, impacted, cloud, stores]);
+  // what the classic topology knows and Smartscape does not — asked with the
+  // same key, so an application whose two models agree pays for one query and
+  // draws nothing extra
+  const gen2 = useGen2Closure([...scope.services], scope.resolved);
+  const built = useMemo(
+    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2),
+    [data, appId, scope, ahead, impacted, cloud, stores, gen2]);
   const tiers = built.layers;
   const edges = built.edges;
   // the setter mirrors useState's signature so the existing toggles still read
@@ -1186,9 +1249,18 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
                 return (<>
                   <div className="dd__h">Vitals <em>last 30 min</em></div>
                   <div className="dd" style={{ marginBottom: 6 }}>
-                    <Kpi l="p50" v={met.ready ? fmtMs(met.p50) : "…"} t="info" />
-                    <Kpi l="p90" v={met.ready ? fmtMs(met.p90) : "…"} t="info" />
-                    <Kpi l="p95" v={met.ready ? fmtMs(met.p95) : "…"} t="info" />
+                    {/* The metric store keeps an average, not percentiles.
+                        Printing it under p50, p90 and p95 would be the same
+                        number three times, each claiming to be something it
+                        is not — so a fallback reading says what it is. */}
+                    {met.avgOnly
+                      ? <Kpi l="avg (metric store)"
+                          v={met.ready ? fmtMs(met.p50) : "…"} t="info" />
+                      : <>
+                          <Kpi l="p50" v={met.ready ? fmtMs(met.p50) : "…"} t="info" />
+                          <Kpi l="p90" v={met.ready ? fmtMs(met.p90) : "…"} t="info" />
+                          <Kpi l="p95" v={met.ready ? fmtMs(met.p95) : "…"} t="info" />
+                        </>}
                     <Kpi l="Throughput" v={met.ready ? fmtK(met.thr) : "…"} t="info" />
                     <Kpi l="Failures" v={met.ready ? fmtN(met.fails) : "…"}
                       t={met.ready && met.fails > 0 ? "bad" : met.ready ? "good" : "info"} />
@@ -1408,7 +1480,12 @@ function Routes({ list, mode = "incident" }: {
                     : "\n\nAsks which view to open: this environment's app has not "
                       + "published one. The filter travels either way.")}
                   style={{ ["--app" as string]: st.hue }}
-                  onClick={(e) => { e.preventDefault(); open(s); }}>
+                  {...(s.viaHref ? { target: "_blank", rel: "noreferrer" } : {})}
+                  /* A url-only step is the anchor it looks like: intercepting
+                     it would hand the click to a bus that cannot carry its
+                     filter, and the Explorer would open showing everything. */
+                  onClick={s.viaHref ? undefined
+                    : (e) => { e.preventDefault(); open(s); }}>
                   <i className="path__node" aria-hidden="true">{st.icon}</i>
                   <em className="path__app">{s.app}</em>
                   {/CLASSIC/i.test(s.app) && <em className="path__gen">gen2</em>}

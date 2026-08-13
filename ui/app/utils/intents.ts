@@ -157,6 +157,12 @@ export const SESSIONS_LIST = {
  * numbers. `error.type` is optional and free-form; the two this tenant emits
  * are "exception" and "request", and omitting it opens all of them.
  */
+/* NOT used for the drill-downs any more, and the reason is worth keeping:
+ * this intent carries typed properties and no filter string, so handing off
+ * to it — even with `target: "explorer"` — opens the Explorer with an empty
+ * filter bar. Every Error Inspector drill-down now goes by the app's own url
+ * (see errorsExplorerHref). Left here as the record of what the registry
+ * declares, so the next reader does not rediscover it the hard way. */
 export const ERRORS_INSPECTOR = {
   appId: "dynatrace.error.inspector",
   intentId: "inspect-errors-of-frontend", source: "verified",

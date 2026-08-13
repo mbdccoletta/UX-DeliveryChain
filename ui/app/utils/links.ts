@@ -16,7 +16,7 @@ import { getIntentLink, sendIntent } from "@dynatrace-sdk/navigation";
 import { getEnvironmentUrl } from "@dynatrace-sdk/app-environment";
 import { type Timeframe } from "./dql";
 import {
-  ERRORS_INSPECTOR, intentFor, K8S_NODE_BY_APP, SERVICE_RESPONSE_TIME,
+  intentFor, K8S_NODE_BY_APP, SERVICE_RESPONSE_TIME,
   SESSION_CLASSIC, SESSION_GEN3, SESSIONS_LIST, TRACES_LIST, type IntentRef,
 } from "./intents";
 import type { AppMap, Capability } from "../hooks/useApps";
@@ -45,6 +45,15 @@ export interface DeepLink {
   /** The evidence this step contributes to the conclusion. */
   proves: string;
   href: string;
+  /**
+   * True when this destination is expressible ONLY as the app's own url.
+   *
+   * The intent bus cannot carry a filter string: `inspect-errors-of-frontend`
+   * declares typed properties and no filter, so handing it off — even with
+   * `target: "explorer"` — opens the Explorer with an empty filter bar. The
+   * click has to follow the href instead of being intercepted.
+   */
+  viaHref?: boolean;
 }
 
 /**
@@ -114,14 +123,20 @@ const link = (
   opts: {
     keyProperties?: string[]; appId?: string; intentId?: string;
     app?: string; proves?: string;
+    /** A url the app publishes itself, when the intent cannot say this. */
+    href?: string;
   } = {},
 ): DeepLink => ({
   label, meta, payload,
   keyProperties: opts.keyProperties ?? ["dt.query"],
-  appId: opts.appId, intentId: opts.intentId,
+  // A url-only step still names its app so the node is labelled, but it must
+  // NOT name an intent: naming one is what sends the click to the bus.
+  appId: opts.href ? undefined : opts.appId,
+  intentId: opts.href ? undefined : opts.intentId,
   app: opts.app ?? "Open with…",
   proves: opts.proves ?? "",
-  href: safeLink(payload, opts.appId, opts.intentId),
+  href: opts.href ?? safeLink(payload, opts.appId, opts.intentId),
+  ...(opts.href ? { viaHref: true } : {}),
 });
 
 /**
@@ -243,16 +258,23 @@ export const errorsExplorerHref = (
   });
   const t = tfParam(tf);
   if (t) q.set("tf", t);
-  const val = (v: string) => {
-    const clean = v.replace(/["\\]/g, "");
-    return /^[\w./:@-]+$/.test(clean) ? clean : `"${clean}"`;
-  };
+  /* Quote BOTH sides, always.
+   *
+   * The app's own quoting is inconsistent — it emits `Frontend = easytrade`
+   * here and `"Frontend" = "www.vmware.easytravel.com"` there — and guessing
+   * which form a given name needs is how this link kept arriving unfiltered.
+   * Quoting is accepted everywhere it was observed, so the safe form is the
+   * one that never has to decide. */
+  const val = (v: string) => `"${v.replace(/["\\]/g, "")}"`;
   const filter = [
     ...(viewName ? [`"View Name" = ${val(viewName)}`] : []),
-    `Frontend = ${val(appName)}`,
+    `"Frontend" = ${val(appName)}`,
   ].join(" ");
+  /* Spaces as `+`, not `%20`: that is what the Error Inspector writes into its
+   * own address bar, so it is the encoding known to survive its fragment
+   * parser. URLSearchParams produces exactly that. */
   const path = `/ui/apps/dynatrace.error.inspector/error-explorer?${q}`
-    + `#filtering=${encodeURIComponent(filter)}`;
+    + `#${new URLSearchParams({ filtering: filter })}`;
   // Absolute, because this app runs in an iframe: a relative href would
   // resolve against the app's own origin and go nowhere. Outside the shell
   // getEnvironmentUrl has nothing to report, and the caller degrades.
@@ -274,16 +296,19 @@ export const errorsExplorerHref = (
  * errors of the busiest application carry the very entity id sent here, so the
  * app opens on the same errors this page counted — not on its own default.
  */
-export const errorsLink = (tf: Timeframe, entity: string, errors: number): DeepLink =>
+/**
+ * The route's Error Inspector step.
+ *
+ * Takes the application's NAME, not its entity id, because the destination is
+ * the Explorer's filter bar and the filter bar matches on the display name.
+ * It used to hand off by intent with `target: "overview"`, which opened the
+ * grouped page — a different tab, and unfiltered, since the intent carries no
+ * filter string at all.
+ */
+export const errorsLink = (tf: Timeframe, appName: string, errors: number): DeepLink =>
   link("Inspect errors", `Error Inspector · ${errors.toLocaleString()} errors · ${tf.label}`,
-    // The app has two pages and the intent chooses: `overview` groups the
-    // errors by type and message, `explorer` lists them raw. An investigator
-    // arriving from a count wants the grouping, so the landing page is named
-    // rather than left to the default.
-    withTf(tf, { frontend: entity, target: "overview" }),
-    { appId: ERRORS_INSPECTOR.appId, intentId: ERRORS_INSPECTOR.intentId,
-      app: "Error Inspector",
-      proves: "which errors these are, grouped by type and message" });
+    {}, { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
+      proves: "every error of this application, ranked by users affected" });
 
 /**
  * The platform's own intent url: `/ui/apps/<app>/intent/<action>?<payload>`,
@@ -683,7 +708,7 @@ export function investigationPaths(
      * failing — the errors ARE the root cause evidence — and stays available
      * behind the overview when it is not. */
     if (errors && errors > 0) {
-      const insp = errorsLink(tf, app, errors);
+      const insp = errorsLink(tf, name, errors);
       if (failing) tech.unshift(insp); else tech.push(insp);
     }
   } else if (pgi) {
@@ -905,6 +930,12 @@ export function rowDrilldown(
    * something to show; failures are offered only where failures exist.
    */
   lens: "time" | "fail" | "volume" = "time",
+  /**
+   * The application's display NAME. The Error Inspector's Explorer filters on
+   * it — the entity id opens the app but names nothing in its filter bar — so
+   * without this the error rows can only reach an unfiltered Explorer.
+   */
+  appName?: string,
 ): DeepLink | null {
   /* ── the bar: how much, and where it goes ──
    * The bar is a quantity, so it opens the view that compares quantities.
@@ -922,13 +953,10 @@ export function rowDrilldown(
           appId: "dynatrace.services", intentId: "view-services-map",
           app: "Services", proves: "how much traffic this service carries, and from whom" });
     }
-    if (kind === "errors" && appEntity) {
-      return link("Every occurrence", row.name,
-        withTf(tf, { frontend: appEntity, target: "explorer",
-          ...(row.type ? { "error.type": row.type } : {}) }),
-        { keyProperties: ["frontend"],
-          appId: ERRORS_INSPECTOR.appId, intentId: ERRORS_INSPECTOR.intentId,
-          app: "Error Inspector", proves: "each time this failure happened" });
+    if (kind === "errors" && appName) {
+      return link("Every occurrence", row.name, {},
+        { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
+          proves: "each time this failure happened" });
     }
     return null;
   }
@@ -1019,11 +1047,11 @@ export function rowDrilldown(
     // them was offering an empty screen — the row said "all satisfied" and
     // the click disagreed. No errors, no destination.
     if (!row.errors) return null;
-    return link("Errors on this view", `${row.errors} on ${row.name}`,
-      withTf(tf, { frontend: appEntity, "view.name": row.name, target: "explorer" }),
-      { keyProperties: ["frontend"],
-        appId: ERRORS_INSPECTOR.appId, intentId: ERRORS_INSPECTOR.intentId,
-        app: "Error Inspector", proves: "what failed for users of this view" });
+    if (!appName) return null;
+    return link("Errors on this view", `${row.errors} on ${row.name}`, {},
+      { app: "Error Inspector",
+        href: errorsExplorerHref(tf, appName, row.name),
+        proves: "what failed for users of this view" });
   }
   if (kind === "errors") {
     /* Measured: two of this tenant's four applications record error.name on
@@ -1032,14 +1060,10 @@ export function rowDrilldown(
      * empty, because there was nothing named to list. A row this app had to
      * name itself (from a status code) leads nowhere. */
     if (row.named === 0) return null;
-    return link("Inspect this failure", row.name,
-      withTf(tf, {
-        frontend: appEntity, target: "explorer",
-        ...(row.type ? { "error.type": row.type } : {}),
-      }),
-      { keyProperties: ["frontend"],
-        appId: ERRORS_INSPECTOR.appId, intentId: ERRORS_INSPECTOR.intentId,
-        app: "Error Inspector", proves: "every occurrence of this failure" });
+    if (!appName) return null;
+    return link("Inspect this failure", row.name, {},
+      { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
+        proves: "every occurrence of this failure" });
   }
   return null;
 }
