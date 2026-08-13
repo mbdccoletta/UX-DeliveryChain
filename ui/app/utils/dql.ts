@@ -1039,6 +1039,25 @@ fetch dt.entity.application, from: now()-2h
 | limit 200`;
 
 /**
+ * The device families a mobile application declares it runs on.
+ *
+ * The Consume layer counts sessions, so an application with no RUM in Grail
+ * got "No coverage" — which reads as "nobody uses it", when what happened is
+ * that nobody measured it here. The inventory does say something: measured,
+ * MOBILE_APPLICATION-773D0C09E8E14B58 declares IOS and ANDROID.
+ *
+ * A declaration is not a measurement and the layer must not pretend it is —
+ * the card carries no session count, because there is none to carry. It says
+ * which devices the application is built for, which is more than silence and
+ * less than a number.
+ */
+export const qAppOsFamilies = (entityId: string) => `
+fetch dt.entity.mobile_application, from: now()-2h
+| filter id == "${entityId.replace(/["\\]/g, "")}"
+| fields os = mobileOsFamily
+| limit 1`;
+
+/**
  * The services one application calls, straight from the classic model.
  *
  * Used as the scope's seed when neither the trace join nor Smartscape found

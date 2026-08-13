@@ -14,6 +14,7 @@ import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
+import { useAppDevices } from "../hooks/useAppDevices";
 import { davisCategory, verdictOf, worseOf, type Tone } from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import type { Forecast } from "../utils/forecast";
@@ -65,6 +66,11 @@ const LAYER_ICON = [
  * names for them would only stop the reader finding the same thing in the
  * platform. Anything unmapped falls through as itself rather than as "other".
  */
+/** IOS -> iOS, ANDROID -> Android. The platform SHOUTS; the card need not. */
+const DEVICE_LABEL = (os: string): string =>
+  /^ios$/i.test(os) ? "iOS"
+    : os.charAt(0).toUpperCase() + os.slice(1).toLowerCase();
+
 const KIND_LABEL = (kind: string): string => kind
   ? kind.replace(/_SERVICE$/, "").replace(/_/g, " ").toLowerCase()
   : "service";
@@ -72,7 +78,9 @@ const KIND_LABEL = (kind: string): string => kind
 /** The icon a node wears: its layer's, refined by what the node actually is. */
 function nodeIcon(ti: number, n: { nm: string; store?: string; gen2Db?: boolean }): React.ComponentType<SvgIconProps> {
   if (ti === 0) {
-    if (n.nm === "Mobile") return MobileIcon;
+    // "Mobile" is the measured origin; iOS and Android are the declared device
+    // families a mobile application names when no session was recorded
+    if (n.nm === "Mobile" || n.nm === "iOS" || n.nm === "Android") return MobileIcon;
     if (n.nm === "Robots") return AutomationEngineIcon;
     if (n.nm === "Synthetic") return SyntheticMonitoringSignetIcon;
     return DesktopIcon;
@@ -158,6 +166,8 @@ const problemIds = (p: { entityIds: string[] | null }) => p.entityIds ?? [];
 function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecast | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
   stores: DataStore[] | null, gen2: Gen2Service[] | null,
+  /** Device families the application declares, when no session was measured. */
+  declaredDevices: string[] | null,
 ): { layers: Layer[]; edges: Edge[] } {
   const app = d.apps.find((a) => a.appId === appId);
   // Layers 1, 2 and 4 come from RUM, which now carries the application id —
@@ -435,6 +445,24 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           per.set(o, (per.get(o) ?? 0) + r.sessions);
         }
         const rows = [...per.entries()].sort((a, b) => b[1] - a[1]);
+        /* No sessions is not the same as no consumers.
+         *
+         * An application whose RUM never reached Grail had this layer say "No
+         * coverage", which reads as "nobody uses it". The inventory knows
+         * better: measured, easyTravel Mobile (mainframe) declares IOS and
+         * ANDROID. The card names the device and shows no count, because a
+         * declaration is not a measurement and the layer has spent this whole
+         * project refusing to print numbers it did not measure. */
+        if (!rows.length && declaredDevices?.length) {
+          return declaredDevices.map<Elo>((os) => ({
+            nm: DEVICE_LABEL(os), mt: "declared by the application",
+            v: "—", tone: "info", vol: 1,
+            det: [["Source", "the application inventory, not a session"],
+                  ["Sessions here", "none measured in this window"],
+                  ["Meaning", "the app is built for this device; whether anyone "
+                    + "used it is not recorded in Grail"]],
+          }));
+        }
         return rows.length ? rows.map<Elo>(([o, n]) => {
           // The audience layer wears the harm done to that audience. Without
           // this, an application whose every session hit an error drew a calm
@@ -462,7 +490,10 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       })(),
       // the layer's KPI is the sum of the cards drawn under it, never a second
       // measurement of the same thing — the two used to disagree by ~100
-      Math.max(devices.length, 1), fmtK(devSessions), "sessions"),
+      Math.max(devices.length, declaredDevices?.length ?? 0, 1),
+      devices.length ? fmtK(devSessions) : declaredDevices?.length ? "—" : fmtK(devSessions),
+      devices.length ? "sessions"
+        : declaredDevices?.length ? "declared devices" : "sessions"),
 
     L(others.length ? others.map<Elo>((x) => ({
         nm: x.domain, mt: `${x.provider ?? "—"} · ${fmtN(x.reqs)} req`, v: fmtMs(x.p50), tone: "info", vol: x.reqs,
@@ -665,7 +696,14 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     if (o.miss) continue;
     const sess = devices.filter((r) => originOf(r.agent, r.utype) === o.nm)
       .reduce((a, r) => a + r.sessions, 0);
-    if (sess) edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions" });
+    if (sess) { edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions" }); continue; }
+    /* A declared device has no session count and still belongs to the
+     * application — drawing the card without its edge would leave exactly the
+     * unconnected component this pass exists to remove. The line carries no
+     * number because there is none to carry. */
+    if (declaredDevices?.length && !devices.length) {
+      edges.push({ s: [0, oi], t: [2, 0], v: 1, label: "declared" });
+    }
   }
   // third-party domain ← the application's page (render order: app fetches it)
   for (const [di, dcard] of layers[1].items.slice(0, NODE_CAP).entries()) {
@@ -861,9 +899,14 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
   // same key, so an application whose two models agree pays for one query and
   // draws nothing extra
   const gen2 = useGen2Closure([...scope.services], scope.resolved);
+  // the devices the application declares, asked only where no session was seen
+  const appEntity = data.apps.find((a) => a.appId === appId)?.entity;
+  const declaredDevices = useAppDevices(appEntity,
+    !data.devices.some((r) => r.appId === appId));
   const built = useMemo(
-    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2),
-    [data, appId, scope, ahead, impacted, cloud, stores, gen2]);
+    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2,
+      declaredDevices),
+    [data, appId, scope, ahead, impacted, cloud, stores, gen2, declaredDevices]);
   const tiers = built.layers;
   const edges = built.edges;
   // the setter mirrors useState's signature so the existing toggles still read
