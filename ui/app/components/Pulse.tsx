@@ -803,7 +803,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
             : rowDrilldown(
                 KIND[metric],
                 { ...r, hasSpans: !!tracedDomains?.has(r.name) },
-                tf, appEntity, metric === "errors" ? "fail" : "time");
+                tf, appEntity, metric === "errors" ? "fail" : "time", appName);
           /* An anchor, not a button: without an href the click died silently
            * wherever the intent bus is absent. Two kinds of target arrive
            * here — a full intent hand-off, and a plain url built from an app's

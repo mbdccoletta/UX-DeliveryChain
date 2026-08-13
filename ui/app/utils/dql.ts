@@ -918,3 +918,122 @@ fetch spans, from: now()-10m, to: now()
   by: { svc = dt.entity.service, store, sys = db.system, ns = db.namespace }
 | sort calls desc
 | limit 40`;
+
+/**
+ * What the CLASSIC topology says these services call — used only for what
+ * Smartscape does not know.
+ *
+ * Measured on guu84124, on the easyTravel mainframe application, and this is
+ * the whole reason it exists: Smartscape Gen3 draws seven services and six
+ * `calls` edges between them, and stops. The classic entity model, over the
+ * SAME entity ids, adds one more — `MF easyTravelBusiness`, a
+ * DATABASE_SERVICE that BookingService, JourneyService and
+ * AuthenticationService all call. Gen3 has no node for it and no edge to it.
+ * The platform's own service flow has been showing it all along.
+ *
+ * No new scope and no classic API: `dt.entity.service` is the classic model
+ * surfaced in Grail, so `storage:entities:read` — which this app already
+ * holds — is enough. It carries the relationships as fields (`calls`,
+ * `called_by`, `runs_on`, `sends_to`), and the ids are the same ones
+ * Smartscape uses, so the two models join without translation.
+ *
+ * What it deliberately does NOT reach: the mainframe's message path.
+ * `IBM MQ Queue Listener → DTMD on CICS → DBCG` is a connected chain in the
+ * classic model too, but nothing in this application calls the listener, and
+ * the queues (`CSQ8.creditcardrequest`, `CSQ8.creditcardresponse`) carry
+ * `sends_to`, `receives_from`, `propagates_to` and `propagated_from` all
+ * null. That hop lives in the PurePath, not in the entity model. Drawing it
+ * would mean inventing the edge that would justify drawing it.
+ */
+export const qServicesGen2Calls = (serviceIds: string[]) => `
+fetch dt.entity.service, from: now()-2h
+| filter in(id, {${serviceIds.slice(0, 60)
+  .map((s) => `"${s.replace(/["\\]/g, "")}"`).join(",")}})
+| fields src = id, tgt = calls[dt.entity.service]
+| filter isNotNull(tgt)
+| expand tgt
+| join [ fetch dt.entity.service, from: now()-2h
+         | fields id, nm = entity.name, st = serviceType, ro = runs_on ],
+    on: { left[tgt] == right[id] }, fields: { nm, st, ro }
+| fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host]
+| limit 80`;
+
+/**
+ * A service's vitals from the METRIC STORE, for services that have no spans.
+ *
+ * The drawer reads spans, which is right for anything OneAgent traces into
+ * Grail — and wrong for everything else. Measured on guu84124: `MF
+ * easyTravelBusiness` has zero spans, so the tiles printed p50 0ms, p90 0ms,
+ * throughput 0 for a service the metric store shows serving 17, 280 and 60
+ * requests in consecutive minutes at 4.7ms, 0.3ms and 3.9ms. A confident zero
+ * for a service that is plainly working.
+ *
+ * Same fallback rule as the topology: when the first source has nothing, ask
+ * the second before concluding. This one is free — the metric store scans no
+ * bytes — and it reports MICROseconds, scaled here to the nanoseconds the rest
+ * of the app speaks.
+ *
+ * No percentile split: the store keeps an average, so p50/p90/p95 would be one
+ * number printed three times. The caller shows the average as what it is.
+ */
+export const qSvcMetricsFallback = (id: string) => `
+timeseries { rt = avg(dt.service.request.response_time),
+             ct = sum(dt.service.request.count),
+             fl = sum(dt.service.request.failure_count) },
+  from: now()-30m,
+  filter: { dt.entity.service == "${id.replace(/["\\]/g, "")}" }
+| fieldsAdd avgNs = arrayAvg(rt) * 1000, calls = arraySum(ct), fails = arraySum(fl)
+| fields avgNs, calls, fails
+| limit 1`;
+
+/**
+ * Applications the inventory knows and RUM did not report on — with the
+ * backend the CLASSIC model says each one calls.
+ *
+ * The selector is built from `user.events`, which is right for anything
+ * sending RUM to Grail and silently wrong for everything else. Measured on
+ * guu84124: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
+ * so it could never be listed — while the platform's own service flow drew
+ * its whole backend, mainframe included. `easyTravel Mobile` has 375 events
+ * in 24h and simply falls out of a two-hour window.
+ *
+ * `calls` is the gate, not a decoration: an application enters this list only
+ * because the classic model can show a chain for it. One with no RUM AND no
+ * backend has nothing to draw, and listing it would be offering an empty
+ * screen — the defect this project keeps hunting, in a new place.
+ */
+export const qAppsGen2 = () => `
+fetch dt.entity.application, from: now()-2h
+| fields id, name = entity.name, seed = calls[dt.entity.service]
+| append [ fetch dt.entity.mobile_application, from: now()-2h
+           | fields id, name = entity.name, seed = calls[dt.entity.service] ]
+| filter isNotNull(seed)
+| limit 200`;
+
+/**
+ * The services one application calls, straight from the classic model.
+ *
+ * Used as the scope's seed when neither the trace join nor Smartscape found
+ * anything — the third source, asked last. Verified on
+ * MOBILE_APPLICATION-773D0C09E8E14B58: the seed is `MF EasyTravelWebserver:9079`,
+ * and walking `calls` from there reaches MF EasytravelService,
+ * ConfigurationService, BookingService, JourneyService, VerificationService,
+ * AuthenticationService, CheckDestination and MF easyTravelBusiness — the
+ * service flow's own picture, rebuilt from the entity model.
+ */
+export const qAppSeedGen2 = (entityId: string) => {
+  const e = entityId.replace(/["\\]/g, "");
+  return `
+fetch dt.entity.application, from: now()-2h
+| filter id == "${e}"
+| fields id, seed = calls[dt.entity.service]
+| append [ fetch dt.entity.mobile_application, from: now()-2h
+           | filter id == "${e}"
+           | fields id, seed = calls[dt.entity.service] ]
+| filter isNotNull(seed)
+| expand seed
+| join [ fetch dt.entity.service, from: now()-2h | fields id, nm = entity.name ],
+    on: { left[seed] == right[id] }, fields: { nm }
+| fields svc = seed, name = nm
+| limit 40`;
+};

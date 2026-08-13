@@ -13,7 +13,8 @@
 // Fetched lazily and memoised: most sessions never switch application, and a
 // scope that has been resolved once does not change while the user looks at it.
 import { useEffect, useState } from "react";
-import { qAppServices, qAppServicesTopo, qAppServicesTopoMobile, qServiceRuntime, runDql } from "../utils/dql";
+import { qAppSeedGen2, qAppServices, qAppServicesTopo, qAppServicesTopoMobile,
+  qServiceRuntime, runDql } from "../utils/dql";
 
 export interface AppScope {
   /** Service entity ids this application's traces actually reach. */
@@ -90,6 +91,27 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         })();
         for (const t of topoRows) {
           if (!rows.some((r) => r.svc === t.svc)) rows.push(t);
+        }
+        /* THIRD source, asked only when the first two came back empty.
+         *
+         * Traces need the application to send RUM into Grail and Smartscape
+         * needs it to have a Gen3 node; an application with neither is not
+         * an application without a backend, it is one whose backend only the
+         * classic model still describes. Measured: `easyTravel Mobile
+         * (mainframe)` has no events in seven days and no Smartscape edge,
+         * and `dt.entity.mobile_application.calls` names its webserver in one
+         * hop — from which the chain walks the rest.
+         *
+         * Last, never first: where the other two answer, they answer with
+         * measured volumes, and this one has none to give. */
+        if (!rows.length && appEntity) {
+          try {
+            const seed = await runDql<{ svc: string; name?: string }>(
+              qAppSeedGen2(appEntity), 40);
+            for (const r of seed) {
+              if (r.svc) rows.push({ svc: r.svc, traces: 0, name: r.name });
+            }
+          } catch { /* the classic model is unavailable too — the scope is empty */ }
         }
         const topo = rows.length > 0 && rows.every((r) => !Number(r.traces));
         const services = new Set(rows.map((r) => String(r.svc)).filter(Boolean));
