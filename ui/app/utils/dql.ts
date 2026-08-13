@@ -953,8 +953,36 @@ fetch dt.entity.service, from: now()-2h
 | filter isNotNull(tgt)
 | expand tgt
 | join [ fetch dt.entity.service, from: now()-2h
-         | fields id, nm = entity.name, st = serviceType, ro = runs_on ],
-    on: { left[tgt] == right[id] }, fields: { nm, st, ro }
+         | fields id, nm = entity.name, st = serviceType, ro = runs_on,
+                  ext = isExternalService ],
+    on: { left[tgt] == right[id] }, fields: { nm, st, ro, ext }
+/* An EXTERNAL WEB service is the same code seen from its caller.
+ *
+ * The classic model describes one running process at more than one
+ * granularity, and the walk finds every level. Measured on guu84124:
+ *
+ *   MF JourneyService                             WEB_SERVICE   external=false
+ *   MF /services/JourneyService/ on port 8091     WEB_SERVICE   external=TRUE
+ *   MF easyTravel Customer Frontend               WEB_REQUEST   external=false
+ *   MF com.dynatrace…frontend.jar …:8280          WEB_REQUEST   external=TRUE
+ *
+ * Each pair is one thing, once as the service and once as the endpoint a
+ * caller dialled — and drawing both put a box named after a jar and a port
+ * beside every real service.
+ *
+ * The external flag alone would not do: MF easyTravelBusiness is external
+ * too, and it is exactly the component this whole fallback exists to find.
+ * The difference is that it is not a WEB service — it is a database, and a
+ * queue listener or a CICS region would be the same. An external web hop into
+ * something monitored is already in the chain under its own name; into
+ * something unmonitored it is a third-party address, which the Transport
+ * layer already counts.
+ *
+ * NOT the process: five of this application's services share one
+ * PROCESS_GROUP_INSTANCE, so "same process" would have collapsed the whole
+ * business tier into one box. Tried, measured, discarded.
+ */
+| filter ext != true or not(in(st, { "WEB_SERVICE", "WEB_REQUEST_SERVICE" }))
 | fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host]
 | limit 80`;
 
