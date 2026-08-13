@@ -1,0 +1,36 @@
+{
+  "name": "deliverychain-ux",
+  "version": "0.1.0",
+  "description": "Smartscape delivery chain crossed with RUM, Davis problems, custom alerts and extensions",
+  "private": true,
+  "scripts": {
+    "start": "dt-app dev",
+    "build": "dt-app build",
+    "deploy": "dt-app deploy",
+    "uninstall": "dt-app uninstall",
+    "info": "dt-app info"
+  },
+  "engines": {
+    "node": ">=16.13.0"
+  },
+  "dependencies": {
+    "@dynatrace-sdk/app-environment": "^1.1.4",
+    "@dynatrace-sdk/client-davis-analyzers": "^1.10.0",
+    "@dynatrace-sdk/client-davis-copilot": "^1.0.0",
+    "@dynatrace-sdk/client-query": "^1.25.0",
+    "@dynatrace-sdk/client-state": "^1.9.3",
+    "@dynatrace-sdk/navigation": "^2.2.0",
+    "@dynatrace/strato-components": "^3.5.0",
+    "@dynatrace/strato-components-preview": "^3.4.0",
+    "@dynatrace/strato-design-tokens": "^1.2.0",
+    "@dynatrace/strato-icons": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.20",
+    "@types/react-dom": "^18.3.5",
+    "dt-app": "^1.14.1",
+    "typescript": "^5.9.3"
+  }
+}

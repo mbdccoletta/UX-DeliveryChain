@@ -1,0 +1,3145 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Torre de Controle — Experiência Digital</title>
+<style>
+  /* ════════════════════════════════════════════════════════════
+     TORRE DE CONTROLE — EXPERIÊNCIA DIGITAL
+     Identidade: terminal de operações. Âmbar sobre grafite-azulado,
+     grade de engenharia, telemetria mono. Tema claro = prancheta
+     técnica (papel cinza-azulado, tinta grafite, âmbar queimado).
+     ════════════════════════════════════════════════════════════ */
+  :root {
+    --bg:        #090b0f;
+    --panel:     #0d1016;
+    --panel-2:   #12161f;
+    --border:    rgba(148, 163, 184, 0.10);
+    --border-2:  rgba(148, 163, 184, 0.26);
+    --ink:       #dde3ec;
+    --ink-2:     #8b94a7;
+    --ink-3:     #525b6e;
+    --grid-min:  rgba(148, 163, 184, 0.05);
+    --grid-maj:  rgba(148, 163, 184, 0.10);
+    --trace-good: #34b57f;
+    --trace-warn: #e0a63c;
+    --trace-bad:  #e5484d;
+    --trace-info: #4c9aff;
+    --accent:    #f0b429;
+    --accent-dim: rgba(240, 180, 41, 0.12);
+    /* prioridade operacional */
+    --sev-p1: #e5484d;
+    --sev-p2: #e0a63c;
+    --sev-p3: #4c9aff;
+    --sev-p4: #34b57f;
+    --mono: "JetBrains Mono", "IBM Plex Mono", "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: "Helvetica Neue", "Roboto", -apple-system, system-ui, sans-serif;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  [data-theme="light"] {
+    --bg:        #f2f3f0;
+    --panel:     #fbfbf9;
+    --panel-2:   #ebedea;
+    --border:    rgba(63, 76, 94, 0.15);
+    --border-2:  rgba(63, 76, 94, 0.34);
+    --ink:       #202733;
+    --ink-2:     #57616f;
+    --ink-3:     #99a1ac;
+    --grid-min:  rgba(76, 106, 145, 0.09);
+    --grid-maj:  rgba(76, 106, 145, 0.18);
+    --trace-good: #157a52;
+    --trace-warn: #a26c08;
+    --trace-bad:  #bd2f38;
+    --trace-info: #1d6fd6;
+    --accent:    #a26c08;
+    --accent-dim: rgba(162, 108, 8, 0.10);
+    --sev-p1: #bd2f38; --sev-p2: #a26c08; --sev-p3: #1d6fd6; --sev-p4: #157a52;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f2f3f0; --panel: #fbfbf9; --panel-2: #ebedea;
+      --border: rgba(63, 76, 94, 0.15); --border-2: rgba(63, 76, 94, 0.34);
+      --ink: #202733; --ink-2: #57616f; --ink-3: #99a1ac;
+      --grid-min: rgba(76, 106, 145, 0.09); --grid-maj: rgba(76, 106, 145, 0.18);
+      --trace-good: #157a52; --trace-warn: #a26c08; --trace-bad: #bd2f38; --trace-info: #1d6fd6;
+      --accent: #a26c08; --accent-dim: rgba(162, 108, 8, 0.10);
+      --sev-p1: #bd2f38; --sev-p2: #a26c08; --sev-p3: #1d6fd6; --sev-p4: #157a52;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px 28px 72px; }
+
+  .lbl {
+    font: 600 10px var(--mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ── barra superior ── */
+  .top {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px; margin-bottom: 18px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; }
+  .brand__mark { color: var(--accent); font: 700 17px var(--mono); }
+  .brand h1 {
+    margin: 0; font: 700 16px var(--mono); letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--ink);
+  }
+  .brand h1 em { font-style: normal; color: var(--accent); }
+  .top__meta { font: 500 10.5px var(--mono); letter-spacing: 0.1em; color: var(--ink-3); text-transform: uppercase; }
+  .top__spacer { flex: 1; }
+  .top__clock { font: 700 15px var(--mono); color: var(--ink-2); letter-spacing: 0.08em; }
+
+  .tabs { display: flex; border: 1px solid var(--border); }
+  .tab {
+    background: transparent; border: none; color: var(--ink-3);
+    font: 600 10.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 8px 20px; cursor: pointer; transition: color 120ms, background 120ms;
+  }
+  .tab + .tab { border-left: 1px solid var(--border); }
+  .tab:hover { color: var(--ink); }
+  .tab--on { background: var(--accent-dim); color: var(--accent); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .disclaimer {
+    font: 400 11px var(--sans); color: var(--ink-3);
+    margin: 0 0 16px; padding-left: 10px;
+    border-left: 2px solid var(--border-2);
+  }
+  .disclaimer b { color: var(--ink-2); font-weight: 600; }
+
+  .view { display: none; }
+  .view.on { display: block; animation: appear 500ms var(--ease); }
+  @keyframes appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); }
+  .panel__hd {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+  }
+  .panel__hd .lbl { color: var(--ink-2); }
+  .panel__hd::before { content: "▪"; color: var(--accent); font-size: 9px; }
+  .panel__hd .hint { margin-left: auto; font: 500 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+
+  .graph {
+    background-image:
+      linear-gradient(var(--grid-maj) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-maj) 1px, transparent 1px),
+      linear-gradient(var(--grid-min) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-min) 1px, transparent 1px);
+    background-size: 60px 60px, 60px 60px, 12px 12px, 12px 12px;
+  }
+
+  /* ════════ PAINEL PRINCIPAL ════════ */
+  .monitor { display: grid; grid-template-columns: 1fr 320px; margin-bottom: 16px; }
+  @media (max-width: 900px) { .monitor { grid-template-columns: 1fr; } }
+  .monitor__scope { position: relative; min-height: 190px; }
+  .monitor__scope canvas { display: block; width: 100%; height: 190px; }
+  .monitor__tag { position: absolute; top: 10px; left: 14px; display: flex; gap: 14px; align-items: baseline; }
+  .scope-legend { position: absolute; right: 14px; top: 10px; display: flex; gap: 14px; align-items: center;
+                  font: 500 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  .scope-legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--trace-warn);
+                    margin-right: 5px; vertical-align: middle; }
+  .scope-legend i.dash { border-top-style: dashed; border-top-width: 1px; border-color: var(--ink-3); }
+  .scope-legend i.dash--bad { border-color: var(--trace-bad); }
+
+  /* ── resumo executivo: saúde geral da arquitetura ── */
+  .sum-verdict { display: flex; align-items: center; gap: 18px; padding: 16px;
+                 border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .sum-verdict__badge { font: 800 13px var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+                        padding: 9px 18px; border: 1px solid; flex: none; }
+  .sum-verdict__txt { font: 400 13px var(--sans); color: var(--ink-2); line-height: 1.55; max-width: 78ch; }
+  .sum-verdict__txt b { color: var(--ink); }
+  .sum-layers { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--border); }
+  @media (max-width: 900px) { .sum-layers { grid-template-columns: 1fr 1fr; } }
+  .sum-layer { padding: 14px 16px; display: flex; gap: 13px; align-items: center;
+               border-right: 1px solid var(--border); }
+  .sum-layer:last-child { border-right: none; }
+  .sum-layer__t { font: 600 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+  .sum-layer__v { font: 800 18px var(--mono); font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .sum-layer__i { font: 400 10.5px var(--sans); color: var(--ink-3); line-height: 1.35; }
+  .sum-grid { display: grid; grid-template-columns: 1fr 1.15fr; }
+  @media (max-width: 900px) { .sum-grid { grid-template-columns: 1fr; } }
+  .sum-block { padding: 14px 16px 16px; }
+  .sum-block + .sum-block { border-left: 1px solid var(--border); }
+  @media (max-width: 900px) { .sum-block + .sum-block { border-left: none; border-top: 1px solid var(--border); } }
+  .sum-block h4 { font: 600 9.5px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+                  color: var(--ink-2); margin: 0 0 10px; }
+  .stackbar { display: flex; height: 14px; overflow: hidden; background: var(--panel-2); }
+  .stackbar i { height: 100%; }
+  .stack-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px;
+                  font: 500 10px var(--mono); color: var(--ink-3); }
+  .stack-legend i { width: 8px; height: 8px; display: inline-block; margin-right: 4px; }
+  .stackrow { display: grid; grid-template-columns: 118px 1fr 44px; gap: 10px; align-items: center;
+              font: 500 10.5px var(--sans); padding: 3.5px 0; color: var(--ink-2); }
+  .stackrow .stackbar { height: 8px; }
+  .stackrow .pct { font: 700 10.5px var(--mono); text-align: right; }
+  .threat { display: flex; gap: 12px; padding: 9px 0; align-items: flex-start;
+            font-size: 12.5px; border-top: 1px solid var(--border); line-height: 1.45; }
+  .threat:first-of-type { border-top: none; }
+  .threat .sev-dot { margin-top: 4px; }
+  .threat b { font: 700 12px var(--sans); }
+  .threat .dim { display: block; font-size: 11.5px; }
+
+  /* ── visão de parque (heatmap de aplicações) ── */
+  .fleet-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+                    padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .fleet-search { background: var(--panel-2); border: 1px solid var(--border); color: var(--ink);
+                  font: 500 11px var(--mono); padding: 7px 10px; width: 190px; }
+  .fleet-search::placeholder { color: var(--ink-3); }
+  .fleet-search:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .fleet { display: grid; grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+           gap: 8px; padding: 12px 16px 8px; }
+  .ftile { border: 1px solid var(--border); border-left-width: 3px; background: var(--panel-2);
+           padding: 8px 10px; cursor: pointer; position: relative;
+           transition: transform 80ms, border-color 120ms; }
+  .ftile:hover { border-color: var(--border-2); }
+  .ftile:active { transform: scale(0.98); }
+  .ftile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ftile__nm { font: 600 11px var(--sans); white-space: nowrap; overflow: hidden;
+               text-overflow: ellipsis; padding-right: 30px; }
+  .ftile__bu { font: 400 8.5px var(--mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .ftile__row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 5px; }
+  .ftile__x { font: 800 17px var(--mono); font-variant-numeric: tabular-nums; }
+  .ftile__s { font: 500 9px var(--mono); color: var(--ink-3); }
+  .ftile__real { position: absolute; top: 6px; right: 8px; font: 700 7.5px var(--mono);
+                 letter-spacing: 0.1em; color: var(--accent);
+                 border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); padding: 1px 4px; }
+  .fleet-group-h { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline;
+                   font: 600 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+                   color: var(--ink-2); margin-top: 8px; }
+  .fleet-group-h em { font-style: normal; color: var(--ink-3); }
+  .fleet-note { padding: 4px 16px 14px; font: 400 11px var(--sans); color: var(--ink-3); }
+
+  /* painéis recolhíveis */
+  .fold__hd { cursor: pointer; user-select: none; width: 100%; text-align: left; }
+  .fold__hd:hover { background: var(--panel-2); }
+  .fold__caret { color: var(--ink-3); font: 400 12px var(--mono); margin-left: 10px; }
+  .monitor__vitals { border-left: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 900px) { .monitor__vitals { border-left: none; border-top: 1px solid var(--border); } }
+  .vital { padding: 14px 18px 12px; border-bottom: 1px solid var(--border); }
+  .vital:nth-child(odd) { border-right: 1px solid var(--border); }
+  .vital:nth-last-child(-n+2) { border-bottom: none; }
+  .vital__v { font: 800 30px var(--mono); letter-spacing: -1px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .vital__u { font: 500 10px var(--mono); color: var(--ink-3); letter-spacing: 0.08em; }
+
+  /* ════════ FILA DE PRIORIDADE ════════ */
+  .sev-legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--border); }
+  .sev-legend span { display: inline-flex; align-items: center; gap: 6px; font: 500 9.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  .sev-dot { width: 9px; height: 9px; flex: none; }
+
+  .bed {
+    display: grid;
+    grid-template-columns: 5px 236px 1fr 92px 104px 132px 30px;
+    align-items: center;
+    border-top: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 140ms var(--ease);
+  }
+  .bed:hover { background: var(--panel-2); }
+  .bed:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .bed__sev { align-self: stretch; }
+  .bed__id { padding: 14px 16px; }
+  .bed__name { font: 700 14px var(--sans); letter-spacing: 0.01em; }
+  .bed__desc { font: 400 11px var(--sans); color: var(--ink-3); margin-top: 2px; }
+  .bed__tag { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px;
+              font: 700 9px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }
+  .bed__scope { height: 64px; position: relative; border-left: 1px solid var(--border); }
+  .bed__scope canvas { display: block; width: 100%; height: 64px; }
+  .bed__stat { padding: 0 14px; text-align: right; border-left: 1px solid var(--border); align-self: stretch;
+               display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+  .bed__stat .num { font-weight: 800; font-size: 20px; letter-spacing: -0.5px; white-space: nowrap; }
+  .bed__chev { color: var(--ink-3); font: 400 16px var(--mono); text-align: center; }
+  .alarm { animation: alarm 1.6s steps(2) infinite; }
+  @keyframes alarm { 50% { opacity: 0.25; } }
+
+  .life { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; align-items: start; }
+  @media (max-width: 900px) { .life { grid-template-columns: 1fr; } }
+  .life table { width: 100%; border-collapse: collapse; }
+  .life td { padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .life td:first-child { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12px; }
+  .life .num { text-align: right; color: var(--ink-2); }
+  .sig { width: 8px; height: 8px; flex: none; }
+
+  /* ════════ ANÁLISE DO FLUXO (drill) ════════ */
+  .chart-hd { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .back {
+    background: transparent; border: 1px solid var(--border); color: var(--ink-2);
+    font: 600 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 8px 16px; cursor: pointer; transition: color 120ms, border-color 120ms;
+  }
+  .back:hover { color: var(--ink); border-color: var(--border-2); }
+  .chart-hd h2 { margin: 0; font: 700 20px var(--sans); letter-spacing: -0.01em; }
+  .chart-hd .bed__tag { margin: 0; }
+  .chart-meta { font: 500 10.5px var(--mono); color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
+
+  .chart-vitals { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; }
+  @media (max-width: 900px) { .chart-vitals { grid-template-columns: repeat(2, 1fr); } }
+  .chart-vitals .vital { border-bottom: none; border-right: 1px solid var(--border); }
+  .chart-vitals .vital:last-child { border-right: none; }
+
+  .chart-scope { margin-bottom: 16px; }
+  .chart-scope canvas { display: block; width: 100%; height: 110px; }
+
+  .chart-grid { display: grid; grid-template-columns: 1.22fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .chart-grid { grid-template-columns: 1fr; } }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+
+  .funnel { padding: 16px; display: flex; flex-direction: column; }
+  .fstep { display: grid; grid-template-columns: 138px 1fr 56px; align-items: center; gap: 12px; padding: 6px 0; }
+  .fstep__name { font: 500 11.5px var(--mono); color: var(--ink-2); text-align: right; }
+  .fstep__track { height: 24px; background: var(--panel-2); overflow: hidden; }
+  .fstep__fill { height: 100%; display: flex; align-items: center; padding-left: 9px;
+                 font: 700 10.5px var(--mono); color: var(--bg); min-width: 56px; white-space: nowrap;
+                 transition: width 800ms var(--ease); }
+  .fstep__pct { font: 700 12px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+  .fdrop { display: flex; align-items: baseline; gap: 8px; padding-left: 150px; font: 700 10.5px var(--mono); }
+  .fdrop--bad { color: var(--trace-bad); }
+  .fdrop--ok { color: var(--ink-3); }
+  .fdrop__why { font: 400 11px var(--sans); color: var(--ink-3); }
+
+  table.exams { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .exams th {
+    text-align: left; font: 600 9.5px var(--mono); letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-3);
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .exams td { padding: 9px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .exams tr:last-child td { border-bottom: none; }
+  .exams .mono { font-family: var(--mono); font-size: 11.5px; }
+  .xbar { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+  .xbar b { font: 700 12px var(--mono); width: 24px; }
+  .xbar__t { flex: 1; height: 5px; background: var(--panel-2); }
+  .xbar__f { height: 100%; transition: width 800ms var(--ease); }
+
+  .diag { padding: 16px; }
+  .chain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chain__node { display: inline-flex; align-items: center; gap: 7px;
+                 border: 1px solid var(--border-2); padding: 5px 11px;
+                 font: 500 11.5px var(--mono); background: var(--panel-2); }
+  .chain__arrow { color: var(--ink-3); font-family: var(--mono); }
+  .diag p { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; margin: 14px 0 0; }
+  .rx-btn {
+    margin-top: 16px; width: 100%;
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent);
+    font: 700 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 12px 18px; cursor: pointer;
+    transition: background 140ms, color 140ms, transform 80ms;
+  }
+  .rx-btn:hover { background: var(--accent); color: var(--bg); }
+  .rx-btn:active { transform: scale(0.98); }
+
+  .bad { color: var(--trace-bad); font-weight: 700; }
+  .dim { color: var(--ink-3); }
+
+  /* ── funil geral por aplicação (portfólio) ── */
+  .appfun { display: grid; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 900px) { .appfun { grid-template-columns: 1fr; } }
+  .appfun__cell { padding: 14px 16px; border-top: 1px solid var(--border);
+                  cursor: pointer; transition: background 140ms var(--ease); }
+  .appfun__cell:nth-child(odd) { border-right: 1px solid var(--border); }
+  .appfun__cell:hover { background: var(--panel-2); }
+  .appfun__hd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .appfun__name { font: 700 13px var(--sans); display: flex; align-items: center; gap: 8px; }
+  .appfun__conv { font: 700 12px var(--mono); color: var(--ink-2); }
+  .funnel--sm .fstep { grid-template-columns: 118px 1fr 44px; padding: 3px 0; }
+  .funnel--sm .fstep__track { height: 16px; }
+  .funnel--sm .fstep__fill { font: 700 9.5px var(--mono); min-width: 40px; padding-left: 6px; }
+  .funnel--sm .fstep__name { font: 500 10.5px var(--mono); }
+  .funnel--sm .fstep__pct { font: 700 10.5px var(--mono); }
+  .funnel--sm .fdrop { padding-left: 130px; font: 700 9.5px var(--mono); }
+
+  /* ── sequências de jornada descobertas ── */
+  .seq__row { cursor: pointer; transition: background 140ms var(--ease); }
+  .seq__row:hover { background: var(--panel-2); }
+  .seq__caret { color: var(--ink-3); font: 400 12px var(--mono); margin-right: 6px; }
+  .seqfun { padding: 6px 16px 14px; border-top: 1px dashed var(--border); }
+  .seq__row { display: grid; grid-template-columns: 1fr 110px 130px; gap: 12px;
+              align-items: center; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .seq__path { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .seq__step { border: 1px solid var(--border-2); background: var(--panel-2);
+               padding: 3px 9px; font: 500 11px var(--mono); }
+  .seq__arrow { color: var(--ink-3); font: 400 11px var(--mono); }
+  .seq__n { text-align: right; font: 800 16px var(--mono); font-variant-numeric: tabular-nums; }
+  .seq__n .lbl { display: block; font-size: 9px; }
+  .seq__share { display: flex; align-items: center; gap: 8px; }
+  .seq__share b { font: 700 12px var(--mono); width: 44px; text-align: right; }
+  .seq__bar { flex: 1; height: 6px; background: var(--panel-2); }
+  .seq__fill { height: 100%; background: var(--accent); }
+
+  /* ════════ CADEIA DE ENTREGA — colunas com malha animada ════════ */
+  .dcf-shell { position: relative; padding: 20px 18px 22px; overflow-x: auto;
+    background:
+      linear-gradient(color-mix(in srgb, var(--accent) 3%, transparent) 1px, transparent 1px) 0 0/100% 34px,
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 3%, transparent) 1px, transparent 1px) 0 0/34px 100%,
+      var(--panel); }
+  .dcf-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+  .dcf-svg path { fill: none; stroke-width: 1.4; stroke-dasharray: 4 7; animation: dcflow2 1.4s linear infinite; }
+  .dcf-svg path.bad { stroke-width: 2.2; }
+  @keyframes dcflow2 { to { stroke-dashoffset: -11; } }
+  .dcf { position: relative; z-index: 1; display: grid;
+         grid-template-columns: repeat(7, minmax(148px, 1fr)); gap: 16px; min-width: 1120px; }
+  .dcc { display: flex; flex-direction: column; gap: 12px; }
+  .dcc__h { text-align: center; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .dcc__no { display: block; font: 800 8.5px var(--mono); letter-spacing: 0.18em; color: var(--accent); }
+  .dcc__pb { margin-left: 7px; color: var(--trace-bad); font: 700 8.5px var(--mono);
+             border: 1px solid color-mix(in srgb, var(--trace-bad) 45%, transparent); padding: 0 5px;
+             animation: pbblink 2.2s steps(2) infinite; }
+  @keyframes pbblink { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .dcc__pb { animation: none; } }
+  .dcc__nm { display: block; font: 600 9.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+             color: var(--ink-2); margin-top: 3px; line-height: 1.3; }
+  .dcc__sb { display: block; font: 400 8px var(--mono); color: var(--ink-3); margin-top: 2px; }
+
+  .nd { position: relative; background: var(--panel); border: 1px solid var(--border);
+        padding: 10px 9px 9px; cursor: pointer; text-align: center;
+        transition: border-color 140ms, transform 140ms var(--ease), box-shadow 140ms; }
+  .nd::before, .nd::after { content: ""; position: absolute; width: 7px; height: 7px;
+        border: 1px solid var(--tone); opacity: 0.8; }
+  .nd::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  .nd::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+  .nd:hover { transform: translateY(-2px); border-color: var(--tone);
+              box-shadow: 0 0 18px color-mix(in srgb, var(--tone) 22%, transparent); }
+  .nd.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 22px var(--accent-dim); }
+  .nd.miss { border-style: dashed; opacity: 0.7; }
+  .nd__ic { color: var(--tone); display: grid; place-items: center; margin-bottom: 5px;
+            filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone) 45%, transparent)); }
+  .nd__nm { font: 600 10.5px var(--sans); line-height: 1.25; word-break: break-word; }
+  .nd__mt { font: 400 8.5px var(--mono); color: var(--ink-3); margin-top: 3px; line-height: 1.3; }
+  .nd__v { display: inline-block; margin-top: 6px; font: 700 10px var(--mono); color: var(--tone);
+           border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); padding: 1px 7px; }
+  .nd--crit { animation: ndpulse 2s infinite var(--ease); }
+  @keyframes ndpulse { 50% { box-shadow: 0 0 22px color-mix(in srgb, var(--tone) 34%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .dcf-svg path, .nd--crit { animation: none; } }
+
+  /* ════════ CADEIA DE ENTREGA — faixas horizontais (legado) ════════ */
+  .lays { display: flex; flex-direction: column; }
+  .lay { display: grid; grid-template-columns: 176px 1fr; align-items: stretch;
+         border-top: 1px solid var(--border); }
+  .lay:first-child { border-top: none; }
+  .lay--miss { background: repeating-linear-gradient(135deg,
+                 transparent 0 9px, color-mix(in srgb, var(--trace-warn) 5%, transparent) 9px 18px); }
+  .lay__rail { padding: 14px 16px; border-right: 1px solid var(--border);
+               display: flex; flex-direction: column; justify-content: center; gap: 2px;
+               background: var(--panel-2); position: relative; }
+  .lay__no { font: 800 9px var(--mono); letter-spacing: 0.14em; color: var(--accent); }
+  .lay__nm { font: 700 11.5px var(--sans); line-height: 1.2; }
+  .lay__sub { font: 400 9.5px var(--mono); color: var(--ink-3); }
+  .lay__body { padding: 12px 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; }
+
+  .el { display: flex; align-items: center; gap: 10px; cursor: pointer;
+        border: 1px solid var(--border); background: var(--panel);
+        padding: 8px 12px 8px 10px; min-width: 190px;
+        transition: border-color 120ms, background 120ms, transform 80ms; }
+  .el:hover { background: var(--panel-2); border-color: var(--border-2); }
+  .el:active { transform: scale(0.99); }
+  .el.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .el.miss { border-style: dashed; opacity: 0.72; }
+  .el__ic { flex: none; width: 30px; height: 30px; display: grid; place-items: center; }
+  .el__ic svg { display: block; }
+  .el__tx { min-width: 0; display: flex; flex-direction: column; }
+  .el__nm { display: block; font: 600 11px var(--sans); line-height: 1.25; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; max-width: 210px; }
+  .el__mt { display: block; font: 400 9.5px var(--mono); color: var(--ink-3); margin-top: 2px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 210px; }
+  .el__v { margin-left: auto; font: 700 11px var(--mono); padding-left: 10px; }
+
+  /* conector entre camadas */
+  .lay__link { grid-column: 1 / -1; height: 16px; position: relative; }
+  .lay__link::before { content: ""; position: absolute; left: 258px; top: 0; bottom: 0; width: 1px;
+                       background: var(--border-2); }
+  .lay__link i { position: absolute; left: 255px; width: 7px; height: 7px; border-radius: 50%;
+                 background: var(--accent); box-shadow: 0 0 8px var(--accent);
+                 animation: dcflow 2.2s linear infinite; }
+  @keyframes dcflow { from { top: -4px; opacity: 0; } 20% { opacity: 1; } to { top: 16px; opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .lay__link i { animation: none; top: 5px; } }
+  @media (max-width: 760px) { .lay { grid-template-columns: 1fr; } .lay__rail { border-right: none; border-bottom: 1px solid var(--border); } }
+
+  /* ════════ CADEIA DE ENTREGA — stack isométrico (legado) ════════ */
+  .dc-stage { position: relative; height: 560px; padding: 0; overflow: hidden;
+              background: radial-gradient(ellipse at 50% 40%,
+                color-mix(in srgb, var(--accent) 5%, var(--panel)) 0%, var(--panel) 66%); }
+  @media (max-width: 900px) { .dc-stage { height: 420px; } }
+  #dc-canvas { display: block; width: 100%; height: 100%; cursor: default; }
+  .dc-hud { position: absolute; top: 12px; right: 12px; font-family: var(--mono);
+            background: color-mix(in srgb, var(--panel) 86%, transparent);
+            border: 1px solid var(--border); padding: 9px 12px; pointer-events: none; }
+
+  .dc-wrap { padding: 20px 18px; overflow-x: auto; }
+  .dc { display: flex; align-items: stretch; gap: 0; min-width: 900px; }
+  .dc__tier { flex: 1; display: flex; flex-direction: column; gap: 8px; position: relative; padding: 0 12px; }
+  .dc__tier + .dc__tier::before {
+    content: ""; position: absolute; left: -1px; top: 26px; bottom: 10px; width: 1px;
+    background: linear-gradient(var(--border), transparent); }
+  .dc__h { font: 600 8.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+           color: var(--ink-3); display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .dc__h i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3); }
+  .dc__n { border: 1px solid var(--border); border-left: 3px solid var(--tone, var(--trace-good));
+           background: var(--panel-2); padding: 7px 9px; cursor: pointer;
+           transition: border-color 120ms, background 120ms, transform 80ms; }
+  .dc__n:hover { background: var(--panel); border-color: var(--border-2); }
+  .dc__n:active { transform: scale(0.985); }
+  .dc__n.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .dc__n.miss { border-style: dashed; opacity: 0.7; }
+  .dc__nm { font: 600 11px var(--sans); line-height: 1.25; }
+  .dc__mt { font: 400 9.5px var(--mono); color: var(--ink-3); margin-top: 2px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dc__v { font: 700 10px var(--mono); color: var(--tone, var(--ink-2)); float: right; margin-left: 8px; }
+  .dc__arrow { align-self: center; color: var(--ink-3); font: 400 13px var(--mono); padding: 0 2px; }
+  /* detalhe rico do elo */
+  .dd { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .dd__k { border: 1px solid var(--border); border-bottom-width: 2px; padding: 9px 11px; }
+  .dd__kl { font: 600 8.5px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+  .dd__kv { font: 800 19px var(--mono); letter-spacing: -0.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .dd__h { font: 600 9px var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+           color: var(--ink-2); margin: 16px 0 8px; display: flex; gap: 8px; align-items: baseline; }
+  .dd__h em { font-style: normal; color: var(--ink-3); font-size: 8px; letter-spacing: 0.06em; }
+  .db { display: grid; grid-template-columns: 150px 1fr 74px; gap: 10px; align-items: center;
+        font-size: 11.5px; padding: 3px 0; }
+  .db__n { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .db__t { height: 8px; background: var(--panel-2); overflow: hidden; }
+  .db__f { height: 100%; transition: width 700ms var(--ease); }
+  .db__v { font: 700 10.5px var(--mono); text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  table.dt { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 4px; }
+  .dt th { text-align: left; font: 600 8.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+           color: var(--ink-3); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .dt td { padding: 6px 8px; border-bottom: 1px solid var(--border); font-family: var(--mono);
+           font-size: 11px; font-variant-numeric: tabular-nums; }
+  .dt tr:last-child td { border-bottom: none; }
+  .dt .hi { color: var(--accent); }
+  .dd__note { font: 400 11.5px var(--sans); color: var(--ink-3); line-height: 1.5; margin: 12px 0 0;
+              padding-left: 10px; border-left: 2px solid var(--border-2); }
+
+  #dc-detail .rr { display: flex; justify-content: space-between; gap: 14px; font-size: 12.5px;
+                   padding: 5px 0; border-top: 1px solid var(--border); }
+  #dc-detail .rr:first-child { border-top: none; }
+  #dc-detail .rr span { color: var(--ink-3); }
+  #dc-detail .rr b { font-family: var(--mono); font-size: 11.5px; text-align: right; }
+
+  /* ════════ FLUXO DE SESSÕES (Sankey) ════════ */
+  .flow-head { display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+  .fw-sub { font: 400 10.5px var(--mono); color: var(--ink-3); margin-top: 3px; letter-spacing: 0.04em; }
+  .flow-shell { height: 430px; padding: 0; overflow: hidden; }
+  @media (max-width: 900px) { .flow-shell { height: 340px; } }
+  #flow { display: block; width: 100%; height: 100%; }
+  .flow-under { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-top: 16px; align-items: start; }
+  @media (max-width: 900px) { .flow-under { grid-template-columns: 1fr; } }
+  #fw-read .rr { display: flex; justify-content: space-between; gap: 14px; font-size: 12.5px;
+                 padding: 5px 0; border-top: 1px solid var(--border); }
+  #fw-read .rr:first-child { border-top: none; }
+  #fw-read .rr span { color: var(--ink-3); }
+  #fw-read .rr b { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ════════ ARQUITETURA — radar radial (legado) ════════ */
+  .radar-shell { position: relative; height: 620px; overflow: hidden; padding: 0;
+                 background: radial-gradient(ellipse at 50% 45%,
+                   color-mix(in srgb, var(--accent) 6%, var(--panel)) 0%, var(--panel) 62%); }
+  @media (max-width: 900px) { .radar-shell { height: 460px; } }
+  #radar { display: block; width: 100%; height: 100%; cursor: grab; }
+  #radar.dragging { cursor: grabbing; }
+  .hud { position: absolute; font-family: var(--mono); pointer-events: none; z-index: 2;
+         background: color-mix(in srgb, var(--panel) 86%, transparent);
+         border: 1px solid var(--border); padding: 9px 12px; backdrop-filter: blur(3px); }
+  .hud--tl { top: 12px; left: 12px; }
+  .hud--tr { top: 12px; right: 12px; }
+  .hud--bl { bottom: 12px; left: 12px; }
+  .hud--br { bottom: 12px; right: 12px; max-width: 340px; }
+  .hud__k { font: 600 8.5px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+  .hud__v { font: 800 15px var(--mono); letter-spacing: 0.06em; color: var(--accent); margin-top: 2px; }
+  .hud__s { font: 400 9.5px var(--mono); color: var(--ink-3); margin-top: 2px; letter-spacing: 0.04em; }
+  .hud__row { display: flex; justify-content: space-between; gap: 16px; font: 400 10px var(--mono);
+              color: var(--ink-3); margin-top: 3px; }
+  .hud__row b { color: var(--ink-2); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hud__ring { font: 400 9.5px var(--mono); color: var(--ink-3); margin-top: 3px; }
+  .hud__ring i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .hud__btn { pointer-events: auto; margin-top: 7px; background: transparent; color: var(--ink-2);
+              border: 1px solid var(--border-2); font: 600 9px var(--mono); letter-spacing: 0.12em;
+              text-transform: uppercase; padding: 5px 10px; cursor: pointer; }
+  .hud__btn:hover { color: var(--accent); border-color: var(--accent); }
+  #radar-detail { display: none; }
+  #radar-detail.on { display: block; pointer-events: auto; }
+  .rd__t { font: 700 12px var(--mono); color: var(--ink); display: flex; align-items: center; gap: 7px; }
+  .rd__t i { width: 8px; height: 8px; border-radius: 50%; }
+  .rd__s { font: 400 9.5px var(--mono); color: var(--ink-3); margin: 2px 0 6px; }
+  .rd__row { display: flex; justify-content: space-between; gap: 14px; font: 400 10px var(--mono);
+             color: var(--ink-3); padding: 1.5px 0; }
+  .rd__row b { color: var(--ink-2); font-weight: 600; text-align: right; }
+  .rd__act { pointer-events: auto; margin-top: 8px; width: 100%; background: var(--accent-dim);
+             border: 1px solid var(--accent); color: var(--accent); font: 700 9px var(--mono);
+             letter-spacing: 0.12em; text-transform: uppercase; padding: 7px; cursor: pointer; }
+  .rd__act:hover { background: var(--accent); color: var(--bg); }
+
+  /* ════════ ARQUITETURA (legado — grid de orbes) ════════ */
+  .arch-canvas { position: relative; padding: 22px 18px 0; overflow: hidden; }
+  #arch-flow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+  .arch-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 0.85fr 1.05fr 0.8fr 1.15fr 1fr; gap: 14px; }
+  .arch-col { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-bottom: 20px; }
+  .arch-col > h3 { font: 600 9.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+                   color: var(--ink-3); margin: 0 0 4px; }
+  .orb { --oc: var(--trace-good); position: relative; border-radius: 50%;
+         display: flex; flex-direction: column; align-items: center; justify-content: center;
+         text-align: center; cursor: pointer; gap: 1px;
+         background: radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--oc) 16%, transparent), var(--panel) 72%);
+         border: 1px solid color-mix(in srgb, var(--oc) 55%, transparent);
+         box-shadow: 0 0 20px color-mix(in srgb, var(--oc) 18%, transparent);
+         transition: transform 160ms var(--ease), box-shadow 160ms; }
+  .orb:hover { transform: scale(1.05); box-shadow: 0 0 28px color-mix(in srgb, var(--oc) 34%, transparent); }
+  .orb:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .orb.sel { outline: 1px solid var(--accent); outline-offset: 3px; }
+  .orb--lg { width: 104px; height: 104px; }
+  .orb--md { width: 88px; height: 88px; }
+  .orb--sm { width: 76px; height: 76px; }
+  .orb b { font: 800 16px var(--mono); color: var(--oc); font-variant-numeric: tabular-nums; }
+  .orb--sm b { font-size: 13px; }
+  .orb--lg b { font-size: 20px; }
+  .orb .nm { font: 600 8.5px var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
+             color: var(--ink-2); line-height: 1.3; max-width: 88%; }
+  .orb .sb { font: 400 8px var(--mono); color: var(--ink-3); max-width: 90%; }
+  .orb--crit { animation: orbpulse 2s infinite var(--ease); }
+  @keyframes orbpulse { 50% { box-shadow: 0 0 36px color-mix(in srgb, var(--oc) 48%, transparent); } }
+  .arch-legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+                 font: 500 9.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  .arch-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: middle; }
+  @media (prefers-reduced-motion: reduce) { .orb--crit { animation: none; } }
+  @media (max-width: 900px) { .arch-grid { grid-template-columns: 1fr 1fr; } #arch-flow { display: none; } }
+
+  /* ════════ JORNADA ════════ */
+  .jn-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  .seg { display: flex; border: 1px solid var(--border); }
+  .seg button {
+    background: transparent; border: none; color: var(--ink-3);
+    font: 600 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 7px 14px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--accent-dim); color: var(--accent); }
+  .jn-select-wrap { display: flex; align-items: center; gap: 10px; }
+  .jn-select-box { position: relative; display: inline-flex; }
+  .jn-select-box select {
+    appearance: none; -webkit-appearance: none;
+    background: var(--panel); border: 1px solid var(--border-2); color: var(--accent);
+    font: 600 10.5px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 8px 32px 8px 12px; cursor: pointer;
+  }
+  .jn-select-box select:hover { background: var(--panel-2); }
+  .jn-select-box select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .jn-select-caret { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+                     pointer-events: none; color: var(--ink-3); font: 400 10px var(--mono); }
+  .jn-canvas { position: relative; padding: 18px; }
+  .jn-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+  .jn-svg path { fill: none; stroke-width: 1.5; stroke-dasharray: 5 6; animation: flow 1.1s linear infinite; }
+  .jn-svg path.edge-bad { stroke-width: 2.2; }
+  @keyframes flow { to { stroke-dashoffset: -11; } }
+  .jn-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 224px repeat(4, 1fr); gap: 24px; align-items: start; }
+  .jn-col { display: flex; flex-direction: column; gap: 10px; }
+  .jn-col > h3 { margin: 0 0 2px; text-align: center; font: 600 9.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  .node {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 9px 11px; font-size: 12px; cursor: pointer; position: relative;
+    transition: border-color 140ms, transform 140ms var(--ease);
+  }
+  .node:hover { border-color: var(--border-2); transform: translateY(-1px); }
+  .node.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .node__name { font: 500 11.5px var(--mono); display: flex; align-items: center; gap: 7px; }
+  .node__meta { color: var(--ink-3); font: 400 10.5px var(--mono); margin-top: 3px; }
+  .node__dot { width: 7px; height: 7px; flex: none; }
+  .n-ok .node__dot { background: var(--trace-good); }
+  .n-warn .node__dot { background: var(--trace-warn); }
+  .n-bad .node__dot { background: var(--trace-bad); }
+  .n-bad { border-color: color-mix(in srgb, var(--trace-bad) 45%, transparent); }
+  .n-info .node__dot { background: var(--trace-info); }
+  .device {
+    background: var(--panel); border: 1px solid var(--accent);
+    padding: 14px; cursor: pointer; transition: box-shadow 140ms;
+  }
+  .device.sel { box-shadow: 0 0 0 1px var(--accent); }
+  .device__frame {
+    margin: 0 auto 12px; width: 68px; height: 118px;
+    border: 2px solid var(--ink-3); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; position: relative;
+    background: var(--accent-dim);
+  }
+  .device__frame::before { content: ""; position: absolute; top: 6px; width: 18px; height: 3px; background: var(--ink-3); }
+  .device__frame.desktop { width: 120px; height: 78px; border-radius: 4px; }
+  .device__frame.desktop::before { top: auto; bottom: -10px; width: 40px; height: 4px; }
+  .device__score { font: 800 24px var(--mono); }
+  .device__list { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; margin: 0; }
+  .device__list div { display: flex; justify-content: space-between; gap: 8px; }
+  .device__list dt { color: var(--ink-3); }
+  .device__list dd { margin: 0; font: 500 11px var(--mono); text-align: right; }
+  .jn-detail {
+    margin: 18px -18px -18px; padding: 13px 18px;
+    border-top: 1px solid var(--border); background: var(--panel-2);
+    font-size: 12.5px;
+  }
+  .jn-detail__title { font: 700 12.5px var(--mono); margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
+  .jn-detail__stats { display: flex; gap: 20px; flex-wrap: wrap; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .jn-detail__stats b { color: var(--ink); font: 700 12.5px var(--mono); }
+  .jn-detail__groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                       gap: 8px 22px; margin-top: 12px; }
+  .jn-detail__g h5 { margin: 0 0 5px; font: 600 9px var(--mono); letter-spacing: 0.12em;
+                     text-transform: uppercase; color: var(--ink-3);
+                     display: flex; gap: 8px; align-items: baseline; }
+  .jn-detail__g h5 em { font-style: normal; opacity: 0.65; font-size: 8.5px; letter-spacing: 0.08em; }
+  .jn-detail__g > div { display: flex; justify-content: space-between; gap: 10px;
+                        font-size: 11.5px; padding: 1.5px 0; }
+  .jn-detail__g .k { color: var(--ink-3); }
+  .jn-detail__g .v { font: 500 11px var(--mono); color: var(--ink); text-align: right;
+                     font-variant-numeric: tabular-nums; }
+  @media (max-width: 1020px) { .jn-grid { grid-template-columns: 1fr 1fr; } .jn-svg { display: none; } }
+
+  /* ════════ MODAL — plano de ação ════════ */
+  .veil {
+    position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 72%, transparent);
+    backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; padding: 24px; z-index: 20;
+  }
+  .veil.open { display: flex; }
+  .rx {
+    background: var(--panel); border: 1px solid var(--accent);
+    max-width: 640px; width: 100%; max-height: 82vh; overflow-y: auto;
+    animation: appear 400ms var(--ease);
+  }
+  .rx__hd { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+  .rx__hd h3 { margin: 0; font: 700 12px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; }
+  .rx__sim { font: 600 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+             color: var(--trace-info); border: 1px solid var(--trace-info); padding: 3px 9px; }
+  .rx__prompt { font-size: 12.5px; color: var(--ink-2); background: var(--panel-2); padding: 12px 20px; border-bottom: 1px solid var(--border); }
+  .rx__body { padding: 8px 20px 18px; font-size: 13.5px; }
+  .rx__body h4 { font: 600 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin: 16px 0 6px; }
+  .rx__body ul { margin: 0; padding-left: 18px; }
+  .rx__body li { margin: 4px 0; }
+  .rx__body .hl { color: var(--accent); font: 600 12.5px var(--mono); }
+  .rx__close {
+    margin: 0 20px 18px; background: transparent; border: 1px solid var(--border);
+    color: var(--ink-2); font: 600 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 9px 18px; cursor: pointer;
+  }
+  .rx__close:hover { color: var(--ink); border-color: var(--border-2); }
+  .typing { color: var(--ink-2); font-size: 12.5px; }
+  .typing::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--accent); }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .jn-svg path, .alarm, .typing::after, .view.on, .rx { animation: none; }
+    .fstep__fill, .xbar__f { transition: none; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">⌖</span>
+      <h1>Torre de <em>Controle</em></h1>
+    </div>
+    <span class="top__meta">experiência digital · 4 aplicações · 2.352 sessões/2h · tenant bwm98081 · dados reais</span>
+    <div class="top__spacer"></div>
+    <nav class="tabs" aria-label="Visões" id="nav-tabs">
+      <button class="tab tab--on" data-v="arch">1 · Fluxo</button>
+      <button class="tab" data-v="chain">2 · Entrega</button>
+      <button class="tab" data-v="journey">3 · Jornada</button>
+      <button class="tab" data-v="ops">4 · Saúde</button>
+    </nav>
+    <span class="top__clock num" id="clock">--:--:--</span>
+  </header>
+
+  <p class="disclaimer">
+    <b>Protótipo com dados reais</b> do tenant bwm98081, consultados via DQL/MCP em 23/07/2026 (janela de 2h):
+    aplicações, sessões, views, erros e latências são medidos. Campos marcados como <b>estimados</b>
+    (R$ em risco, cadeia de backend, fricção) são ilustrativos até a correlação via spans/Smartscape no app final.
+  </p>
+
+  <!-- ════════════ OPERAÇÃO ════════════ -->
+  <section class="view" id="view-ops">
+    <div id="ops-home">
+
+      <div class="panel monitor">
+        <div class="monitor__scope graph">
+          <div class="monitor__tag">
+            <span class="lbl">XScore do ambiente ao longo das últimas 2h</span>
+          </div>
+          <div class="scope-legend" aria-hidden="true">
+            <span><i></i>xscore</span>
+            <span><i class="dash"></i>meta 75</span>
+            <span><i class="dash dash--bad"></i>crítico 50</span>
+            <span>eixo 0–100</span>
+          </div>
+          <canvas id="chart-main" data-series="global" data-color="warn" data-thresholds="75,50"></canvas>
+        </div>
+        <div class="monitor__vitals">
+          <div class="vital">
+            <div class="lbl">XScore do ambiente</div>
+            <div class="vital__v num" style="color:var(--trace-warn)">54</div>
+            <div class="vital__u">ponderado por sessões · meta ≥ 75</div>
+          </div>
+          <div class="vital">
+            <div class="lbl">Sessões</div>
+            <div class="vital__v num">2.352</div>
+            <div class="vital__u">5.866 views nas últimas 2h</div>
+          </div>
+          <div class="vital">
+            <div class="lbl">Erros</div>
+            <div class="vital__v num" style="color:var(--trace-bad)">15,0k</div>
+            <div class="vital__u">densidade 2,6 por view</div>
+          </div>
+          <div class="vital">
+            <div class="lbl">Aplicações</div>
+            <div class="vital__v num">40</div>
+            <div class="vital__u"><span style="color:var(--trace-bad)">6 em P1</span> · 4 reais + 36 demo</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel__hd">
+          <span class="lbl">Saúde geral da arquitetura</span>
+          <span class="hint">nível 1 de 4 · clique em qualquer item para descer um nível</span>
+        </div>
+        <div class="sum-verdict" id="sum-verdict"></div>
+        <div class="sum-layers" id="sum-layers"></div>
+        <div class="sum-block">
+          <h4>O que exige atenção agora</h4>
+          <div id="sum-threats"></div>
+        </div>
+      </div>
+
+    </div>
+    <div id="ops-layer" hidden></div>
+    <div id="ops-app" hidden></div>
+    <div id="ops-chart" hidden></div>
+  </section>
+
+  <!-- ════════════ ARQUITETURA ════════════ -->
+  <section class="view on" id="view-arch">
+    <div class="flow-head">
+      <div>
+        <div class="lbl" id="fw-scope">Ambiente · 2.352 sessões</div>
+        <div class="fw-sub" id="fw-sub">largura das faixas = número de sessões medidas · janela 2h</div>
+      </div>
+      <button class="back" id="fw-up" hidden>‹ voltar ao ambiente</button>
+      <div class="top__spacer"></div>
+      <div class="arch-legend">
+        <span><i style="background:var(--trace-good)"></i>conclui</span>
+        <span><i style="background:var(--trace-warn)"></i>avança parcial</span>
+        <span><i style="background:var(--trace-bad)"></i>perde / sem dado</span>
+      </div>
+    </div>
+
+    <div class="panel flow-shell">
+      <canvas id="flow" aria-label="Fluxo de sessões por aplicação, etapa e desfecho"></canvas>
+    </div>
+
+    <div class="flow-under">
+      <div class="panel">
+        <div class="panel__hd"><span class="lbl">Cadeia de serviços que atende a seleção</span>
+          <span class="hint">relações calls do Smartscape · astroshop</span></div>
+        <div class="diag"><div class="chain" id="fw-chain"></div>
+          <p id="fw-note" style="font-size:12.5px;color:var(--ink-2);margin:14px 0 0;line-height:1.55"></p></div>
+      </div>
+      <div class="panel">
+        <div class="panel__hd"><span class="lbl">Leitura</span><span class="hint" id="fw-sel">nada selecionado</span></div>
+        <div class="diag" id="fw-read"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ CADEIA DE ENTREGA ════════════ -->
+  <section class="view" id="view-chain">
+    <div class="flow-head">
+      <div>
+        <div class="lbl">Cadeia de entrega — do usuário até a nuvem</div>
+        <div class="fw-sub" id="dc-sub">topologia Smartscape + problemas Davis, alertas customizados e extensions</div>
+      </div>
+      <div class="top__spacer"></div>
+      <label class="jn-select-wrap">
+        <span class="lbl">Aplicação</span>
+        <span class="jn-select-box">
+          <select id="dc-app" aria-label="Aplicação da cadeia de entrega">
+            <option value="mwa">My Web Application</option>
+            <option value="snow">Astroshop-Snow</option>
+            <option value="legacy">Aplicação d60bc238</option>
+            <option value="chat">AI Chatbot</option>
+          </select><span class="jn-select-caret">▾</span>
+        </span>
+      </label>
+    </div>
+    <div class="panel dcf-shell">
+      <svg class="dcf-svg" id="dc-svg" aria-hidden="true"></svg>
+      <div class="dcf" id="dc"></div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel__hd"><span class="lbl">Elo selecionado</span><span class="hint" id="dc-sel">clique em qualquer elo da cadeia</span></div>
+      <div class="diag" id="dc-detail"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ JORNADA ════════════ -->
+  <section class="view" id="view-journey">
+    <div class="jn-head">
+      <label class="jn-select-wrap">
+        <span class="lbl">Aplicação</span>
+        <span class="jn-select-box">
+          <select id="jn-app-select" aria-label="Selecionar aplicação">
+            <option value="mwa">My Web Application</option>
+            <option value="snow">Astroshop-Snow</option>
+            <option value="legacy">Aplicação d60bc238</option>
+            <option value="chat">AI Chatbot</option>
+          </select>
+          <span class="jn-select-caret">▾</span>
+        </span>
+      </label>
+      <div class="seg" id="persona-chips" role="group" aria-label="Persona">
+        <button class="on" data-p="mobile">Sessão mobile</button>
+        <button data-p="desktop">Sessão desktop</button>
+      </div>
+      <span class="dim" style="font-size:11.5px">Clique em um nó para inspecionar — o fluxo percorre do dispositivo ao backend</span>
+    </div>
+    <div class="panel jn-canvas">
+      <svg class="jn-svg" id="jn-svg" aria-hidden="true"></svg>
+      <div class="jn-grid" id="jn-grid">
+        <div class="jn-col">
+          <h3>Dispositivo</h3>
+          <div class="device sel" id="node-device" data-node="device"></div>
+        </div>
+        <div class="jn-col" id="col-views"><h3>Experiência</h3></div>
+        <div class="jn-col" id="col-requests"><h3>Web requests</h3></div>
+        <div class="jn-col" id="col-services"><h3>Serviços do cliente</h3></div>
+        <div class="jn-col" id="col-deps"><h3>Terceiros &amp; dados</h3></div>
+      </div>
+      <div class="jn-detail" id="jn-detail"></div>
+    </div>
+  </section>
+</div>
+
+<div class="veil" id="veil" role="dialog" aria-modal="true" aria-labelledby="rx-title">
+  <div class="rx">
+    <div class="rx__hd">
+      <h3 id="rx-title">Plano de ação · Dynatrace Assist</h3>
+      <span class="rx__sim">simulação do protótipo</span>
+    </div>
+    <div class="rx__prompt" id="rx-prompt"></div>
+    <div class="rx__body" id="rx-body"></div>
+    <button class="rx__close" id="rx-close">Fechar</button>
+  </div>
+</div>
+
+<script>
+  /* ═══════════ helpers ═══════════ */
+  const $ = (id) => document.getElementById(id);
+  const fmtN = (n) => n.toLocaleString("pt-BR");
+  const fmtR$ = (v) => v >= 1000 ? "R$ " + (v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : "R$ " + fmtN(v);
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  const tickClock = () => { $("clock").textContent = new Date().toLocaleTimeString("pt-BR"); };
+  tickClock(); setInterval(tickClock, 1000);
+
+  const fmtMs = (ms) => ms >= 60000 ? (ms / 60000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "min"
+    : ms >= 1000 ? (ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "s"
+    : Math.round(ms) + "ms";
+  // score de performance por view: p50 ≤1s → 100 … ≥8s → 0
+  const perfScore = (ms) => Math.round(clamp(((8000 - ms) / 7000) * 100, 0, 100));
+
+  /* ═══════════ séries do XScore (2h · 1 ponto/100s) ═══════════
+     Trajetórias moldadas pelo estado REAL medido de cada aplicação. */
+  function genSeries(opts) { // { from, to = from, at = 0.62, vol }
+    const n = 72, out = [];
+    const to = opts.to ?? opts.from, at = opts.at ?? 0.62;
+    for (let i = 0; i < n; i++) {
+      const p = i / n;
+      const base = to === opts.from ? opts.from
+        : p < at ? opts.from
+        : p < at + 0.08 ? opts.from + (to - opts.from) * ((p - at) / 0.08)
+        : to;
+      out.push(clamp(base + (Math.random() - 0.5) * opts.vol, 3, 98));
+    }
+    return out;
+  }
+  const SERIES = {
+    "app-mwa":    genSeries({ from: 55, to: 32, vol: 4 }),
+    "app-snow":   genSeries({ from: 79, vol: 3 }),
+    "app-legacy": genSeries({ from: 24, to: 15, at: 0.5, vol: 5 }),
+    "app-chat":   genSeries({ from: 45, vol: 2 }),
+    "flow-mwa-buy":    genSeries({ from: 52, to: 24, vol: 5 }),
+    "flow-snow-disc":  genSeries({ from: 88, vol: 2.5 }),
+    "flow-legacy-buy": genSeries({ from: 26, to: 18, at: 0.5, vol: 5 }),
+    "flow-chat-conv":  genSeries({ from: 45, vol: 2 }),
+  };
+  // ambiente = média ponderada pelas sessões reais de cada aplicação
+  const W = { "app-mwa": 1036, "app-snow": 1019, "app-legacy": 72, "app-chat": 53 };
+  SERIES.global = SERIES["app-mwa"].map((_, i) => {
+    let sum = 0, w = 0;
+    for (const k of Object.keys(W)) { sum += SERIES[k][i] * W[k]; w += W[k]; }
+    return sum / w;
+  });
+
+  /* tick ao vivo: um ponto novo a cada 2,5s mantendo o regime atual */
+  const ANCHOR = { "app-mwa": 32, "app-snow": 79, "app-legacy": 15, "app-chat": 45,
+                   "flow-mwa-buy": 24, "flow-snow-disc": 88, "flow-legacy-buy": 18, "flow-chat-conv": 45 };
+  if (!reduceMotion) setInterval(() => {
+    for (const k of Object.keys(ANCHOR)) {
+      const s = SERIES[k], last = s[s.length - 1];
+      s.push(clamp(last + (ANCHOR[k] - last) * 0.15 + (Math.random() - 0.5) * 3, 3, 98));
+      s.shift();
+    }
+    const g = SERIES.global;
+    g.push(Object.keys(W).reduce((a, k) => a + SERIES[k][SERIES[k].length - 1] * W[k], 0) /
+           Object.values(W).reduce((a, b) => a + b, 0));
+    g.shift();
+  }, 2500);
+
+  /* ═══════════ renderizador de gráfico (canvas) ═══════════ */
+  const TRACE_COLORS = { good: "--trace-good", warn: "--trace-warn", bad: "--trace-bad", info: "--trace-info" };
+  const charts = [];
+  function makeChart(canvas) {
+    const s = {
+      canvas,
+      series: canvas.dataset.series,
+      key: canvas.dataset.color,
+      thresholds: (canvas.dataset.thresholds || "75").split(",").map(Number),
+      cached: null, cacheAt: 0,
+    };
+    charts.push(s);
+    return s;
+  }
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function drawChart(s, t) {
+    const c = s.canvas, dpr = window.devicePixelRatio || 1;
+    const w = c.clientWidth, h = c.clientHeight;
+    if (!w) return;
+    if (c.width !== w * dpr || c.height !== h * dpr) { c.width = w * dpr; c.height = h * dpr; }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    if (!s.cached || t - s.cacheAt > 1000) {
+      s.cached = { line: cssVar(TRACE_COLORS[s.key]), dim: cssVar("--ink-3"), bad: cssVar("--trace-bad") };
+      s.cacheAt = t;
+    }
+    const data = SERIES[s.series];
+    const padT = 10, padB = 8, padL = 4, padR = 10;
+    const X = (i) => padL + (i / (data.length - 1)) * (w - padL - padR);
+    const Y = (v) => padT + (1 - v / 100) * (h - padT - padB);
+
+    // linhas de referência (meta / crítico) com rótulo
+    for (const th of s.thresholds) {
+      ctx.beginPath();
+      ctx.setLineDash([4, 5]);
+      ctx.moveTo(padL, Y(th)); ctx.lineTo(w - padR, Y(th));
+      ctx.strokeStyle = th <= 50 ? s.cached.bad : s.cached.dim;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (h >= 90) {
+        ctx.font = "600 9px 'JetBrains Mono', monospace";
+        ctx.fillStyle = th <= 50 ? s.cached.bad : s.cached.dim;
+        ctx.globalAlpha = 0.85;
+        ctx.textAlign = "left";
+        ctx.fillText(th <= 50 ? "crítico " + th : "meta " + th, padL + 4, Y(th) - 4);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // área
+    ctx.beginPath();
+    data.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)));
+    ctx.lineTo(X(data.length - 1), h - padB); ctx.lineTo(X(0), h - padB); ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, s.cached.line + "2e");
+    grad.addColorStop(1, s.cached.line + "00");
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // linha
+    ctx.beginPath();
+    data.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)));
+    ctx.strokeStyle = s.cached.line;
+    ctx.lineWidth = 1.8;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    // ponto final
+    const li = data.length - 1;
+    ctx.fillStyle = s.cached.line;
+    ctx.beginPath();
+    ctx.arc(X(li), Y(data[li]), 3, 0, 7);
+    ctx.fill();
+  }
+  function loop(t) {
+    // cada desenho é isolado: uma falha num painel nunca derruba a animação toda
+    try { for (const s of charts) if (s.canvas.offsetParent !== null) drawChart(s, t); }
+    catch (e) { console.error("chart", e); }
+    try { drawFlow(t); } catch (e) { console.error("flow", e); }
+    try { drawChain(t); } catch (e) { console.error("chain", e); }
+    if (!reduceMotion) requestAnimationFrame(loop);
+  }
+
+  /* ═══════════ dados ═══════════ */
+  const SEV = {
+    p1: { name: "P1 · Crítico",     color: "var(--sev-p1)", alarm: true },
+    p2: { name: "P2 · Degradado",   color: "var(--sev-p2)", alarm: false },
+    p3: { name: "P3 · Observação",  color: "var(--sev-p3)", alarm: false },
+    p4: { name: "P4 · Estável",     color: "var(--sev-p4)", alarm: false },
+  };
+  /* ── DADOS REAIS — DQL via MCP · tenant bwm98081 · 23/07/2026 · janela 2h ──
+     fetch user.events | summarize sessions, views, errors, p50(view) by dt.rum.application.id
+     XScore: 55% performance (p50 de view por etapa, ponderado por sessões)
+           + 45% confiabilidade (densidade de erros por view — no demo, ~100%
+             das sessões têm ≥1 erro, então errorSessions não diferencia). */
+  const APPS = [
+    {
+      id: "mwa", name: "My Web Application", entity: "APPLICATION-EA7C4B59F27D43EB",
+      desc: "e-commerce AstroShop · OTel demo",
+      sessions: 1036, views: 3953, errors: 10635, x: 32,
+      sev: "p1", since: "p50 do carrinho: 1,1min (medido)", trace: "bad", series: "app-mwa",
+      detected: [
+        { name: "/", sessions: 1005, views: 1970, p50: 3242 },
+        { name: "/cart", sessions: 993, views: 993, p50: 65868 },
+        { name: "/product/OLJCESPC7Z", sessions: 983, views: 983, p50: 65868 },
+      ],
+      journeyFunnel: [
+        { name: "Home", n: 1005, p50: 3242 },
+        { name: "Produto OLJCESPC7Z", n: 983, p50: 65868, drop: { pct: 2, why: "navegação normal", bad: false } },
+        { name: "Carrinho", n: 993, p50: 65868, drop: { pct: 0, why: "clickpath sintético — praticamente sem abandono", bad: false } },
+      ],
+      funnelNote: "Funil quase plano: a dor desta aplicação é latência (1,1min por etapa), não abandono.",
+      sequences: [
+        { path: ["/", "/product/*", "/cart", "/"], sessions: 966, share: 96 },
+        { path: ["/product/*", "/cart", "/"], sessions: 20, share: 2 },
+        { path: ["/"], sessions: 11, share: 1 },
+        { path: ["/cart", "/"], sessions: 9, share: 1 },
+      ],
+      seqNote: "96% das sessões seguem o mesmo circuito com retorno à home — assinatura de clickpath sintético.",
+      flows: [{
+        id: "mwa-buy", name: "Navegação & compra", desc: "home → produto → carrinho",
+        x: 24, conv: 99, sessions: 1005, risk: 184000, riskEst: true,
+        sev: "p1", since: "degradado", trace: "bad", series: "flow-mwa-buy",
+        funnel: [
+          { name: "Home", n: 1005, load: "3,2s", err: null, fric: "—", x: 68 },
+          { name: "Produto OLJCESPC7Z", n: 983, load: "1,1min", err: null, fric: "—", x: 5, drop: { pct: 2, why: "navegação normal", bad: false } },
+          { name: "Carrinho", n: 993, load: "1,1min", err: null, fric: "—", x: 4, drop: { pct: 0, why: "conversão constante (clickpath sintético) — a dor é latência, não abandono", bad: false } },
+        ],
+        chain: [["frontend-proxy", "good"], ["cart-service", "bad"], ["checkout-service", "warn"]],
+        chainEst: true,
+        insight: "Medido: p50 de 1,1min em /cart e /product e 10.635 erros/2h nesta aplicação — padrão de chamada bloqueante no backend do carrinho.",
+      }],
+    },
+    {
+      id: "snow", name: "Astroshop-Snow", entity: "APPLICATION-35D7CC5781E8758B",
+      desc: "e-commerce · réplica saudável",
+      sessions: 1019, views: 1504, errors: 2785, x: 79,
+      sev: "p4", since: "estável", trace: "good", series: "app-snow",
+      detected: [
+        { name: "/", sessions: 751, views: 751, p50: 1928 },
+        { name: "/product/9SIQT8TOJO", sessions: 92, views: 92, p50: 1098 },
+        { name: "/product/2ZYFJ3GM2N", sessions: 77, views: 77, p50: 1051 },
+        { name: "/product/0PUK6V6EV0", sessions: 76, views: 76, p50: 1146 },
+        { name: "/product/1YMWWN1N4O", sessions: 76, views: 76, p50: 1197 },
+        { name: "/product/LS4PSXUNUM", sessions: 76, views: 76, p50: 1363 },
+        { name: "/product/HQTGWGPNH4", sessions: 75, views: 75, p50: 1051 },
+        { name: "/product/L9ECAV7KIM", sessions: 73, views: 73, p50: 1146 },
+        { name: "/product/6E92ZMYYFZ", sessions: 70, views: 70, p50: 1098 },
+        { name: "/product/66VCHSJNUP", sessions: 69, views: 69, p50: 1098 },
+        { name: "/product/OLJCESPC7Z", sessions: 66, views: 66, p50: 1051 },
+      ],
+      journeyFunnel: [
+        { name: "Home", n: 751, p50: 1928 },
+        { name: "Página de produto (10 SKUs)", n: 750, p50: 1120, drop: { pct: 0, why: "navegação normal", bad: false } },
+      ],
+      funnelNote: "Checkout não foi detectado nesta aplicação — o funil termina na página de produto. Oportunidade: instrumentar as etapas de compra.",
+      sequences: [
+        { path: ["/", "/product/*"], sessions: 748, share: 99.6 },
+        { path: ["/"], sessions: 2, share: 0.3 },
+        { path: ["/product/*"], sessions: 1, share: 0.1 },
+      ],
+      seqNote: "Nenhuma sequência descoberta chega ao carrinho — confirma a lacuna de instrumentação do checkout.",
+      flows: [{
+        id: "snow-disc", name: "Descoberta de produtos", desc: "home → página de produto",
+        x: 88, conv: 100, sessions: 751, risk: 0,
+        sev: "p4", since: "estável", trace: "good", series: "flow-snow-disc",
+        funnel: [
+          { name: "Home", n: 751, load: "1,9s", err: null, fric: "—", x: 87 },
+          { name: "Página de produto (10 SKUs)", n: 750, load: "1,1s", err: null, fric: "—", x: 97, drop: { pct: 0, why: "navegação normal", bad: false } },
+        ],
+        chain: [["frontend-proxy", "good"], ["product-catalog", "good"]],
+        insight: "Referência de meta do ambiente: mesma jornada da aplicação crítica com p50 até 35× menor.",
+      }],
+    },
+    {
+      id: "legacy", name: "Aplicação d60bc238", entity: "sem nome no inventário de entidades",
+      desc: "checkout com pedidos reais · governança pendente",
+      sessions: 72, views: 356, errors: 1574, x: 15,
+      sev: "p1", since: "sem dono · 4,4 erros por view", trace: "bad", series: "app-legacy",
+      detected: [
+        { name: "/", sessions: 71, views: 142, p50: 8800 },
+        { name: "/cart", sessions: 71, views: 71, p50: 5339 },
+        { name: "/product/1YMWWN1N4O", sessions: 71, views: 71, p50: 5339 },
+        { name: "/cart/checkout/{order-id}", sessions: 72, views: 72, p50: 4800, note: "URLs únicas (1 por pedido) normalizadas" },
+      ],
+      journeyFunnel: [
+        { name: "Home", n: 71, p50: 8800 },
+        { name: "Produto 1YMWWN1N4O", n: 71, p50: 5339, drop: { pct: 0, why: "navegação normal", bad: false } },
+        { name: "Carrinho", n: 71, p50: 5339, drop: { pct: 0, why: "navegação normal", bad: false } },
+        { name: "Checkout {order-id}", n: 72, p50: 4800, drop: { pct: 0, why: "conclusão de pedido em ~100% das sessões", bad: false } },
+      ],
+      funnelNote: "Único funil completo do ambiente (home → pedido concluído). A dor não é abandono: é latência (5–9s por etapa) e 4,4 erros por view.",
+      sequences: [
+        { path: ["/", "/product/*", "/cart", "/cart/checkout/*", "/"], sessions: 72, share: 100 },
+      ],
+      seqNote: "100% das sessões percorrem a jornada completa de compra — a sequência descoberta corrigiu a leitura de abandono no checkout.",
+      flows: [{
+        id: "legacy-buy", name: "Compra completa", desc: "home → produto → carrinho → checkout {order-id}",
+        x: 18, conv: 100, sessions: 71, risk: 0,
+        sev: "p1", since: "latência e erros altos em toda a jornada", trace: "bad", series: "flow-legacy-buy",
+        funnel: [
+          { name: "Home", n: 71, load: "8,8s", err: null, fric: "—", x: 12 },
+          { name: "Produto", n: 71, load: "5,3s", err: null, fric: "—", x: 38, drop: { pct: 0, why: "navegação normal", bad: false } },
+          { name: "Carrinho", n: 71, load: "5,3s", err: null, fric: "—", x: 38, drop: { pct: 0, why: "navegação normal", bad: false } },
+          { name: "Checkout {order-id}", n: 72, load: "4,8s", err: null, fric: "—", x: 46, drop: { pct: 0, why: "conclusão de pedido em ~100% das sessões", bad: false } },
+        ],
+        chain: [["frontend (não instrumentado)", "warn"]],
+        insight: "A sequência descoberta mostra a jornada completa em 100% das sessões — a dor é performance (5–9s) e 4,4 erros/view. Governança: nomear a aplicação e definir dono.",
+      }],
+    },
+    {
+      id: "chat", name: "AI Chatbot", entity: "APPLICATION-B4C99D89D314DE21",
+      desc: "assistente conversacional",
+      sessions: 53, views: 52, errors: 0, x: 45,
+      sev: "p3", since: "duração ≠ dor para chat", trace: "info", series: "app-chat",
+      detected: [
+        { name: "/", sessions: 53, views: 52, p50: 78330, note: "duração = tempo de conversa", na: true },
+      ],
+      journeyFunnel: [
+        { name: 'Conversa "/"', n: 53, p50: 78330, na: true },
+      ],
+      funnelNote: "Jornada de etapa única — funil não se aplica a um chat.",
+      sequences: [
+        { path: ["/"], sessions: 53, share: 100 },
+      ],
+      seqNote: "Toda a experiência acontece numa única view — sequência não é o sinal certo para este app.",
+      flows: [{
+        id: "chat-conv", name: "Conversa com IA", desc: "sessão única de chat",
+        x: null, conv: null, sessions: 53, risk: 0,
+        sev: "p3", since: "em observação", trace: "info", series: "flow-chat-conv",
+        funnel: [
+          { name: 'Conversa "/"', n: 53, load: "1,3min (mediana)", err: 0, fric: "—", x: null },
+        ],
+        chain: [["chat-frontend", "good"], ["provedor LLM", "good"]],
+        insight: "Duração alta de view é o esperado num chat — o XScore padrão não se aplica. Próximo passo: métricas próprias (tempo até a 1ª resposta, taxa de fallback).",
+      }],
+    },
+  ];
+  const UNATTRIBUTED_SESSIONS = 172;
+  const SERVICES = [
+    ["frontend-proxy", "good", "96ms", "0,4%"],
+    ["cart-service", "bad", "2,4s", "12,4%"],
+    ["product-catalog", "good", "145ms", "0,2%"],
+    ["checkout-service", "warn", "890ms", "4,1%"],
+    ["recommendation", "good", "480ms", "0,8%"],
+    ["payment-service", "good", "310ms", "0,3%"],
+  ];
+  const THIRD = [
+    ["Stripe · pagamento", "good", "310ms"],
+    ["Cloudflare CDN · assets", "good", "85ms"],
+    ["Google Analytics · beacon", "good", "120ms"],
+    ["fonts.gstatic.com · fontes", "warn", "1,9s"],
+    ["Hotjar · replay", "good", "240ms"],
+  ];
+  const TCOLOR = { good: "var(--trace-good)", warn: "var(--trace-warn)", bad: "var(--trace-bad)" };
+  const gradeColor = (x) => x >= 75 ? "var(--trace-good)" : x >= 50 ? "var(--trace-warn)" : "var(--trace-bad)";
+  const FRIC_COLOR = { baixa: "var(--trace-good)", "média": "var(--trace-warn)", alta: "var(--trace-bad)" };
+
+  /* ═══════════ nível 1 — portfólio de aplicações ═══════════ */
+  const xColor = (x) => x == null ? "var(--trace-info)" : gradeColor(x);
+  const xText = (x) => x == null ? "—" : x;
+  const fmtK = (n) => n >= 1000 ? (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : fmtN(n);
+  function bedTag(sev, since) {
+    const t = SEV[sev];
+    return `<div class="bed__tag" style="color:${t.color}">
+      <i class="sev-dot ${t.alarm ? "alarm" : ""}" style="background:${t.color}"></i>${t.name} · ${since}</div>`;
+  }
+
+  function renderApps() {
+    $("beds").innerHTML = [...APPS].sort((a, b) => a.x - b.x).map((a) => `
+      <div class="bed" data-app="${a.id}" role="button" tabindex="0" aria-label="Abrir aplicação ${a.name}">
+        <div class="bed__sev" style="background:${SEV[a.sev].color}"></div>
+        <div class="bed__id">
+          <div class="bed__name">${a.name}</div>
+          <div class="bed__desc">${a.desc} · ${a.entity}</div>
+          ${bedTag(a.sev, a.since)}
+        </div>
+        <div class="bed__scope graph"><canvas data-series="${a.series}" data-color="${a.trace}" data-thresholds="75"></canvas></div>
+        <div class="bed__stat"><span class="lbl">XScore</span><span class="num" style="color:${xColor(a.x)}">${xText(a.x)}</span></div>
+        <div class="bed__stat"><span class="lbl">Sessões</span><span class="num">${fmtN(a.sessions)}</span></div>
+        <div class="bed__stat"><span class="lbl">Erros 2h</span><span class="num" style="color:${a.errors > 1000 ? "var(--trace-bad)" : "var(--ink)"}">${fmtK(a.errors)}</span></div>
+        <div class="bed__chev">›</div>
+      </div>`).join("") +
+      `<div style="padding:9px 16px;border-top:1px solid var(--border);font:400 11px var(--sans);color:var(--ink-3)">
+        + ${UNATTRIBUTED_SESSIONS} sessões sem atribuição de aplicação (application.id vazio) — higiene de instrumentação a corrigir.</div>`;
+    $("beds").querySelectorAll("canvas").forEach(makeChart);
+  }
+
+  /* funil geral por aplicação (portfólio) — barras da sequência dominante */
+  function funnelBars(steps, { small = false, first = null } = {}) {
+    const base = first ?? steps[0].n;
+    return `<div class="funnel ${small ? "funnel--sm" : ""}">` + steps.map((s) => {
+      const pct = Math.min(100, Math.round((s.n / base) * 100));
+      const sc = s.na ? null : (s.p50 != null ? perfScore(s.p50) : null);
+      const drop = s.drop ? `<div class="fdrop ${s.drop.bad ? "fdrop--bad" : "fdrop--ok"}">▼ −${s.drop.pct}%
+          <span class="fdrop__why">· ${s.drop.why}</span></div>` : "";
+      return `${drop}<div class="fstep">
+        <span class="fstep__name">${s.name}</span>
+        <div class="fstep__track"><div class="fstep__fill" style="width:${pct}%;background:${sc == null ? "var(--accent)" : xColor(sc)}">${fmtN(s.n)}${s.p50 != null ? " · " + fmtMs(s.p50) : ""}</div></div>
+        <span class="fstep__pct">${pct}%</span>
+      </div>`;
+    }).join("") + "</div>";
+  }
+
+  function renderAppFunnels() {
+    $("appfun").innerHTML = [...APPS].sort((a, b) => a.x - b.x).map((a) => {
+      const first = a.journeyFunnel[0].n, last = a.journeyFunnel[a.journeyFunnel.length - 1].n;
+      const conv = a.journeyFunnel.length > 1 ? Math.min(100, Math.round((last / first) * 100)) + "%" : "—";
+      return `<div class="appfun__cell" data-app="${a.id}" role="button" tabindex="0" aria-label="Abrir ${a.name}">
+        <div class="appfun__hd">
+          <span class="appfun__name"><i class="sev-dot" style="background:${SEV[a.sev].color}"></i>${a.name}</span>
+          <span class="appfun__conv">conversão ${conv}</span>
+        </div>
+        ${funnelBars(a.journeyFunnel, { small: true })}
+      </div>`;
+    }).join("");
+  }
+
+  /* funil por jornada — contagem de prefixo: quantas sessões da aplicação
+     chegam a cada etapa DESTA sequência (sequências que compartilham o prefixo) */
+  function prefixCount(app, path, k) {
+    return app.sequences.reduce((acc, q) =>
+      acc + (path.slice(0, k + 1).every((s, i) => q.path[i] === s) ? q.sessions : 0), 0);
+  }
+  function seqFunnel(app, q) {
+    let prev = null;
+    const steps = q.path.map((name, k) => {
+      const n = prefixCount(app, q.path, k);
+      const drop = prev != null && prev > 0 && n < prev
+        ? { pct: Math.round((1 - n / prev) * 100), why: "sessões que não seguiram esta jornada", bad: (1 - n / prev) > 0.2 }
+        : null;
+      prev = n;
+      return { name, n, drop };
+    });
+    return funnelBars(steps, { small: true, first: steps[0].n });
+  }
+
+  /* ═══════════ visão de parque — heatmap escalável ═══════════ */
+  const FLEET = [
+    { id: "mwa", n: "My Web Application", bu: "E-commerce", x: 32, s: 1036, r: 184000, real: true },
+    { id: "snow", n: "Astroshop-Snow", bu: "E-commerce", x: 79, s: 1019, r: 0, real: true },
+    { id: "legacy", n: "Aplicação d60bc238", bu: "E-commerce", x: 15, s: 72, r: 26000, real: true },
+    { id: "chat", n: "AI Chatbot", bu: "Dados & IA", x: 45, s: 53, r: 0, real: true, obs: true },
+    // ── frota simulada para demonstrar escala ──
+    { n: "Portal do Cliente", bu: "Canais Digitais", x: 88, s: 8400 },
+    { n: "Internet Banking", bu: "Canais Digitais", x: 91, s: 15200 },
+    { n: "Onboarding PF", bu: "Canais Digitais", x: 67, s: 3900, r: 12000 },
+    { n: "Onboarding PJ", bu: "Canais Digitais", x: 47, s: 1800, r: 44000 },
+    { n: "Área Logada B2B", bu: "Canais Digitais", x: 82, s: 5100 },
+    { n: "Simulador de Crédito", bu: "Canais Digitais", x: 74, s: 2600 },
+    { n: "Chat Suporte Web", bu: "Canais Digitais", x: 86, s: 4700 },
+    { n: "Central de Ajuda", bu: "Canais Digitais", x: 93, s: 3100 },
+    { n: "Checkout Pix", bu: "Pagamentos", x: 90, s: 9800 },
+    { n: "Gateway Cartões", bu: "Pagamentos", x: 71, s: 8700, r: 31000 },
+    { n: "Carteira Digital", bu: "Pagamentos", x: 84, s: 6200 },
+    { n: "Split Marketplace", bu: "Pagamentos", x: 46, s: 2100, r: 18000 },
+    { n: "Antifraude Console", bu: "Pagamentos", x: 89, s: 900 },
+    { n: "Recorrência", bu: "Pagamentos", x: 77, s: 1400 },
+    { n: "RH Self-service", bu: "Backoffice", x: 92, s: 1100 },
+    { n: "Portal NF-e", bu: "Backoffice", x: 63, s: 2500 },
+    { n: "Compras & Suprimentos", bu: "Backoffice", x: 85, s: 800 },
+    { n: "Jurídico Docs", bu: "Backoffice", x: 90, s: 400 },
+    { n: "Faturamento", bu: "Backoffice", x: 49, s: 1900, r: 22000 },
+    { n: "BI Corporativo", bu: "Backoffice", x: 81, s: 1300 },
+    { n: "Atendimento Interno", bu: "Backoffice", x: 87, s: 2200 },
+    { n: "Rastreamento", bu: "Logística", x: 83, s: 7400 },
+    { n: "Torre de Entregas", bu: "Logística", x: 66, s: 2900 },
+    { n: "Agendamento Docas", bu: "Logística", x: 91, s: 600 },
+    { n: "Roteirização", bu: "Logística", x: 78, s: 1100 },
+    { n: "Etiquetas", bu: "Logística", x: 94, s: 500 },
+    { n: "Feature Store UI", bu: "Dados & IA", x: 88, s: 300 },
+    { n: "Catálogo de Dados", bu: "Dados & IA", x: 76, s: 700 },
+    { n: "Assistente Interno", bu: "Dados & IA", x: 69, s: 900, obs: true },
+    { n: "Labs Experimentos", bu: "Dados & IA", x: 90, s: 250 },
+    { n: "App Cliente iOS", bu: "Mobile", x: 85, s: 11200 },
+    { n: "App Cliente Android", bu: "Mobile", x: 72, s: 12800, r: 27000 },
+    { n: "App Entregadores", bu: "Mobile", x: 41, s: 3400, r: 38000 },
+    { n: "App Vendedores", bu: "Mobile", x: 79, s: 2100 },
+    { n: "App Gestor", bu: "Mobile", x: 88, s: 700 },
+    { n: "Quiosque Loja", bu: "Mobile", x: 61, s: 450 },
+  ];
+  const flState = { q: "", sev: "all", sort: "x", group: "none" };
+  const flSev = (a) => a.obs ? "p3" : a.x < 50 ? "p1" : a.x < 75 ? "p2" : "p4";
+
+  function renderFleet() {
+    let list = FLEET.filter((a) =>
+      (!flState.q || a.n.toLowerCase().includes(flState.q)) &&
+      (flState.sev === "all" || flSev(a) === flState.sev));
+    const cmp = flState.sort === "s" ? (a, b) => b.s - a.s
+      : flState.sort === "r" ? (a, b) => (b.r || 0) - (a.r || 0)
+      : (a, b) => a.x - b.x;
+    list = [...list].sort(cmp);
+    const tile = (a) => {
+      const sev = flSev(a);
+      return `<div class="ftile" data-fleet="${a.id || ""}" data-real="${a.real ? 1 : 0}"
+        role="button" tabindex="0" style="border-left-color:var(--sev-${sev})"
+        title="${a.n} · ${SEV[sev].name}${a.real ? " · dados reais" : " · simulada"}">
+        ${a.real ? '<span class="ftile__real">REAL</span>' : ""}
+        <div class="ftile__nm">${a.n}</div>
+        <div class="ftile__bu">${a.bu}</div>
+        <div class="ftile__row">
+          <span class="ftile__x" style="color:${gradeColor(a.x)}">${a.x}</span>
+          <span class="ftile__s">${fmtK(a.s)} sess${a.r ? " · " + fmtR$(a.r) : ""}</span>
+        </div>
+      </div>`;
+    };
+    if (flState.group === "bu") {
+      const bus = [...new Set(list.map((a) => a.bu))];
+      $("fleet").innerHTML = bus.map((bu) => {
+        const items = list.filter((a) => a.bu === bu);
+        const worst = Math.min(...items.map((a) => a.x));
+        return `<div class="fleet-group-h">${bu} <em>${items.length} app(s) · pior XScore ${worst}</em></div>` +
+          items.map(tile).join("");
+      }).join("");
+    } else {
+      $("fleet").innerHTML = list.map(tile).join("");
+    }
+    $("fl-count").textContent = `exibindo ${list.length} de ${FLEET.length}`;
+  }
+  /* eventos do parque — delegados (o heatmap só existe no nível 2) */
+  $("ops-layer").addEventListener("input", (e) => {
+    if (e.target.id === "fl-q") { flState.q = e.target.value.trim().toLowerCase(); renderFleet(); }
+  });
+  $("ops-layer").addEventListener("change", (e) => {
+    if (e.target.id === "fl-sort") { flState.sort = e.target.value; renderFleet(); }
+    if (e.target.id === "fl-group") { flState.group = e.target.value; renderFleet(); }
+  });
+  $("ops-layer").addEventListener("click", (e) => {
+    if (e.target.closest("[data-back]")) return backToOverview();
+    const sv = e.target.closest("#fl-sev [data-fs]");
+    if (sv) {
+      flState.sev = sv.dataset.fs;
+      document.querySelectorAll("#fl-sev button").forEach((c) => c.classList.toggle("on", c === sv));
+      return renderFleet();
+    }
+    const t = e.target.closest("[data-fleet]");
+    if (t) {
+      if (t.dataset.real === "1") return openApp(t.dataset.fleet);
+      $("fl-count").textContent = `“${t.querySelector(".ftile__nm").textContent}” é simulada — o drill está nas 4 reais`;
+      return;
+    }
+    const bed = e.target.closest("[data-app]");
+    if (bed) return openApp(bed.dataset.app);
+  });
+  $("ops-layer").addEventListener("keydown", (e) => {
+    const t = e.target.closest("[data-fleet], [data-app]");
+    if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); t.click(); }
+  });
+
+  /* ═══════════ resumo executivo — saúde geral da arquitetura ═══════════ */
+  const SEV_COLOR = { p1: "var(--sev-p1)", p2: "var(--sev-p2)", p3: "var(--sev-p3)", p4: "var(--sev-p4)" };
+  function gaugeSvg(pct, color, size = 52) {
+    const r = (size - 8) / 2, c = 2 * Math.PI * r;
+    return `<svg width="${size}" height="${size}" aria-hidden="true">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--panel-2)" stroke-width="5"></circle>
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="5"
+        stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"
+        transform="rotate(-90 ${size / 2} ${size / 2})"></circle>
+    </svg>`;
+  }
+  function renderSummary() {
+    const counts = { p1: 0, p2: 0, p3: 0, p4: 0 };
+    for (const a of FLEET) counts[flSev(a)]++;
+    const total = FLEET.length;
+    const okPct = Math.round(((total - counts.p1) / total) * 100);
+
+    // veredito
+    $("sum-verdict").innerHTML = `
+      <span class="sum-verdict__badge" style="color:var(--trace-warn);border-color:var(--trace-warn);background:color-mix(in srgb, var(--trace-warn) 10%, transparent)">Atenção</span>
+      <p class="sum-verdict__txt" style="margin:0">
+        <b>${okPct}% do parque opera sem criticidade</b>, mas ${counts.p1} de ${total} aplicações estão em P1 —
+        concentradas no e-commerce. O ofensor dominante é a cadeia
+        <b>carrinho → cart-service → Redis saturado</b> (p50 de 1,1min medido), com
+        <b>R$ 234k/2h</b> de receita em risco no ambiente. Nenhuma indisponibilidade total.
+      </p>`;
+
+    // saúde por camada — cada card desce um nível
+    const layers = [
+      { id: "exp", t: "Experiência do usuário", v: "54", u: "/100 · medido", pct: 54, tone: "var(--trace-warn)", i: "XScore agregado, puxado pelo e-commerce" },
+      { id: "svc", t: "Serviços & APIs", v: "83%", u: "saudáveis", pct: 83, tone: "var(--trace-warn)", i: "1 de 6 crítico (cart-service)" },
+      { id: "data", t: "Dados & cache", v: "75%", u: "saudáveis", pct: 75, tone: "var(--trace-bad)", i: "Redis saturado — causa raiz ativa" },
+      { id: "third", t: "Terceiros", v: "80%", u: "saudáveis", pct: 80, tone: "var(--trace-warn)", i: "fontes de terceiros atrasam o FCP" },
+    ];
+    $("sum-layers").innerHTML = layers.map((l) => `
+      <div class="sum-layer" data-layer="${l.id}" role="button" tabindex="0" aria-label="Abrir camada ${l.t}">
+        ${gaugeSvg(l.pct, l.tone)}
+        <div>
+          <div class="sum-layer__t">${l.t} <span style="color:var(--ink-3)">›</span></div>
+          <div class="sum-layer__v" style="color:${l.tone}">${l.v}<span style="font:500 10px var(--mono);color:var(--ink-3)"> ${l.u}</span></div>
+          <div class="sum-layer__i">${l.i}</div>
+        </div>
+      </div>`).join("");
+
+    // ameaças — cada uma desce para a camada correspondente
+    $("sum-threats").innerHTML = `
+      <div class="threat" data-layer="exp" role="button" tabindex="0"><i class="sev-dot alarm" style="background:var(--sev-p1)"></i>
+        <div><b>Cadeia de compra do e-commerce <span style="color:var(--ink-3)">›</span></b>
+          <span class="dim">cart-service (12,4% err) sobre Redis saturado · p50 do carrinho 1,1min (medido) · R$ 184k/2h em risco</span></div></div>
+      <div class="threat" data-layer="third" role="button" tabindex="0"><i class="sev-dot" style="background:var(--sev-p2)"></i>
+        <div><b>Terceiros no caminho crítico de renderização <span style="color:var(--ink-3)">›</span></b>
+          <span class="dim">fonts.gstatic a 1,9s adiciona +0,8s ao FCP das homes</span></div></div>
+      <div class="threat" data-layer="cov" role="button" tabindex="0"><i class="sev-dot" style="background:var(--sev-p2)"></i>
+        <div><b>Cobertura & governança de observabilidade <span style="color:var(--ink-3)">›</span></b>
+          <span class="dim">1 aplicação sem dono e sem OneAgent · 172 sessões sem atribuição · mobile RUM fora do Grail</span></div></div>
+      <div class="threat" data-layer="park" role="button" tabindex="0"><i class="sev-dot" style="background:var(--sev-p3)"></i>
+        <div><b>Explorar o parque completo <span style="color:var(--ink-3)">›</span></b>
+          <span class="dim">${total} aplicações · busca, filtros P1–P4 e agrupamento por unidade</span></div></div>`;
+  }
+
+  /* ═══════════ nível 2 — camada da arquitetura ═══════════ */
+  const LAYER_TITLES = {
+    exp: ["Experiência do usuário", "jornada agregada do ambiente e aplicações mais degradadas"],
+    svc: ["Serviços & APIs", "serviços chamados pelas aplicações do ambiente"],
+    data: ["Dados & cache", "bancos, caches e filas no caminho das jornadas"],
+    third: ["Terceiros", "provedores externos no caminho crítico"],
+    cov: ["Cobertura & governança", "lacunas de instrumentação do ambiente"],
+    park: ["Parque de aplicações", "todas as aplicações monitoradas"],
+  };
+  const DATA_ROWS = [
+    ["Redis (cache carrinho)", "bad", "2,1s", "saturado · hit 31%"],
+    ["PostgreSQL", "good", "9ms", "42/100 conexões"],
+    ["Redis (contexto do chat)", "good", "4ms", "ok"],
+    ["Filas de pedido", "good", "18ms", "sem backlog"],
+  ];
+  function layerBody(id) {
+    const table = (rows, c3, c4) => `<table class="exams" style="width:100%">
+      <thead><tr><th>Componente</th><th>Latência</th><th>${c3}</th><th>${c4}</th></tr></thead>
+      <tbody>${rows.map(([n, t, lat, extra]) => `<tr>
+        <td class="mono"><i class="sig" style="background:${TCOLOR[t]};display:inline-block;margin-right:8px"></i>${n}</td>
+        <td class="num">${lat}</td>
+        <td class="num" style="color:${t === "good" ? "var(--ink-3)" : TCOLOR[t]}">${extra}</td>
+        <td class="dim">${t === "bad" ? "crítico" : t === "warn" ? "atenção" : "saudável"}</td>
+      </tr>`).join("")}</tbody></table>`;
+
+    if (id === "exp") {
+      const envSteps = [
+        { name: "Sessões ativas", n: 2352, note: "todas as aplicações" },
+        { name: "Entraram (home)", n: 1880, note: "4 apps com view inicial" },
+        { name: "Navegaram produto", n: 1804, drop: { pct: 4, why: "navegação normal", bad: false } },
+        { name: "Chegaram ao carrinho", n: 1064, drop: { pct: 41, why: "só 2 das 4 aplicações têm carrinho instrumentado", bad: false } },
+        { name: "Concluíram pedido", n: 72, drop: { pct: 93, why: "apenas 1 aplicação instrumenta o checkout — lacuna de cobertura, não abandono", bad: true } },
+      ];
+      const first = envSteps[0].n;
+      const funnel = `<div class="funnel funnel--sm">` + envSteps.map((s) => {
+        const pct = Math.round((s.n / first) * 100);
+        const col = pct >= 70 ? "var(--trace-good)" : pct >= 30 ? "var(--trace-warn)" : "var(--trace-bad)";
+        const drop = s.drop ? `<div class="fdrop ${s.drop.bad ? "fdrop--bad" : "fdrop--ok"}">▼ −${s.drop.pct}%
+            <span class="fdrop__why">· ${s.drop.why}</span></div>` : "";
+        return `${drop}<div class="fstep">
+          <span class="fstep__name">${s.name}</span>
+          <div class="fstep__track"><div class="fstep__fill" style="width:${pct}%;background:${col}">${fmtN(s.n)}${s.note ? " · " + s.note : ""}</div></div>
+          <span class="fstep__pct">${pct}%</span></div>`;
+      }).join("") + `</div>`;
+      return `
+        <div class="panel">
+          <div class="panel__hd"><span class="lbl">Jornada agregada — todas as aplicações somadas</span><span class="hint">sessões medidas · 2h</span></div>
+          <div class="sum-block">${funnel}
+            <p class="dim" style="font:400 10.5px var(--sans);margin:8px 0 0">A queda final expõe <b style="color:var(--ink-2)">cobertura de instrumentação</b>, não comportamento do usuário.</p></div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel__hd"><span class="lbl">Aplicações mais degradadas</span><span class="hint">nível 3 · clique para abrir a aplicação</span></div>
+          <div id="beds"></div>
+        </div>`;
+    }
+    if (id === "svc") {
+      return `<div class="panel"><div class="panel__hd"><span class="lbl">Serviços do ambiente</span><span class="hint">amostra ilustrativa</span></div>
+        <div style="padding:4px 16px 14px">${table(SERVICES.map(([n, t, lat, err]) => [n, t, lat, err]), "Erros", "Status")}</div></div>`;
+    }
+    if (id === "data") {
+      return `<div class="panel"><div class="panel__hd"><span class="lbl">Dados & cache</span><span class="hint">amostra ilustrativa</span></div>
+        <div style="padding:4px 16px 14px">${table(DATA_ROWS, "Observação", "Status")}</div></div>`;
+    }
+    if (id === "third") {
+      return `<div class="panel"><div class="panel__hd"><span class="lbl">Terceiros conectados</span><span class="hint">amostra ilustrativa</span></div>
+        <div style="padding:4px 16px 14px">${table(THIRD.map(([n, t, lat]) => [n, t, lat, t === "warn" ? "FCP +0,8s" : "—"]), "Impacto", "Status")}</div></div>`;
+    }
+    if (id === "cov") {
+      return `<div class="panel"><div class="panel__hd"><span class="lbl">Lacunas de cobertura</span><span class="hint">achados das consultas ao tenant</span></div>
+        <div class="sum-block">
+          <div class="threat"><i class="sev-dot" style="background:var(--sev-p1)"></i><div><b>Aplicação d60bc238 sem nome/dono</b>
+            <span class="dim">72 sessões e 72 pedidos reais · backend sem OneAgent — visibilidade só de frontend</span></div></div>
+          <div class="threat"><i class="sev-dot" style="background:var(--sev-p2)"></i><div><b>172 sessões sem atribuição de aplicação</b>
+            <span class="dim">application.id vazio — higiene de instrumentação do agente RUM</span></div></div>
+          <div class="threat"><i class="sev-dot" style="background:var(--sev-p2)"></i><div><b>Checkout não instrumentado na Astroshop-Snow</b>
+            <span class="dim">nenhuma sequência descoberta chega ao carrinho — funil trunca na página de produto</span></div></div>
+          <div class="threat"><i class="sev-dot" style="background:var(--sev-p3)"></i><div><b>Mobile RUM fora do Grail</b>
+            <span class="dim">Astroshop Android (497 usuários, 21 crashes) só na visão clássica</span></div></div>
+        </div></div>`;
+    }
+    // park
+    return `<div class="panel">
+      <div class="panel__hd"><span class="lbl">Parque — <span id="fl-total">${FLEET.length}</span> aplicações</span>
+        <span class="hint">cor = XScore · borda = prioridade · clique numa real para abrir</span></div>
+      <div class="fleet-controls">
+        <input class="fleet-search" id="fl-q" type="search" placeholder="buscar aplicação…" aria-label="Buscar aplicação">
+        <div class="seg" id="fl-sev" role="group" aria-label="Filtrar por prioridade">
+          <button class="on" data-fs="all">Todas</button><button data-fs="p1">P1</button>
+          <button data-fs="p2">P2</button><button data-fs="p3">P3</button><button data-fs="p4">P4</button>
+        </div>
+        <span class="jn-select-box"><select id="fl-sort" aria-label="Ordenar">
+          <option value="x">pior XScore primeiro</option><option value="s">mais sessões</option>
+          <option value="r">maior receita em risco</option></select><span class="jn-select-caret">▾</span></span>
+        <span class="jn-select-box"><select id="fl-group" aria-label="Agrupar">
+          <option value="none">sem agrupamento</option><option value="bu">agrupar por unidade</option>
+          </select><span class="jn-select-caret">▾</span></span>
+        <span class="hint" id="fl-count"></span>
+      </div>
+      <div class="fleet" id="fleet"></div>
+      <div class="fleet-note">4 aplicações são reais (badge <b style="color:var(--accent)">REAL</b>); as demais simulam a escala.</div>
+    </div>`;
+  }
+  let currentLayer = null;
+  function openLayer(id) {
+    const [t, sub] = LAYER_TITLES[id] || LAYER_TITLES.park;
+    currentLayer = id;
+    $("ops-layer").innerHTML = `
+      <div class="chart-hd">
+        <button class="back" data-back>‹ Saúde geral</button>
+        <h2>${t}</h2>
+        <span class="chart-meta">nível 2 de 4 · ${sub}</span>
+      </div>${layerBody(id)}`;
+    if (id === "exp") renderApps();
+    if (id === "park") { flState.q = ""; flState.sev = "all"; renderFleet(); }
+    $("ops-home").hidden = true;
+    $("ops-layer").hidden = false;
+    window.scrollTo({ top: 0 });
+  }
+  function backToOverview() {
+    releaseCharts($("ops-layer"));
+    $("ops-layer").hidden = true;
+    $("ops-layer").innerHTML = "";
+    $("ops-home").hidden = false;
+    currentLayer = null;
+  }
+  $("ops-home").addEventListener("click", (e) => {
+    const l = e.target.closest("[data-layer]"); if (l) openLayer(l.dataset.layer);
+  });
+  $("ops-home").addEventListener("keydown", (e) => {
+    const l = e.target.closest("[data-layer]");
+    if (l && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openLayer(l.dataset.layer); }
+  });
+
+  /* ═══════════ nível 2 — aplicação e seus fluxos ═══════════ */
+  let currentApp = null;
+  function releaseCharts(container) {
+    container.querySelectorAll("canvas").forEach((c) => {
+      const i = charts.findIndex((s) => s.canvas === c);
+      if (i >= 0) charts.splice(i, 1);
+    });
+  }
+  function renderAppScreen(a) {
+    const flowRows = [...a.flows].sort((x, y) => (x.x ?? 50) - (y.x ?? 50)).map((f) => `
+      <div class="bed" data-flow="${f.id}" role="button" tabindex="0" aria-label="Abrir análise do fluxo ${f.name}">
+        <div class="bed__sev" style="background:${SEV[f.sev].color}"></div>
+        <div class="bed__id">
+          <div class="bed__name">${f.name}</div>
+          <div class="bed__desc">${f.desc}</div>
+          ${bedTag(f.sev, f.since)}
+        </div>
+        <div class="bed__scope graph"><canvas data-series="${f.series}" data-color="${f.trace}" data-thresholds="75"></canvas></div>
+        <div class="bed__stat"><span class="lbl">XScore</span><span class="num" style="color:${xColor(f.x)}">${xText(f.x)}</span></div>
+        <div class="bed__stat"><span class="lbl">Sessões</span><span class="num">${fmtN(f.sessions)}</span></div>
+        <div class="bed__stat"><span class="lbl">Conversão</span><span class="num">${f.conv == null ? "—" : f.conv + "%"}</span></div>
+        <div class="bed__chev">›</div>
+      </div>`).join("");
+
+    $("ops-app").innerHTML = `
+      <div class="chart-hd">
+        <button class="back" data-back>‹ ${currentLayer ? (LAYER_TITLES[currentLayer] || [])[0] || "Saúde geral" : "Saúde geral"}</button>
+        <h2>${a.name}</h2>
+        <span class="bed__tag" style="color:${SEV[a.sev].color}"><i class="sev-dot" style="background:${SEV[a.sev].color}"></i>${SEV[a.sev].name}</span>
+        <span class="chart-meta">nível 3 de 4 · ${a.entity}</span>
+      </div>
+      <div class="panel chart-vitals">
+        <div class="vital"><div class="lbl">XScore da aplicação</div>
+          <div class="vital__v num" style="color:${xColor(a.x)}">${xText(a.x)}</div><div class="vital__u">meta ≥ 75</div></div>
+        <div class="vital"><div class="lbl">Sessões</div>
+          <div class="vital__v num">${fmtN(a.sessions)}</div><div class="vital__u">últimas 2h · medido</div></div>
+        <div class="vital"><div class="lbl">Views</div>
+          <div class="vital__v num">${fmtN(a.views)}</div><div class="vital__u">user.events · medido</div></div>
+        <div class="vital"><div class="lbl">Erros</div>
+          <div class="vital__v num" style="color:${a.errors > 1000 ? "var(--trace-bad)" : "var(--ink)"}">${fmtN(a.errors)}</div>
+          <div class="vital__u">${(a.errors / Math.max(1, a.views)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} por view</div></div>
+      </div>
+      <div class="panel chart-scope graph">
+        <canvas data-series="${a.series}" data-color="${a.trace}" data-thresholds="75,50"></canvas>
+      </div>
+      <div class="panel">
+        <div class="panel__hd">
+          <span class="lbl">Fluxos de negócio de ${a.name}</span>
+          <span class="hint">clique para abrir a análise</span>
+        </div>
+        ${flowRows}
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <div class="panel__hd">
+          <span class="lbl">Sequências de jornada descobertas — top ${a.sequences.length}</span>
+          <span class="hint">mineradas por sessão · ordem real de navegação · URLs normalizadas</span>
+        </div>
+        ${a.sequences.map((q, qi) => `
+          <div class="seq__row" data-seq="${qi}" role="button" tabindex="0"
+               aria-expanded="${qi === 0}" aria-label="Alternar funil da jornada ${qi + 1}">
+            <div class="seq__path"><span class="seq__caret">${qi === 0 ? "▾" : "▸"}</span>${q.path.map((p, i) =>
+              `${i ? '<span class="seq__arrow">→</span>' : ""}<span class="seq__step">${p}</span>`).join("")}</div>
+            <div class="seq__n">${fmtN(q.sessions)}<span class="lbl">sessões</span></div>
+            <div class="seq__share"><b>${q.share.toLocaleString("pt-BR")}%</b>
+              <div class="seq__bar"><div class="seq__fill" style="width:${q.share}%"></div></div></div>
+          </div>
+          <div class="seqfun" data-seqfun="${qi}" ${qi === 0 ? "" : "hidden"}>${seqFunnel(a, q)}</div>`).join("")}
+        <p class="dim" style="font:400 11.5px var(--sans);margin:0;padding:10px 16px 14px;line-height:1.5;border-top:1px solid var(--border)">${a.seqNote}</p>
+      </div>
+
+      <div class="chart-grid" style="margin-top:16px">
+        <div class="panel">
+          <div class="panel__hd">
+            <span class="lbl">Funil geral da aplicação — sessões por etapa</span>
+            <span class="hint">sequência dominante · com p50 medido</span>
+          </div>
+          <div class="funnel">${(() => {
+            const first = a.journeyFunnel[0].n;
+            return a.journeyFunnel.map((s) => {
+              const pct = Math.round((s.n / first) * 100);
+              const sc = s.na ? null : perfScore(s.p50);
+              const drop = s.drop ? `<div class="fdrop ${s.drop.bad ? "fdrop--bad" : "fdrop--ok"}">▼ −${s.drop.pct}%
+                  <span class="fdrop__why">· ${s.drop.why}</span></div>` : "";
+              return `${drop}<div class="fstep">
+                <span class="fstep__name">${s.name}</span>
+                <div class="fstep__track"><div class="fstep__fill" style="width:${pct}%;background:${xColor(sc)}">${fmtN(s.n)} · ${fmtMs(s.p50)}</div></div>
+                <span class="fstep__pct">${pct}%</span>
+              </div>`;
+            }).join("");
+          })()}</div>
+          <p class="dim" style="font:400 11.5px var(--sans);margin:0;padding:0 16px 14px;line-height:1.5">${a.funnelNote}</p>
+        </div>
+        <div class="panel">
+          <div class="panel__hd">
+            <span class="lbl">Jornadas detectadas — ${a.detected.length} view(s) medidas</span>
+            <span class="hint">view.detected_name · user.events · 2h</span>
+          </div>
+          <div style="overflow-x:auto"><table class="exams">
+            <thead><tr><th>View</th><th>Sessões</th><th>Views</th><th>Carga p50</th><th>Performance</th></tr></thead>
+            <tbody>${[...a.detected].sort((v1, v2) => v2.sessions - v1.sessions).map((v) => {
+              const sc = v.na ? null : perfScore(v.p50);
+              return `<tr>
+                <td class="mono">${v.name}${v.note ? `<br><span class="dim" style="font:400 10.5px var(--sans)">${v.note}</span>` : ""}</td>
+                <td class="num">${fmtN(v.sessions)}</td>
+                <td class="num">${fmtN(v.views)}</td>
+                <td class="num">${fmtMs(v.p50)}</td>
+                <td><div class="xbar"><b style="color:${xColor(sc)}">${xText(sc)}</b>
+                  <div class="xbar__t"><div class="xbar__f" style="width:${sc ?? 0}%;background:${xColor(sc)}"></div></div>
+                </div></td></tr>`;
+            }).join("")}</tbody>
+          </table></div>
+        </div>
+      </div>`;
+    $("ops-app").querySelectorAll("canvas").forEach(makeChart);
+  }
+  function openApp(id) {
+    const a = APPS.find((x) => x.id === id); if (!a) return;
+    currentApp = a;
+    renderAppScreen(a);
+    $("ops-home").hidden = true;
+    $("ops-layer").hidden = true;
+    $("ops-chart").hidden = true;
+    $("ops-app").hidden = false;
+    window.scrollTo({ top: 0 });
+  }
+  /* volta da aplicação → camada de onde veio (ou saúde geral) */
+  function backToPortfolio() {
+    releaseCharts($("ops-app")); releaseCharts($("ops-chart"));
+    $("ops-app").hidden = true; $("ops-chart").hidden = true;
+    currentApp = null;
+    if (currentLayer) { openLayer(currentLayer); return; }
+    $("ops-home").hidden = false;
+  }
+
+  /* ═══════════ nível 3 — análise do fluxo ═══════════ */
+  function renderChart(f) {
+    const t = SEV[f.sev];
+    const first = f.funnel[0].n;
+    const funnelHtml = f.funnel.map((s) => {
+      const pct = Math.round((s.n / first) * 100);
+      const drop = s.drop ? `<div class="fdrop ${s.drop.bad ? "fdrop--bad" : "fdrop--ok"}">▼ −${s.drop.pct}%
+          <span class="fdrop__why">· ${s.drop.why}</span></div>` : "";
+      return `${drop}<div class="fstep">
+        <span class="fstep__name">${s.name}</span>
+        <div class="fstep__track"><div class="fstep__fill" style="width:${pct}%;background:${xColor(s.x)}">${fmtN(s.n)}</div></div>
+        <span class="fstep__pct">${pct}%</span>
+      </div>`;
+    }).join("");
+
+    const examRows = f.funnel.map((s) => `<tr>
+        <td class="mono">${s.name}</td>
+        <td class="num">${fmtN(s.n)}</td>
+        <td class="num">${s.load}</td>
+        <td class="num dim">${s.err == null ? "—" : fmtN(s.err)}</td>
+        <td class="dim">${s.fric}</td>
+        <td><div class="xbar"><b style="color:${xColor(s.x)}">${xText(s.x)}</b>
+          <div class="xbar__t"><div class="xbar__f" style="width:${s.x ?? 0}%;background:${xColor(s.x)}"></div></div>
+        </div></td></tr>`).join("");
+
+    const chainHtml = f.chain.map(([name, tt], i) =>
+      `${i ? '<span class="chain__arrow">→</span>' : ""}<span class="chain__node">
+        <i class="sig" style="background:${TCOLOR[tt === "warn" ? "warn" : tt === "bad" ? "bad" : "good"]}"></i>${name}</span>`).join("");
+
+    $("ops-chart").innerHTML = `
+      <div class="chart-hd">
+        <button class="back" data-back>‹ ${currentApp.name}</button>
+        <h2>${f.name}</h2>
+        <span class="bed__tag" style="color:${t.color}"><i class="sev-dot" style="background:${t.color}"></i>${t.name}</span>
+        <span class="chart-meta">nível 4 de 4 · análise do fluxo · ${f.since}</span>
+      </div>
+
+      <div class="panel chart-vitals">
+        <div class="vital"><div class="lbl">XScore do fluxo</div>
+          <div class="vital__v num" style="color:${xColor(f.x)}">${xText(f.x)}</div><div class="vital__u">meta ≥ 75</div></div>
+        <div class="vital"><div class="lbl">Sessões</div>
+          <div class="vital__v num">${fmtN(f.sessions)}</div><div class="vital__u">últimas 2h · medido</div></div>
+        <div class="vital"><div class="lbl">Conversão fim-a-fim</div>
+          <div class="vital__v num" style="color:${f.conv != null && f.conv < 60 ? "var(--trace-bad)" : "var(--ink)"}">${f.conv == null ? "—" : f.conv + "%"}</div>
+          <div class="vital__u">${f.funnel.length} etapa(s) · medido</div></div>
+        <div class="vital"><div class="lbl">Receita em risco</div>
+          <div class="vital__v num" style="color:${f.risk > 50000 ? "var(--trace-bad)" : "var(--ink)"}">${f.risk ? fmtR$(f.risk) : "—"}</div>
+          <div class="vital__u">${f.riskEst ? "estimativa ilustrativa" : "—"}</div></div>
+      </div>
+
+      <div class="panel chart-scope graph">
+        <canvas data-series="${f.series}" data-color="${f.trace}" data-thresholds="75,50"></canvas>
+      </div>
+
+      <div class="chart-grid">
+        <div class="panel">
+          <div class="panel__hd"><span class="lbl">Funil de conversão — sessões medidas por etapa</span></div>
+          <div class="funnel">${funnelHtml}</div>
+        </div>
+        <div class="stack">
+          <div class="panel">
+            <div class="panel__hd"><span class="lbl">Qualidade por etapa</span></div>
+            <div style="overflow-x:auto"><table class="exams">
+              <thead><tr><th>Etapa</th><th>Sessões</th><th>Carga p50</th><th>Erros</th><th>Fricção</th><th>XScore</th></tr></thead>
+              <tbody>${examRows}</tbody>
+            </table></div>
+          </div>
+          <div class="panel">
+            <div class="panel__hd"><span class="lbl">Diagnóstico — cadeia do backend${f.chainEst ? " · ilustrativo" : ""}</span></div>
+            <div class="diag">
+              <div class="chain">${chainHtml}</div>
+              <p>${f.insight}</p>
+              <button class="rx-btn" data-rx="${f.id}">⌖&nbsp; Plano de ação com Dynatrace Assist</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    $("ops-chart").querySelectorAll("canvas").forEach(makeChart);
+  }
+
+  function openFlow(id) {
+    if (!currentApp) return;
+    const f = currentApp.flows.find((x) => x.id === id); if (!f) return;
+    renderChart(f);
+    $("ops-app").hidden = true;
+    $("ops-chart").hidden = false;
+    window.scrollTo({ top: 0 });
+  }
+  function closeFlow() {
+    releaseCharts($("ops-chart"));
+    $("ops-chart").hidden = true;
+    $("ops-app").hidden = false;
+  }
+  $("ops-app").addEventListener("click", (e) => {
+    if (e.target.closest("[data-back]")) return backToPortfolio();
+    const sq = e.target.closest("[data-seq]");
+    if (sq) {
+      const fun = $("ops-app").querySelector(`[data-seqfun="${sq.dataset.seq}"]`);
+      fun.hidden = !fun.hidden;
+      sq.setAttribute("aria-expanded", String(!fun.hidden));
+      sq.querySelector(".seq__caret").textContent = fun.hidden ? "▸" : "▾";
+      return;
+    }
+    const b = e.target.closest("[data-flow]"); if (b) openFlow(b.dataset.flow);
+  });
+  $("ops-app").addEventListener("keydown", (e) => {
+    const b = e.target.closest("[data-flow]");
+    if (b && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openFlow(b.dataset.flow); }
+  });
+  $("ops-chart").addEventListener("click", (e) => {
+    if (e.target.closest("[data-back]")) return closeFlow();
+    const r = e.target.closest("[data-rx]");
+    if (r) {
+      const f = currentApp && currentApp.flows.find((x) => x.id === r.dataset.rx);
+      if (f) openRx(`Monte um plano de ação para o fluxo "${f.name}" de ${currentApp.name}.`, () => rxAnswer(f));
+    }
+  });
+
+  /* ═══════════ plano de ação (modal) ═══════════ */
+  const veil = $("veil");
+  function openRx(prompt, buildHtml) {
+    $("rx-prompt").textContent = prompt;
+    $("rx-body").innerHTML = `<p class="typing">Dynatrace Assist analisando o contexto do fluxo…</p>`;
+    veil.classList.add("open");
+    setTimeout(() => { $("rx-body").innerHTML = buildHtml(); }, 1400);
+  }
+  function rxAnswer(f) {
+    const worstStep = [...f.funnel].sort((a, b) => (a.x ?? 50) - (b.x ?? 50))[0];
+    const worstDrop = [...f.funnel].filter((s) => s.drop?.bad).sort((a, b) => b.drop.pct - a.drop.pct)[0];
+    const badSvc = f.chain.find(([, t]) => t === "bad");
+    return `
+      <h4>Diagnóstico (negócio)</h4>
+      <ul>
+        <li>O fluxo <b>${f.name}</b> converte <b>${f.conv == null ? "—" : f.conv + "%"}</b> das ${fmtN(f.sessions)} sessões — <b>${f.risk ? fmtR$(f.risk) + (f.riskEst ? " (estimado)" : "") : "R$ 0"}</b> em risco no período.</li>
+        <li>Pior etapa: <span class="hl">${worstStep.name}</span> (XScore ${xText(worstStep.x)}, carga ${worstStep.load}).</li>
+      </ul>
+      <h4>Causa técnica provável</h4>
+      <ul>
+        ${worstDrop ? `<li>Maior degrau do funil: <b>−${worstDrop.drop.pct}%</b> em "${worstDrop.name}" — ${worstDrop.drop.why}.</li>` : ""}
+        ${badSvc ? `<li>Backend ofensor: <span class="hl">${badSvc[0]}</span> — correlacionar com problemas Davis ativos e abrir o trace.</li>` : "<li>Sem ofensor de backend — as perdas são de UX/produto.</li>"}
+      </ul>
+      <h4>Plano de ação priorizado</h4>
+      <ul>
+        ${badSvc ? `<li>1. Resolver a causa raiz em <span class="hl">${badSvc[0]}</span> (maior retorno por sessão recuperada).</li>` : ""}
+        <li>${badSvc ? "2" : "1"}. Assistir Session Replays das sessões que abandonaram em "${worstDrop ? worstDrop.name : worstStep.name}".</li>
+        <li>${badSvc ? "3" : "2"}. Criar SLO de experiência para a etapa crítica e alertar via workflow quando o XScore cruzar 50.</li>
+        <li>${badSvc ? "4" : "3"}. ${f.insight}</li>
+      </ul>`;
+  }
+  $("rx-close").addEventListener("click", () => veil.classList.remove("open"));
+  veil.addEventListener("click", (e) => { if (e.target === veil) veil.classList.remove("open"); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") veil.classList.remove("open"); });
+
+  /* ═══════════ abas ═══════════ */
+  $("nav-tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-v]"); if (!b) return;
+    document.querySelectorAll("#nav-tabs .tab").forEach((t) => t.classList.toggle("tab--on", t === b));
+    document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.id === "view-" + b.dataset.v));
+    if (b.dataset.v === "journey") { drawEdges(); setTimeout(drawEdges, 60); }
+    if (b.dataset.v === "arch") setTimeout(buildFlow, 30);
+    if (b.dataset.v === "chain") setTimeout(buildChain, 30);
+  });
+
+  /* ═══════════ arquitetura — mapa macro com fluxo de partículas ═══════════ */
+  const ARCH_HEALTH = { good: "--trace-good", warn: "--trace-warn", bad: "--trace-bad", info: "--trace-info" };
+  /* ── Nós e relações REAIS do Smartscape (tenant bwm98081, consultados via MCP)
+        smartscapeNodes "FRONTEND" / "SERVICE"  +  smartscapeEdges "calls"
+        namespace astroshop · cluster aeric-walls-aks ── */
+  const ARCH_NODES = [
+    // usuários
+    { id: "u-syn", col: "arch-users", size: "md", health: "good", v: "59%", nm: "Sintéticos", sb: "monitores browser",
+      det: [["Participação nos eventos", "59% · medido"], ["Origem", "synthetic_engine"], ["Fonte", "user.events"]] },
+    { id: "u-rob", col: "arch-users", size: "sm", health: "info", v: "41%", nm: "Robôs", sb: "headless chrome",
+      det: [["Participação nos eventos", "41% · medido"], ["Navegador", "Headless Chrome"]] },
+    { id: "u-mob", col: "arch-users", size: "sm", health: "warn", v: "497", nm: "Usuários mobile", sb: "21 crashes",
+      det: [["Usuários", "497"], ["Crash-free", "95,8%"], ["Fonte", "visão clássica"]] },
+    // aplicações (FRONTEND no Smartscape)
+    { id: "a-mwa", col: "arch-apps", size: "lg", health: "bad", v: "32", nm: "My Web Application", sb: "1.036 sessões · P1", app: "mwa",
+      det: [["Smartscape", "FRONTEND-EA7C4B59F27D43EB"], ["XScore", "32 · P1"], ["Sessões 2h", "1.036 · medido"], ["Erros 2h", "10.635 · medido"]] },
+    { id: "a-snow", col: "arch-apps", size: "lg", health: "good", v: "79", nm: "Astroshop-Snow", sb: "1.019 sessões · P4", app: "snow",
+      det: [["Smartscape", "FRONTEND-6515F98141BAFD47"], ["XScore", "79 · P4"], ["Sessões 2h", "1.019 · medido"]] },
+    { id: "a-legacy", col: "arch-apps", size: "sm", health: "bad", v: "15", nm: "d60bc238", sb: "sem dono", app: "legacy",
+      det: [["Smartscape", "sem nó nomeado"], ["Sessões 2h", "72 · medido"], ["Governança", "definir nome e dono"]] },
+    { id: "a-chat", col: "arch-apps", size: "sm", health: "info", v: "45", nm: "AI Chatbot", sb: "53 sessões", app: "chat",
+      det: [["Smartscape", "FRONTEND-59A6A308BE881B79"], ["Sessões 2h", "53 · medido"]] },
+    // borda
+    { id: "s-proxy", col: "arch-edge", size: "md", health: "good", v: "96ms", nm: "frontend-proxy", sb: "ingress · astroshop",
+      det: [["Smartscape", "SERVICE · frontend-proxy - astroshop - aeric-walls-aks"], ["Chama", "frontend · flagd · image-provider"], ["p50", "96ms"]] },
+    { id: "s-img", col: "arch-edge", size: "sm", health: "good", v: "42ms", nm: "image-provider", sb: "assets",
+      det: [["Smartscape", "SERVICE · image-provider"], ["Chamado por", "frontend-proxy"]] },
+    { id: "s-flagd", col: "arch-edge", size: "sm", health: "good", v: "6ms", nm: "flagd", sb: "feature flags",
+      det: [["Smartscape", "SERVICE · flagd - astroshop"], ["Chamado por", "7 serviços (relação calls)"]] },
+    // serviços (SERVICE · relação calls do Smartscape)
+    { id: "s-frontend", col: "arch-svcs", size: "md", health: "warn", v: "hub", nm: "frontend", sb: "chama 7 serviços",
+      det: [["Smartscape", "SERVICE · frontend - astroshop - aeric-walls-aks"], ["Chama (calls)", "cart · checkout · product-catalog · recommendation · ad · currency · shipping"], ["Papel", "orquestrador da jornada"]] },
+    { id: "s-cart", col: "arch-svcs", size: "md", health: "bad", v: "2,4s", nm: "cart", sb: "12,4% err",
+      det: [["Smartscape", "SERVICE · cart - astroshop - aeric-walls-aks"], ["Chamado por", "frontend · checkout"], ["Chama", "flagd · valkey (cache)"], ["Impacto", "jornada de compra"]] },
+    { id: "s-checkout", col: "arch-svcs", size: "md", health: "warn", v: "890ms", nm: "checkout", sb: "6 dependências",
+      det: [["Smartscape", "SERVICE · checkout - astroshop"], ["Chama (calls)", "cart · payment · shipping · email · currency · product-catalog"], ["Nota", "maior fan-out do domínio"]] },
+    { id: "s-catalog", col: "arch-svcs", size: "sm", health: "good", v: "145ms", nm: "product-catalog", sb: "0,2% err",
+      det: [["Smartscape", "SERVICE · product-catalog - astroshop"], ["Chamado por", "frontend · checkout · recommendation"]] },
+    { id: "s-reco", col: "arch-svcs", size: "sm", health: "good", v: "480ms", nm: "recommendation", sb: "chama catalog",
+      det: [["Smartscape", "SERVICE · recommendation - astroshop"], ["Chama", "product-catalog · flagd"]] },
+    { id: "s-payment", col: "arch-svcs", size: "sm", health: "good", v: "310ms", nm: "payment", sb: "pagamento",
+      det: [["Smartscape", "SERVICE · payment - astroshop"], ["Chamado por", "checkout"]] },
+    { id: "s-shipping", col: "arch-svcs", size: "sm", health: "good", v: "220ms", nm: "shipping", sb: "chama quote",
+      det: [["Smartscape", "SERVICE · shipping - astroshop"], ["Chama", "quote"]] },
+    { id: "s-ad", col: "arch-svcs", size: "sm", health: "good", v: "90ms", nm: "ad", sb: "anúncios",
+      det: [["Smartscape", "SERVICE · ad - astroshop"], ["Chamado por", "frontend"]] },
+    { id: "s-currency", col: "arch-svcs", size: "sm", health: "good", v: "12ms", nm: "currency", sb: "câmbio",
+      det: [["Smartscape", "SERVICE · currency - astroshop"], ["Chamado por", "frontend · checkout"]] },
+    { id: "s-email", col: "arch-svcs", size: "sm", health: "good", v: "180ms", nm: "email", sb: "confirmação",
+      det: [["Smartscape", "SERVICE · email - astroshop"], ["Chamado por", "checkout"]] },
+    { id: "s-fraud", col: "arch-svcs", size: "sm", health: "good", v: "70ms", nm: "fraud-detection", sb: "consumidor",
+      det: [["Smartscape", "SERVICE · fraud-detection - astroshop"], ["Chama", "flagd"]] },
+    // dados & plataforma
+    { id: "d-valkey", col: "arch-data", size: "md", health: "bad", v: "2,1s", nm: "valkey (cache carrinho)", sb: "saturado",
+      det: [["Origem", "dependência do serviço cart"], ["Latência", "2,1s · hit 31%"], ["Ação", "escalar/failover"]] },
+    { id: "d-pg", col: "arch-data", size: "sm", health: "good", v: "9ms", nm: "PostgreSQL", sb: "catálogo",
+      det: [["p50", "9ms"], ["Conexões", "42/100"]] },
+    { id: "d-kafka", col: "arch-data", size: "sm", health: "good", v: "18ms", nm: "Kafka", sb: "pedidos",
+      det: [["Consumidores", "accounting · fraud-detection"], ["Backlog", "sem atraso"]] },
+    { id: "d-quote", col: "arch-data", size: "sm", health: "good", v: "60ms", nm: "quote", sb: "frete externo",
+      det: [["Smartscape", "SERVICE · quote - astroshop"], ["Chamado por", "shipping"]] },
+    { id: "d-k8s", col: "arch-data", size: "md", health: "good", v: "astroshop", nm: "K8s namespace", sb: "cluster aeric-walls-aks",
+      det: [["Smartscape", "K8S_NAMESPACE · astroshop"], ["Relação", "SERVICE belongs_to NAMESPACE"], ["Serviços", "68 mapeados no cluster"], ["Pods", "SERVICE runs_on K8S_POD"]] },
+    { id: "d-cdn", col: "arch-data", size: "sm", health: "warn", v: "1,9s", nm: "CDN & fontes", sb: "fonts degradado",
+      det: [["CDN", "85ms"], ["fonts.gstatic", "1,9s · FCP +0,8s"]] },
+    // específicos de outras aplicações
+    { id: "s-llm", col: "arch-svcs", size: "md", health: "good", v: "240ms", nm: "llm-gateway", sb: "chat",
+      det: [["Smartscape", "GENAI_SERVICE instance_of SERVICE"], ["p50", "240ms"], ["Sinal certo", "tempo até 1ª resposta"]] },
+    { id: "d-llm", col: "arch-data", size: "sm", health: "warn", v: "~1s", nm: "Provedor LLM", sb: "por token",
+      det: [["Latência", "~900ms/token"], ["Atenção", "custo e dependência externa"]] },
+    { id: "s-unk", col: "arch-svcs", size: "md", health: "warn", v: "?", nm: "backend não instrumentado", sb: "sem OneAgent",
+      det: [["Smartscape", "nenhum nó de serviço"], ["Visibilidade", "somente frontend (RUM)"], ["Ação", "instalar OneAgent"]] },
+    { id: "d-unk", col: "arch-data", size: "sm", health: "warn", v: "?", nm: "dependências desconhecidas", sb: "sem visibilidade",
+      det: [["Ação", "instrumentar para o Smartscape mapear"]] },
+  ];
+  /* subgrafo real de cada aplicação (o que ela efetivamente toca) */
+  const ARCH_SCOPE = {
+    mwa: ["s-proxy", "s-img", "s-flagd", "s-frontend", "s-cart", "s-checkout", "s-catalog", "s-reco",
+          "s-ad", "s-currency", "s-shipping", "s-email", "s-payment", "s-fraud",
+          "d-valkey", "d-pg", "d-kafka", "d-quote", "d-k8s", "d-cdn"],
+    snow: ["s-proxy", "s-img", "s-flagd", "s-frontend", "s-catalog", "s-reco", "s-ad", "s-currency",
+           "d-pg", "d-k8s", "d-cdn"],
+    legacy: ["s-unk", "d-unk"],
+    chat: ["s-llm", "d-llm", "d-k8s"],
+  };
+  const ARCH_APP_NOTE = {
+    mwa: "Jornada de compra completa: 20 nós mapeados pelo Smartscape. O caminho crítico passa por cart → valkey.",
+    snow: "Só navegação: o Smartscape não mostra cart nem checkout — coerente com as sequências descobertas, que param na página de produto.",
+    legacy: "Sem backend instrumentado: o Smartscape não tem nós para esta aplicação. Visibilidade limitada ao RUM.",
+    chat: "Cadeia de IA: gateway próprio sobre provedor externo de LLM.",
+  };
+  /* relações "calls" reais do Smartscape (+ tráfego RUM medido) */
+  const ARCH_EDGES = [
+    ["u-syn", "a-mwa", "bad", 3], ["u-syn", "a-snow", "good", 3], ["u-syn", "a-chat", "good", 1],
+    ["u-rob", "a-mwa", "bad", 2], ["u-rob", "a-snow", "good", 2], ["u-rob", "a-legacy", "bad", 1],
+    ["u-mob", "a-mwa", "warn", 1],
+    ["a-mwa", "s-proxy", "bad", 3], ["a-snow", "s-proxy", "good", 3],
+    ["a-legacy", "s-proxy", "warn", 1], ["a-chat", "s-proxy", "good", 1],
+    ["s-proxy", "s-frontend", "warn", 3], ["s-proxy", "s-img", "good", 1], ["s-proxy", "s-flagd", "good", 1],
+    ["s-frontend", "s-cart", "bad", 3], ["s-frontend", "s-checkout", "warn", 2],
+    ["s-frontend", "s-catalog", "good", 2], ["s-frontend", "s-reco", "good", 1],
+    ["s-frontend", "s-ad", "good", 1], ["s-frontend", "s-currency", "good", 1], ["s-frontend", "s-shipping", "good", 1],
+    ["s-checkout", "s-cart", "bad", 2], ["s-checkout", "s-payment", "good", 1], ["s-checkout", "s-shipping", "good", 1],
+    ["s-checkout", "s-email", "good", 1], ["s-checkout", "s-catalog", "good", 1], ["s-checkout", "s-currency", "good", 1],
+    ["s-reco", "s-catalog", "good", 1], ["s-cart", "s-flagd", "good", 1], ["s-fraud", "s-flagd", "good", 1],
+    ["s-cart", "d-valkey", "bad", 3], ["s-catalog", "d-pg", "good", 2],
+    ["s-checkout", "d-kafka", "good", 1], ["s-fraud", "d-kafka", "good", 1],
+    ["s-shipping", "d-quote", "good", 1],
+    ["s-frontend", "d-k8s", "good", 1], ["s-cart", "d-k8s", "warn", 1], ["s-checkout", "d-k8s", "good", 1],
+    ["s-img", "d-cdn", "warn", 1],
+    ["a-chat", "s-llm", "good", 1], ["s-llm", "d-llm", "warn", 1], ["s-llm", "d-k8s", "good", 1],
+    ["a-legacy", "s-unk", "warn", 1], ["s-unk", "d-unk", "warn", 1],
+  ];
+
+  /* ═══════════ FLUXO DE SESSÕES — Sankey em canvas ═══════════
+     Toda faixa é medida: largura ∝ nº de sessões (DQL sobre user.events, 2h).
+     O fluxo conserva volume — o que entra numa coluna sai na seguinte,
+     então "onde a faixa afina" é literalmente onde o negócio perde usuários. */
+
+  const FW_COLS = ["Aplicação", "Etapa mais avançada alcançada", "Desfecho da sessão"];
+  /* nós: valor = sessões medidas · tone = leitura de negócio */
+  const FW_ENV = {
+    nodes: [
+      { id: "mwa",    c: 0, nm: "My Web Application", v: 1036, tone: "bad",  app: "mwa",    sub: "e-commerce · P1" },
+      { id: "snow",   c: 0, nm: "Astroshop-Snow",     v: 1019, tone: "good", app: "snow",   sub: "e-commerce · P4" },
+      { id: "d60",    c: 0, nm: "Aplicação d60bc238", v: 72,   tone: "bad",  app: "legacy", sub: "sem dono" },
+      { id: "chat",   c: 0, nm: "AI Chatbot",         v: 53,   tone: "info", app: "chat",   sub: "assistente" },
+      { id: "unattr", c: 0, nm: "Sem atribuição",     v: 172,  tone: "bad",  sub: "application.id vazio" },
+
+      { id: "st-none", c: 1, nm: "Sem view registrada", v: 469, tone: "bad",  sub: "sessão sem view_summary" },
+      { id: "st-home", c: 1, nm: "Só a home",           v: 13,  tone: "warn", sub: "abandono imediato" },
+      { id: "st-prod", c: 1, nm: "Página de produto",   v: 749, tone: "warn", sub: "navegou o catálogo" },
+      { id: "st-cart", c: 1, nm: "Carrinho",            v: 995, tone: "warn", sub: "chegou a montar o pedido" },
+      { id: "st-order",c: 1, nm: "Checkout concluído",  v: 72,  tone: "good", sub: "pedido confirmado" },
+      { id: "st-chat", c: 1, nm: "Conversa com IA",     v: 54,  tone: "info", sub: "jornada de etapa única" },
+
+      { id: "o-conv",  c: 2, nm: "Converteu",                    v: 72,  tone: "good", sub: "único fluxo com pedido medido" },
+      { id: "o-cart",  c: 2, nm: "Parou no carrinho",            v: 995, tone: "bad",  sub: "checkout não instrumentado" },
+      { id: "o-browse",c: 2, nm: "Navegou e saiu",               v: 762, tone: "warn", sub: "sem intenção de compra registrada" },
+      { id: "o-blind", c: 2, nm: "Invisível para o negócio",     v: 469, tone: "bad",  sub: "lacuna de instrumentação" },
+      { id: "o-chat",  c: 2, nm: "Atendida pela IA",             v: 54,  tone: "info", sub: "métrica própria necessária" },
+    ],
+    links: [
+      ["mwa", "st-cart", 995, "warn"], ["mwa", "st-home", 11, "warn"], ["mwa", "st-none", 30, "bad"],
+      ["snow", "st-prod", 749, "warn"], ["snow", "st-home", 2, "warn"], ["snow", "st-none", 268, "bad"],
+      ["d60", "st-order", 72, "good"],
+      ["chat", "st-chat", 53, "info"],
+      ["unattr", "st-none", 171, "bad"], ["unattr", "st-chat", 1, "info"],
+      ["st-none", "o-blind", 469, "bad"],
+      ["st-home", "o-browse", 13, "warn"], ["st-prod", "o-browse", 749, "warn"],
+      ["st-cart", "o-cart", 995, "bad"],
+      ["st-order", "o-conv", 72, "good"],
+      ["st-chat", "o-chat", 54, "info"],
+    ],
+  };
+  /* nível 2 — fluxo dentro de UMA aplicação (etapas reais medidas) */
+  const FW_APP = {
+    mwa: { title: "My Web Application · 1.036 sessões", cols: ["Sessões", "Etapa da jornada", "Desfecho"],
+      nodes: [
+        { id: "s", c: 0, nm: "Sessões da aplicação", v: 1036, tone: "bad", sub: "medido" },
+        { id: "h", c: 1, nm: "Home /", v: 1005, tone: "warn", sub: "p50 3,2s" },
+        { id: "p", c: 1, nm: "Produto /product/*", v: 983, tone: "bad", sub: "p50 1,1min" },
+        { id: "k", c: 1, nm: "Carrinho /cart", v: 995, tone: "bad", sub: "p50 1,1min" },
+        { id: "x", c: 1, nm: "Sem view", v: 30, tone: "bad", sub: "sessão vazia" },
+        { id: "o1", c: 2, nm: "Parou no carrinho", v: 995, tone: "bad", sub: "sem checkout instrumentado" },
+        { id: "o2", c: 2, nm: "Saiu antes do carrinho", v: 11, tone: "warn", sub: "só home" },
+        { id: "o3", c: 2, nm: "Invisível", v: 30, tone: "bad", sub: "sem view" },
+      ],
+      links: [["s", "h", 1005, "warn"], ["s", "x", 30, "bad"], ["h", "p", 983, "bad"], ["h", "o2", 11, "warn"],
+              ["p", "k", 983, "bad"], ["s", "k", 12, "warn"], ["k", "o1", 995, "bad"], ["x", "o3", 30, "bad"]],
+      chain: [["frontend-proxy", "good"], ["frontend", "warn"], ["cart", "bad"], ["valkey (cache)", "bad"]],
+      note: "A faixa mais grossa termina no carrinho: 995 sessões montam o pedido e o fluxo simplesmente acaba — não há checkout instrumentado. O gargalo técnico está em cart → valkey (p50 1,1min medido)." },
+    snow: { title: "Astroshop-Snow · 1.019 sessões", cols: ["Sessões", "Etapa da jornada", "Desfecho"],
+      nodes: [
+        { id: "s", c: 0, nm: "Sessões da aplicação", v: 1019, tone: "good", sub: "medido" },
+        { id: "h", c: 1, nm: "Home /", v: 751, tone: "good", sub: "p50 1,9s" },
+        { id: "p", c: 1, nm: "Produto /product/* (10 SKUs)", v: 750, tone: "good", sub: "p50 1,1s" },
+        { id: "x", c: 1, nm: "Sem view", v: 268, tone: "bad", sub: "sessão vazia" },
+        { id: "o1", c: 2, nm: "Navegou e saiu", v: 750, tone: "warn", sub: "sem carrinho no fluxo" },
+        { id: "o2", c: 2, nm: "Saiu na home", v: 1, tone: "warn", sub: "" },
+        { id: "o3", c: 2, nm: "Invisível", v: 268, tone: "bad", sub: "sem view" },
+      ],
+      links: [["s", "h", 751, "good"], ["s", "x", 268, "bad"], ["h", "p", 750, "good"], ["h", "o2", 1, "warn"],
+              ["p", "o1", 750, "warn"], ["x", "o3", 268, "bad"]],
+      chain: [["frontend-proxy", "good"], ["frontend", "good"], ["product-catalog", "good"], ["PostgreSQL", "good"]],
+      note: "Performance saudável (p50 até 35× menor que a MWA), mas o fluxo termina no produto: carrinho e checkout não existem na topologia desta aplicação. Oportunidade de instrumentação, não de performance." },
+    legacy: { title: "Aplicação d60bc238 · 72 sessões", cols: ["Sessões", "Etapa da jornada", "Desfecho"],
+      nodes: [
+        { id: "s", c: 0, nm: "Sessões da aplicação", v: 72, tone: "bad", sub: "medido" },
+        { id: "h", c: 1, nm: "Home /", v: 71, tone: "bad", sub: "p50 8,8s" },
+        { id: "p", c: 1, nm: "Produto", v: 71, tone: "warn", sub: "p50 5,3s" },
+        { id: "k", c: 1, nm: "Carrinho", v: 71, tone: "warn", sub: "p50 5,3s" },
+        { id: "c", c: 1, nm: "Checkout {order-id}", v: 72, tone: "good", sub: "p50 4,8s" },
+        { id: "o1", c: 2, nm: "Converteu", v: 72, tone: "good", sub: "pedido confirmado" },
+      ],
+      links: [["s", "h", 71, "bad"], ["h", "p", 71, "warn"], ["p", "k", 71, "warn"], ["k", "c", 71, "good"],
+              ["s", "c", 1, "good"], ["c", "o1", 72, "good"]],
+      chain: [["frontend não instrumentado", "warn"], ["dependências desconhecidas", "warn"]],
+      note: "Único fluxo do ambiente que fecha pedido — 100% de conversão medida. A dor não é abandono: é latência (5–9s por etapa) e 4,4 erros por view, sem OneAgent no backend para achar a causa." },
+    chat: { title: "AI Chatbot · 53 sessões", cols: ["Sessões", "Etapa da jornada", "Desfecho"],
+      nodes: [
+        { id: "s", c: 0, nm: "Sessões da aplicação", v: 53, tone: "info", sub: "medido" },
+        { id: "h", c: 1, nm: 'Conversa "/"', v: 53, tone: "info", sub: "1,3min de mediana" },
+        { id: "o1", c: 2, nm: "Atendida pela IA", v: 53, tone: "info", sub: "sem funil aplicável" },
+      ],
+      links: [["s", "h", 53, "info"], ["h", "o1", 53, "info"]],
+      chain: [["chat-frontend", "good"], ["llm-gateway", "good"], ["Provedor LLM", "warn"]],
+      note: "Jornada de etapa única: funil não se aplica. O sinal correto é tempo até a primeira resposta e taxa de fallback — não duração da view." },
+  };
+  const FW_CHAIN_ENV = {
+    "st-cart": { chain: [["frontend-proxy", "good"], ["frontend", "warn"], ["cart", "bad"], ["valkey (cache)", "bad"]],
+      note: "995 sessões param aqui. A cadeia Smartscape mostra o gargalo: cart chamado por frontend e checkout, apoiado num cache saturado (p50 2,4s · 12,4% erro)." },
+    "st-prod": { chain: [["frontend-proxy", "good"], ["frontend", "good"], ["product-catalog", "good"], ["PostgreSQL", "good"]],
+      note: "749 sessões navegam o catálogo com saúde boa — a cadeia que atende esta etapa está integralmente verde." },
+    "st-order": { chain: [["frontend não instrumentado", "warn"], ["dependências desconhecidas", "warn"]],
+      note: "As 72 conversões vêm da aplicação sem dono. Sem OneAgent, o Smartscape não mapeia o backend que sustenta o único fluxo que fecha pedido." },
+    "st-none": { chain: [["agente RUM", "warn"]],
+      note: "469 sessões sem uma única view: instrumentação incompleta. São usuários reais invisíveis para qualquer análise de negócio." },
+    "st-chat": { chain: [["chat-frontend", "good"], ["llm-gateway", "good"], ["Provedor LLM", "warn"]],
+      note: "Cadeia de IA: o custo e a latência ficam no provedor externo de LLM." },
+    "st-home": { chain: [["frontend-proxy", "good"], ["frontend", "warn"], ["CDN & fontes", "warn"]],
+      note: "Abandono na home: fontes de terceiros a 1,9s adicionam +0,8s ao FCP." },
+  };
+
+  let fwMode = "env", fwSel = null, fwHover = null;
+  let fwNodes = [], fwLinks = [];
+  const TONE_VAR = { good: "--trace-good", warn: "--trace-warn", bad: "--trace-bad", info: "--trace-info" };
+
+  function fwModel() {
+    if (fwMode === "env") return { nodes: FW_ENV.nodes, links: FW_ENV.links, cols: FW_COLS };
+    const a = FW_APP[fwMode];
+    return { nodes: a.nodes, links: a.links, cols: a.cols };
+  }
+
+  function buildFlow() {
+    const { nodes, links, cols } = fwModel();
+    const c = $("flow");
+    const w = c.clientWidth || 900, h = c.clientHeight || 430;
+    const padT = 34, padB = 16;
+    const leftPad = 176, rightPad = 210;   // espaço para os rótulos das pontas
+    const colX = cols.map((_, i) => leftPad + (i / (cols.length - 1)) * Math.max(180, w - leftPad - rightPad));
+    const byCol = cols.map((_, i) => nodes.filter((n) => n.c === i));
+    const total = Math.max(...byCol.map((arr) => arr.reduce((a, n) => a + n.v, 0)));
+    const gap = 14;
+    fwNodes = [];
+    byCol.forEach((arr, ci) => {
+      const avail = h - padT - padB - gap * (arr.length - 1);
+      let y = padT;
+      for (const n of arr) {
+        const hh = Math.max(6, (n.v / total) * avail);
+        fwNodes.push({ ...n, x: colX[ci], y, h: hh, inY: y, outY: y });
+        y += hh + gap;
+      }
+    });
+    const idx = new Map(fwNodes.map((n) => [n.id, n]));
+    fwLinks = links.map(([s, t, v, tone]) => ({ s: idx.get(s), t: idx.get(t), v, tone })).filter((l) => l.s && l.t);
+    // empilhar os pontos de entrada/saída de cada faixa proporcionalmente
+    const scale = (v) => (v / total) * (h - padT - padB - gap * (Math.max(...byCol.map((a) => a.length)) - 1));
+    for (const n of fwNodes) { n.outY = n.y; n.inY = n.y; }
+    for (const l of fwLinks) {
+      l.w = Math.max(1.5, scale(l.v));
+      l.sy = l.s.outY + l.w / 2; l.s.outY += l.w;
+      l.ty = l.t.inY + l.w / 2; l.t.inY += l.w;
+    }
+    $("fw-scope").textContent = fwMode === "env" ? "Ambiente · 2.352 sessões" : FW_APP[fwMode].title;
+    $("fw-sub").textContent = fwMode === "env"
+      ? "largura das faixas = sessões medidas · clique numa aplicação para abrir o fluxo dela"
+      : "largura das faixas = sessões medidas nesta aplicação";
+    $("fw-up").hidden = fwMode === "env";
+    fwCols = cols; fwColX = colX;
+  }
+  let fwCols = FW_COLS, fwColX = [];
+
+  function drawFlow(t) {
+    const c = $("flow");
+    if (!c || c.offsetParent === null) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = c.clientWidth, h = c.clientHeight;
+    if (!w) return;
+    if (c.width !== w * dpr || c.height !== h * dpr) { c.width = w * dpr; c.height = h * dpr; buildFlow(); }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const col = (k) => cssVar(TONE_VAR[k] || "--trace-good");
+    const ink3 = cssVar("--ink-3"), ink = cssVar("--ink"), ink2 = cssVar("--ink-2");
+
+    // títulos das colunas
+    ctx.font = "600 9px 'JetBrains Mono', monospace";
+    ctx.fillStyle = ink3; ctx.textAlign = "left";
+    fwCols.forEach((t2, i) => {
+      ctx.textAlign = i === 0 ? "right" : i === fwCols.length - 1 ? "left" : "center";
+      ctx.fillText(t2.toUpperCase(), fwColX[i] + (i === 0 ? -12 : i === fwCols.length - 1 ? 12 : 0), 16);
+    });
+    ctx.textAlign = "left";
+
+    const focus = fwSel || fwHover;
+    const lit = new Set();
+    if (focus) {
+      lit.add(focus);
+      let changed = true;
+      while (changed) { // propaga a montante e a jusante — o caminho inteiro acende
+        changed = false;
+        for (const l of fwLinks) {
+          if (lit.has(l.s.id) && !lit.has(l.t.id)) { lit.add(l.t.id); changed = true; }
+          if (lit.has(l.t.id) && !lit.has(l.s.id)) { lit.add(l.s.id); changed = true; }
+        }
+      }
+    }
+
+    // faixas
+    for (const l of fwLinks) {
+      const x0 = l.s.x + 9, x1 = l.t.x - 9;
+      const dim = focus && !(lit.has(l.s.id) && lit.has(l.t.id));
+      const mx = (x0 + x1) / 2;
+      ctx.beginPath();
+      ctx.moveTo(x0, l.sy - l.w / 2);
+      ctx.bezierCurveTo(mx, l.sy - l.w / 2, mx, l.ty - l.w / 2, x1, l.ty - l.w / 2);
+      ctx.lineTo(x1, l.ty + l.w / 2);
+      ctx.bezierCurveTo(mx, l.ty + l.w / 2, mx, l.sy + l.w / 2, x0, l.sy + l.w / 2);
+      ctx.closePath();
+      const g = ctx.createLinearGradient(x0, 0, x1, 0);
+      g.addColorStop(0, col(l.s.tone) + (dim ? "10" : "5c"));
+      g.addColorStop(1, col(l.tone) + (dim ? "10" : "5c"));
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+
+    // nós
+    for (const n of fwNodes) {
+      const dim = focus && !lit.has(n.id);
+      ctx.globalAlpha = dim ? 0.25 : 1;
+      ctx.fillStyle = col(n.tone);
+      ctx.fillRect(n.x - 5, n.y, 10, n.h);
+      if (n.id === fwSel) { ctx.strokeStyle = cssVar("--accent"); ctx.lineWidth = 2; ctx.strokeRect(n.x - 6.5, n.y - 1.5, 13, n.h + 3); }
+      // rótulo
+      const left = n.c === 0;
+      const last = n.c === fwCols.length - 1;
+      ctx.textAlign = left ? "right" : "left";
+      const tx = left ? n.x - 12 : n.x + 12;
+      if (last) ctx.textAlign = "left";
+      ctx.font = "600 11px 'Helvetica Neue', Roboto, sans-serif";
+      ctx.fillStyle = dim ? ink3 : ink;
+      ctx.fillText(n.nm, tx, n.y + n.h / 2 - 1);
+      ctx.font = "500 9.5px 'JetBrains Mono', monospace";
+      ctx.fillStyle = ink3;
+      ctx.fillText(fmtN(n.v) + (n.sub ? " · " + n.sub : ""), tx, n.y + n.h / 2 + 11);
+      ctx.globalAlpha = 1;
+      n.hx = n.x; n.hy = n.y; n.hh = n.h;
+    }
+    ctx.textAlign = "left";
+  }
+
+  function fwHit(ev) {
+    const c = $("flow"), r = c.getBoundingClientRect();
+    const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    return fwNodes.find((n) => mx > n.x - 70 && mx < n.x + 190 && my >= n.y - 4 && my <= n.y + n.h + 4) || null;
+  }
+  function renderFwSide() {
+    const model = fwModel();
+    const n = model.nodes.find((x) => x.id === fwSel);
+    const info = fwMode === "env"
+      ? (n && FW_CHAIN_ENV[n.id]) || null
+      : { chain: FW_APP[fwMode].chain, note: FW_APP[fwMode].note };
+    const chain = info?.chain || [];
+    $("fw-chain").innerHTML = chain.length
+      ? chain.map(([nm, tone], i) => `${i ? '<span class="chain__arrow">→</span>' : ""}
+          <span class="chain__node"><i class="sig" style="background:${TCOLOR[tone]}"></i>${nm}</span>`).join("")
+      : `<span class="dim" style="font-size:12px">Selecione uma etapa da jornada para ver a cadeia de serviços que a atende.</span>`;
+    $("fw-note").textContent = info?.note || "";
+    $("fw-sel").textContent = n ? n.nm : "nada selecionado";
+    const total = model.nodes.filter((x) => x.c === 0).reduce((a, x) => a + x.v, 0);
+    $("fw-read").innerHTML = n ? `
+      <div class="rr"><span>Sessões nesta etapa</span><b style="color:${`var(${TONE_VAR[n.tone]})`}">${fmtN(n.v)}</b></div>
+      <div class="rr"><span>Participação no total</span><b>${((n.v / total) * 100).toFixed(1)}%</b></div>
+      <div class="rr"><span>Entram de</span><b>${model.links.filter((l) => l[1] === n.id).length || "—"} origem(ns)</b></div>
+      <div class="rr"><span>Seguem para</span><b>${model.links.filter((l) => l[0] === n.id).length || "—"} destino(s)</b></div>
+      <div class="rr"><span>Leitura</span><b style="max-width:60%;text-align:right;font-weight:400">${n.sub || "—"}</b></div>
+      ${n.app ? `<button class="rx-btn" data-fw-app="${n.app}" style="margin-top:12px">abrir o fluxo desta aplicação ›</button>` : ""}`
+      : `<p class="dim" style="font-size:12.5px;margin:0;line-height:1.55">
+          Clique numa faixa ou etapa: o caminho inteiro acende, a cadeia de serviços do Smartscape aparece ao lado
+          e os números da etapa são detalhados aqui.</p>`;
+  }
+
+  (function fwInput() {
+    const c = $("flow");
+    c.addEventListener("mousemove", (ev) => {
+      const n = fwHit(ev);
+      fwHover = n ? n.id : null;
+      c.style.cursor = n ? "pointer" : "default";
+    });
+    c.addEventListener("mouseleave", () => { fwHover = null; });
+    c.addEventListener("click", (ev) => {
+      const n = fwHit(ev);
+      fwSel = n && fwSel !== n.id ? n.id : null;
+      renderFwSide();
+    });
+  })();
+  $("fw-up").addEventListener("click", () => { fwMode = "env"; fwSel = null; buildFlow(); renderFwSide(); });
+  $("fw-read").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-fw-app]"); if (!b) return;
+    fwMode = b.dataset.fwApp; fwSel = null; buildFlow(); renderFwSide();
+  });
+  window.addEventListener("resize", () => buildFlow());
+
+  /* ═══════════ CADEIA DE ENTREGA ═══════════
+     Sete elos, do usuário à nuvem. Nomes de pod, nó e cluster vieram do
+     Smartscape (runs_on: SERVICE→POD→NODE, belongs_to: →NAMESPACE/CLUSTER). */
+  const DC_TIERS = [
+    ["Usuário & dispositivo", "quem consome"],
+    ["Rede & terceiros", "caminho até a borda"],
+    ["Aplicação (RUM)", "código no navegador"],
+    ["Borda / ingress", "entrada do tráfego"],
+    ["Serviços", "lógica de negócio"],
+    ["Runtime", "pods e contêineres"],
+    ["Infraestrutura & nuvem", "nós, hosts e provedor"],
+  ];
+  const DC = {
+    mwa: [
+      [{ nm: "Navegadores & mobile", mt: "1.036 sessões · 59% sintético", v: "1.036", tone: "bad",
+          det: [["Sessões 2h", "1.036 · medido"], ["Erros", "10.635 · medido"], ["XScore", "32 · P1"]] }],
+      [{ nm: "fonts.gstatic.com", mt: "CDN · h2 · 902 req", v: "162ms", tone: "good",
+          det: [["Provedor", "cdn · medido"], ["Requisições 2h", "902"], ["p50", "162ms"], ["Transferido", "39,1 MB"]] },
+       { nm: "localhost", mt: "terceiro · 902 req", v: "125ms", tone: "info",
+          det: [["Provedor", "third_party · medido"], ["Requisições 2h", "902"], ["p50", "125ms"]] }],
+      [{ nm: "My Web Application", mt: "FRONTEND · RUM no Grail", v: "32", tone: "bad",
+          det: [["Smartscape", "nó FRONTEND"], ["Views 2h", "3.953 · medido"], ["Pior view", "/cart · p50 1,1min"]] }],
+      [{ nm: "frontend-proxy", mt: "envoy · ingress do astroshop", v: "96ms", tone: "good",
+          det: [["Smartscape", "SERVICE · frontend-proxy - astroshop"], ["Chama", "frontend · flagd · image-provider"]] }],
+      [{ nm: "frontend", mt: "orquestra 7 serviços", v: "hub", tone: "warn",
+          det: [["Smartscape", "SERVICE · frontend - astroshop - aeric-walls-aks"], ["Chama (calls)", "cart, checkout, product-catalog, recommendation, ad, currency, shipping"]] },
+       { nm: "cart", mt: "12,4% erro · gargalo", v: "2,4s", tone: "bad",
+          det: [["Smartscape", "SERVICE · cart - astroshop"], ["Chamado por", "frontend · checkout"], ["Erros", "12,4%"]] },
+       { nm: "checkout", mt: "6 dependências", v: "890ms", tone: "warn",
+          det: [["Chama", "cart, payment, shipping, email, currency, product-catalog"]] },
+       { nm: "product-catalog · +5", mt: "reco · ad · currency · shipping · payment", v: "145ms", tone: "good",
+          det: [["Serviços saudáveis", "5"], ["p50 típico", "12–480ms"]] }],
+      [{ nm: "astroshop-cartservice-7c7bd8c9bc-6qv2k", mt: "K8S_POD · runs_on", v: "pod", tone: "bad",
+          det: [["Smartscape", "SERVICE runs_on K8S_POD"], ["Nome real", "astroshop-cartservice-7c7bd8c9bc-6qv2k"], ["Nó", "gke-salsa-cluster-basic-salsa-pool-86abe6ed-8tfs"]] },
+       { nm: "astroshop-frontend-7d8959df44-5dvgh", mt: "K8S_POD · frontend", v: "pod", tone: "warn",
+          det: [["Nó", "gke-salsa-cluster-basic-salsa-pool-86abe6ed-8tfs"]] },
+       { nm: "astroshop-frontendproxy-7f66f5f4bd-6fdt9", mt: "K8S_POD · ingress", v: "pod", tone: "good",
+          det: [["Nó", "gke-salsa-cluster-basic-salsa-pool-092fc55d-gnkg"]] }],
+      [{ nm: "namespace astroshop", mt: "K8S_NAMESPACE · 68 serviços", v: "ns", tone: "good",
+          det: [["Smartscape", "SERVICE belongs_to K8S_NAMESPACE"], ["Serviços no cluster", "68"]] },
+       { nm: "salsa-cluster (GKE)", mt: "2 nós · pool basic-salsa", v: "GKE", tone: "warn",
+          det: [["Nós", "gke-salsa-cluster-basic-salsa-pool-092fc55d-gnkg", ], ["e", "…-86abe6ed-8tfs"], ["Origem", "K8S_POD runs_on K8S_NODE"]] },
+       { nm: "aks-agentpool-21707267-vmss", mt: "cluster AKS · nós k/l", v: "AKS", tone: "good",
+          det: [["Hosts", "vmss00000k · vmss00000l"], ["Nota", "parte da malha roda em AKS"]] },
+       { nm: "valkey · PostgreSQL · Kafka", mt: "dados de apoio", v: "3", tone: "bad",
+          det: [["valkey", "2,1s · saturado"], ["PostgreSQL", "9ms"], ["Kafka", "18ms"]] }],
+    ],
+    snow: [
+      [{ nm: "Navegadores & mobile", mt: "1.019 sessões", v: "1.019", tone: "good", det: [["Sessões 2h", "1.019 · medido"], ["XScore", "79 · P4"]] }],
+      [{ nm: "CDN & assets", mt: "Cloudflare · 85ms", v: "85ms", tone: "good", det: [["p50", "85ms"]] }],
+      [{ nm: "Astroshop-Snow", mt: "FRONTEND-6515F98141BAFD47", v: "79", tone: "good",
+          det: [["Smartscape", "nó FRONTEND"], ["Views 2h", "1.504 · medido"], ["Jornada", "home → produto (sem carrinho)"]] }],
+      [{ nm: "frontend-proxy", mt: "envoy · ingress", v: "96ms", tone: "good", det: [["p50", "96ms"]] }],
+      [{ nm: "frontend", mt: "navegação de catálogo", v: "ok", tone: "good", det: [["Chama", "product-catalog · recommendation · ad · currency"]] },
+       { nm: "product-catalog", mt: "0,2% erro", v: "145ms", tone: "good", det: [["p50", "145ms"]] }],
+      [{ nm: "opentelemetry-demo-frontend-586f54d966-vlb57", mt: "K8S_POD", v: "pod", tone: "good",
+          det: [["Nó", "gke-salsa-cluster-basic-salsa-pool-092fc55d-gnkg"]] }],
+      [{ nm: "namespace astroshop", mt: "K8S_NAMESPACE", v: "ns", tone: "good", det: [["Serviços", "68"]] },
+       { nm: "salsa-cluster (GKE)", mt: "pool basic-salsa", v: "GKE", tone: "good", det: [["Origem", "Smartscape runs_on"]] },
+       { nm: "PostgreSQL", mt: "catálogo", v: "9ms", tone: "good", det: [["p50", "9ms"]] }],
+    ],
+    legacy: [
+      [{ nm: "Navegadores", mt: "72 sessões · 72 pedidos", v: "72", tone: "bad", det: [["Sessões 2h", "72 · medido"], ["Conversão", "100% · medido"]] }],
+      [{ nm: "Rede não observada", mt: "sem dados de CDN/terceiros", v: "—", tone: "warn", miss: true, det: [["Cobertura", "nenhuma"]] }],
+      [{ nm: "Aplicação d60bc238", mt: "sem nome no inventário", v: "15", tone: "bad",
+          det: [["Sessões", "72"], ["Erros por view", "4,4"], ["Governança", "definir nome e dono"]] }],
+      [{ nm: "Borda desconhecida", mt: "sem nó no Smartscape", v: "—", tone: "warn", miss: true, det: [["Ação", "instalar OneAgent"]] }],
+      [{ nm: "Backend não instrumentado", mt: "nenhum SERVICE mapeado", v: "—", tone: "warn", miss: true,
+          det: [["Visibilidade", "somente frontend (RUM)"], ["Perda", "sem causa raiz possível"]] }],
+      [{ nm: "Runtime desconhecido", mt: "sem pods/contêineres", v: "—", tone: "warn", miss: true, det: [["Cobertura", "0%"]] }],
+      [{ nm: "Infra desconhecida", mt: "sem hosts nem nuvem", v: "—", tone: "warn", miss: true,
+          det: [["Impacto", "o único fluxo que fecha pedido é o menos observável do ambiente"]] }],
+    ],
+    chat: [
+      [{ nm: "Navegadores", mt: "53 sessões · conversa", v: "53", tone: "info", det: [["Sessões 2h", "53 · medido"], ["Duração mediana", "1,3min"]] }],
+      [{ nm: "CDN & assets", mt: "estático", v: "ok", tone: "good", det: [["p50", "85ms"]] }],
+      [{ nm: "AI Chatbot", mt: "FRONTEND-59A6A308BE881B79", v: "45", tone: "info",
+          det: [["Smartscape", "nó FRONTEND"], ["Nota", "XScore padrão não se aplica"]] }],
+      [{ nm: "chat-frontend", mt: "entrada do chat", v: "90ms", tone: "good", det: [["p50", "90ms"]] }],
+      [{ nm: "llm-gateway", mt: "GENAI_SERVICE instance_of SERVICE", v: "240ms", tone: "good",
+          det: [["Smartscape", "GENAI_SERVICE"], ["Sinal certo", "tempo até 1ª resposta"]] }],
+      [{ nm: "pods do gateway", mt: "K8S_POD", v: "pod", tone: "good", det: [["Cluster", "salsa-cluster"]] }],
+      [{ nm: "Provedor LLM (externo)", mt: "~900ms por token · custo", v: "~1s", tone: "warn",
+          det: [["Latência", "~900ms/token"], ["Risco", "dependência e custo externos"]] },
+       { nm: "Redis (contexto)", mt: "memória da conversa", v: "4ms", tone: "good", det: [["p50", "4ms"]] }],
+    ],
+  };
+  let dcApp = "mwa", dcSel = null;
+
+  /* ── cada camada tem um elemento visual próprio ── */
+  const DC_ICON = [
+    // 0 · usuário & dispositivo — celular + pessoa
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <rect x="3" y="4" width="10" height="18" rx="2"/><path d="M6.5 6.6h3"/><path d="M8 19.4h.01"/>
+      <circle cx="19" cy="9" r="2.6"/><path d="M15.4 20c0-2.4 1.6-4.2 3.6-4.2s3.6 1.8 3.6 4.2"/></svg>`,
+    // 1 · rede & terceiros — nuvem com sinal
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M7.5 18h11a3.8 3.8 0 0 0 .3-7.6A5.6 5.6 0 0 0 8.3 9.2 4.4 4.4 0 0 0 7.5 18Z"/>
+      <path d="M3 21.5c1.2-1.2 2.6-1.9 4-2M23 21.5c-1.2-1.2-2.6-1.9-4-2"/></svg>`,
+    // 2 · aplicação (RUM) — janela de navegador
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <rect x="2.5" y="4.5" width="21" height="17" rx="2"/><path d="M2.5 9.5h21"/>
+      <circle cx="5.6" cy="7" r=".9" fill="currentColor" stroke="none"/>
+      <circle cx="8.4" cy="7" r=".9" fill="currentColor" stroke="none"/>
+      <path d="M7 13.5h9M7 17h6"/></svg>`,
+    // 3 · borda / ingress — gateway hexagonal com fluxo
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M13 2.6 22 7.6v10.8L13 23.4 4 18.4V7.6Z"/><path d="M8 13h10"/><path d="m14.6 9.8 3.2 3.2-3.2 3.2"/></svg>`,
+    // 4 · serviços — hexágonos interligados (malha)
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M8 3.4 12 5.7v4.6L8 12.6 4 10.3V5.7Z"/><path d="M18 3.4 22 5.7v4.6l-4 2.3-4-2.3V5.7Z"/>
+      <path d="M13 14.2 17 16.5v4.6L13 23.4 9 21.1v-4.6Z"/><path d="M9.6 12.2 11.6 15M16.4 12.2 14.4 15"/></svg>`,
+    // 5 · runtime — contêiner empilhado (pod)
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M13 3.2 22 8v10l-9 4.8L4 18V8Z"/><path d="m4 8 9 4.8L22 8"/><path d="M13 12.8v10"/>
+      <path d="M8.2 5.6 17.4 10.4"/></svg>`,
+    // 6 · infraestrutura & nuvem — rack de servidores
+    `<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.4">
+      <rect x="3.5" y="3.5" width="19" height="5.4" rx="1.2"/><rect x="3.5" y="10.3" width="19" height="5.4" rx="1.2"/>
+      <rect x="3.5" y="17.1" width="19" height="5.4" rx="1.2"/>
+      <path d="M6.6 6.2h.01M6.6 13h.01M6.6 19.8h.01" stroke-width="2" stroke-linecap="round"/>
+      <path d="M17 6.2h2.4M17 13h2.4M17 19.8h2.4"/></svg>`,
+  ];
+
+  function renderChain() {
+    const tiers = DC[dcApp];
+    $("dc").innerHTML = tiers.map((nodes, ti) => {
+      const missTier = nodes.every((n) => n.miss);
+      const els = nodes.map((n, ni) => {
+        const tone = TCOLOR[n.tone] || "var(--trace-info)";
+        const id = ti + "-" + ni;
+        return `<div class="nd ${n.miss ? "miss" : ""} ${n.tone === "bad" ? "nd--crit" : ""} ${dcSel === id ? "sel" : ""}"
+             id="nd-${id}" data-dc="${id}" role="button" tabindex="0" title="${n.nm}" style="--tone:${tone}">
+          <span class="nd__ic">${DC_ICON[ti]}</span>
+          <span class="nd__nm">${n.nm}</span>
+          <span class="nd__mt">${n.mt}</span>
+          <span class="nd__v">${n.v}</span>
+        </div>`;
+      }).join("");
+      return `<div class="dcc">
+          <div class="dcc__h" style="${missTier ? "border-color:color-mix(in srgb,var(--trace-warn) 45%,transparent)" : ""}">
+            <span class="dcc__no">${String(ti + 1).padStart(2, "0")}${activeProblems(ti)
+              ? `<span class="dcc__pb" title="${activeProblems(ti)} problema(s) Davis ativo(s)">⚠ ${activeProblems(ti)}</span>` : ""}</span>
+            <span class="dcc__nm" ${missTier ? 'style="color:var(--trace-warn)"' : ""}>${DC_TIERS[ti][0]}</span>
+            <span class="dcc__sb">${DC_TIERS[ti][1]}</span>
+          </div>${els}</div>`;
+    }).join("");
+    const missing = tiers.flat().filter((n) => n.miss).length;
+    $("dc-sub").textContent = missing
+      ? `${tiers.flat().length} elos em ${tiers.length} camadas · ${missing} sem observabilidade`
+      : `${tiers.flat().length} elos em ${tiers.length} camadas · topologia Smartscape`;
+    renderChainDetail();
+    drawDcEdges();
+    setTimeout(drawDcEdges, 60);
+  }
+
+  /* malha animada entre camadas: converge no elo primário e diverge dele */
+  const WORSE = { good: 0, info: 1, warn: 2, bad: 3 };
+  const worseOf = (a, b) => (WORSE[a] >= WORSE[b] ? a : b);
+  function dcEdgeList() {
+    const tiers = DC[dcApp];
+    const out = [];
+    for (let ti = 0; ti < tiers.length - 1; ti++) {
+      const A = tiers[ti], B = tiers[ti + 1];
+      const seen = new Set();
+      const add = (ai, bi) => {
+        const k = ti + ":" + ai + ">" + bi;
+        if (seen.has(k)) return; seen.add(k);
+        out.push({ s: ti + "-" + ai, t: (ti + 1) + "-" + bi, h: worseOf(A[ai].tone, B[bi].tone) });
+      };
+      A.forEach((_, ai) => add(ai, 0));
+      B.forEach((_, bi) => add(0, bi));
+    }
+    return out;
+  }
+  function drawDcEdges() {
+    const svg = $("dc-svg");
+    if (!svg || svg.parentElement.offsetParent === null) return;
+    const host = svg.parentElement.getBoundingClientRect();
+    svg.setAttribute("viewBox", `0 0 ${host.width} ${host.height}`);
+    const anchor = (id, side) => {
+      const el = $("nd-" + id); if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: (side === "r" ? r.right : r.left) - host.left,
+               y: r.top + r.height / 2 - host.top };
+    };
+    const C = { good: "--trace-good", warn: "--trace-warn", bad: "--trace-bad", info: "--trace-info" };
+    svg.innerHTML = dcEdgeList().map((e) => {
+      const a = anchor(e.s, "r"), b = anchor(e.t, "l");
+      if (!a || !b) return "";
+      const mx = (a.x + b.x) / 2;
+      const dim = dcSel && e.s !== dcSel && e.t !== dcSel;
+      return `<path d="M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}"
+        class="${e.h === "bad" ? "bad" : ""}"
+        stroke="color-mix(in srgb, var(${C[e.h]}) ${e.h === "bad" ? 85 : 55}%, transparent)"
+        style="opacity:${dim ? 0.12 : 0.85}"></path>`;
+    }).join("");
+  }
+  window.addEventListener("resize", () => { if (!$("view-chain").hidden) drawDcEdges(); });
+
+  /* ── estatísticas REAIS de dispositivo (DQL sobre user.events, 2h, ambiente) ──
+     summarize countDistinct(session), count() by {resolução, dpr, orientação, agente, tipo} */
+  const DEV_ROWS = [
+    { res: "1920×1080", dpr: "1.0", ori: "landscape-primary", ag: "javascript", ut: "sintético", s: 1201, v: 127263, cls: "desktop" },
+    { res: "1920×1080", dpr: "—",   ori: "landscape",         ag: "—",          ut: "sintético", s: 1075, v: 2042,   cls: "desktop" },
+    { res: "1280×720",  dpr: "1",   ori: "landscape-primary", ag: "javascript", ut: "robô",      s: 877,  v: 90154,  cls: "desktop" },
+    { res: "430×932",   dpr: "1.0", ori: "portrait-primary",  ag: "javascript", ut: "sintético", s: 54,   v: 1122,   cls: "mobile" },
+    { res: "430×932",   dpr: "—",   ori: "portrait",          ag: "—",          ut: "sintético", s: 37,   v: 50,     cls: "mobile" },
+    { res: "800×600",   dpr: "1",   ori: "landscape-primary", ag: "javascript", ut: "robô",      s: 1,    v: 2,      cls: "desktop" },
+  ];
+  function deviceRich() {
+    const tot = DEV_ROWS.reduce((a, r) => a + r.s, 0);
+    const mob = DEV_ROWS.filter((r) => r.cls === "mobile").reduce((a, r) => a + r.s, 0);
+    const byRes = {};
+    DEV_ROWS.forEach((r) => { byRes[r.res] = (byRes[r.res] || 0) + r.s; });
+    const byUt = {};
+    DEV_ROWS.forEach((r) => { byUt[r.ut] = (byUt[r.ut] || 0) + r.s; });
+    const byOri = {};
+    DEV_ROWS.forEach((r) => { const k = r.ori.startsWith("portrait") ? "retrato" : "paisagem";
+                              byOri[k] = (byOri[k] || 0) + r.s; });
+    const bar = (obj, tone) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => `
+      <div class="db"><span class="db__n">${k}</span>
+        <span class="db__t"><span class="db__f" style="width:${(v / tot) * 100}%;background:${tone(k)}"></span></span>
+        <span class="db__v">${fmtN(v)} · ${((v / tot) * 100).toFixed(1)}%</span></div>`).join("");
+    const resTone = (k) => k === "430×932" ? "var(--trace-info)" : "var(--trace-good)";
+    const utTone = (k) => k === "robô" ? "var(--trace-warn)" : "var(--trace-info)";
+    const oriTone = (k) => k === "retrato" ? "var(--trace-info)" : "var(--trace-good)";
+    return `
+      <div class="dd">
+        <div class="dd__k" style="border-bottom-color:var(--trace-info)">
+          <div class="dd__kl">Sessões no ambiente</div><div class="dd__kv">2.352</div></div>
+        <div class="dd__k" style="border-bottom-color:var(--trace-good)">
+          <div class="dd__kl">Perfis distintos</div><div class="dd__kv">${DEV_ROWS.length}</div></div>
+        <div class="dd__k" style="border-bottom-color:var(--trace-good)">
+          <div class="dd__kl">Desktop</div><div class="dd__kv">${(100 - (mob / tot) * 100).toFixed(1)}%</div></div>
+        <div class="dd__k" style="border-bottom-color:var(--trace-info)">
+          <div class="dd__kl">Mobile</div><div class="dd__kv">${((mob / tot) * 100).toFixed(1)}%</div></div>
+        <div class="dd__k" style="border-bottom-color:var(--trace-warn)">
+          <div class="dd__kl">Views totais</div><div class="dd__kv">${fmtK(DEV_ROWS.reduce((a, r) => a + r.v, 0))}</div></div>
+      </div>
+
+      <div class="dd__h">Resolução de tela <em>device.screen · medido</em></div>${bar(byRes, resTone)}
+      <div class="dd__h">Tipo de usuário <em>dt.rum.user_type · medido</em></div>${bar(byUt, utTone)}
+      <div class="dd__h">Orientação <em>device.orientation · medido</em></div>${bar(byOri, oriTone)}
+
+      <div class="dd__h">Perfis de dispositivo detectados <em>${DEV_ROWS.length} combinações</em></div>
+      <div style="overflow-x:auto"><table class="dt">
+        <thead><tr><th>Resolução</th><th>DPR</th><th>Orientação</th><th>Agente</th><th>Tipo</th><th>Sessões</th><th>Views</th><th>Classe</th></tr></thead>
+        <tbody>${DEV_ROWS.sort((a, b) => b.s - a.s).map((r) => `<tr>
+          <td class="${r.cls === "mobile" ? "hi" : ""}">${r.res}</td><td>${r.dpr}</td><td>${r.ori}</td>
+          <td>${r.ag}</td><td>${r.ut}</td><td>${fmtN(r.s)}</td><td>${fmtN(r.v)}</td>
+          <td style="color:${r.cls === "mobile" ? "var(--trace-info)" : "var(--ink-3)"}">${r.cls}</td></tr>`).join("")}</tbody>
+      </table></div>
+
+      <p class="dd__note"><b>Navegador e sistema operacional:</b> os campos <span class="num">browser.name</span>,
+      <span class="num">os.name</span> e <span class="num">geo.*</span> não estão populados nesta versão do schema
+      RUM no Grail (0.24) — por isso o perfil é derivado de resolução, DPR, orientação e tipo de agente.
+      A visão clássica do produto reporta <b>100% Headless Chrome</b> para este tráfego, coerente com os
+      1.280×720 dos robôs. Os 430×932 em retrato são o viewport lógico de um iPhone 15 Pro Max —
+      a única presença mobile real do ambiente (2,8% das sessões).</p>`;
+  }
+
+  /* ═══ SINAIS por camada — Davis (IA), alertas customizados e extensions ═══
+     fetch dt.davis.problems (7 ativos) + dt.davis.events by event.provider (24h) */
+  const SIGNALS = [
+    { davis: [["P-26064427", "Browser monitor global outage", "AVAILABILITY", 1]],
+      custom: [],
+      ext: [["SYNTHETIC", "SYNTHETIC_GLOBAL_OUTAGE", "24 eventos/24h"],
+            ["SYNTHETIC", "MULTI_PROTOCOL_GLOBAL_OUTAGE", "1 evento"]] },
+    { davis: [],
+      custom: [["Syslog ISIS Down", "CLOSED", "96 eventos"], ["Syslog BGP Down", "CLOSED", "16 eventos"]],
+      ext: [["Extensão Syslog", "alertas de rede ingeridos por extension", "112 eventos/24h"]] },
+    { davis: [["P-26075975", "Unexpected low traffic", "AVAILABILITY", 1]],
+      custom: [],
+      ext: [["BASELINING (Davis IA)", "APPLICATION_UNEXPECTED_LOW_LOAD", "5 eventos"],
+            ["BASELINING (Davis IA)", "APPLICATION_SLOWDOWN", "1 evento"]] },
+    { davis: [], custom: [],
+      ext: [["—", "nenhum sinal correlacionado no período", "—"]] },
+    { davis: [["P-26076144", "Failure rate increase", "ERROR", 1]],
+      custom: [["Problem #6 · LLM latency degradation (p95)", "ACTIVE", "1 ativo · 5 fechados"],
+               ["Problem #6/#8 · LLM error rate elevated", "CLOSED", "17 eventos"],
+               ["AstroShop-SNOW Business Alert · Unexpected Low Payments", "CLOSED", "1 evento"]],
+      ext: [["BASELINING (Davis IA)", "SERVICE_ERROR_RATE_INCREASED", "74 eventos"],
+            ["BASELINING (Davis IA)", "SERVICE_SLOWDOWN", "8 eventos"],
+            ["ROOT_CAUSE_ANALYSIS", "PROBLEM_UPDATE · correlação automática", "20 eventos"],
+            ["EVENTS_REST_API_INGEST", "AWS DevOps Agent · investigação e mitigação", "3 eventos"],
+            ["EVENTS_REST_API_INGEST", "Chaos Engineering · flaky-network", "2 eventos"]] },
+    { davis: [["P-26063022", "Monitoring not available", "AVAILABILITY", 1]],
+      custom: [],
+      ext: [["KUBERNETES_EVENT", "eventos nativos do cluster", "2.820 eventos"],
+            ["KUBERNETES_INFERRED_EVENT", "eventos inferidos", "1.769 eventos"],
+            ["KUBERNETES_ANOMALY_DETECTION", "AVAILABILITY_EVENT", "1 evento"]] },
+    { davis: [["P-26076005", "Low disk space", "RESOURCE_CONTENTION", 1],
+              ["P-26063024", "AWS Monitoring profile wmsAWS is in ERROR State", "ERROR", 1]],
+      custom: [["Low disk space", "ACTIVE", "1 ativo · 1 fechado"],
+               ["AWS Monitoring profile wmsAWS", "ACTIVE", "1 ativo"]],
+      ext: [["ONEAGENT", "avisos do agente", "9.022 eventos"],
+            ["METRIC_EVENTS", "OSI_LOW_DISK_SPACE", "2 eventos"]] },
+  ];
+  const activeProblems = (ti) => SIGNALS[ti] ? SIGNALS[ti].davis.length : 0;
+
+  const CAT_TONE = { ERROR: "bad", AVAILABILITY: "bad", RESOURCE_CONTENTION: "warn",
+                     SLOWDOWN: "warn", CUSTOM_ALERT: "info" };
+  function signalsBlock(ti) {
+    const s = SIGNALS[ti]; if (!s) return "";
+    const rowsD = s.davis.map(([id, nm, cat]) => `<tr>
+        <td style="color:var(--trace-${CAT_TONE[cat] || "warn"})">${id}</td>
+        <td style="font-family:var(--sans);font-size:11.5px">${nm}</td>
+        <td>${cat}</td><td style="color:var(--trace-bad)">ATIVO</td></tr>`).join("");
+    const rowsC = s.custom.map(([nm, st, cnt]) => `<tr>
+        <td style="font-family:var(--sans);font-size:11.5px">${nm}</td>
+        <td style="color:var(--trace-${st === "ACTIVE" ? "bad" : "good"})">${st}</td><td>${cnt}</td></tr>`).join("");
+    const rowsE = s.ext.map(([prov, nm, cnt]) => `<tr>
+        <td class="hi">${prov}</td>
+        <td style="font-family:var(--sans);font-size:11.5px">${nm}</td><td>${cnt}</td></tr>`).join("");
+    return `
+      <div class="dd__h" style="color:var(--trace-bad)">Problemas detectados pela IA (Davis)
+        <em>dt.davis.problems · ativos</em></div>
+      ${s.davis.length ? `<div style="overflow-x:auto"><table class="dt">
+        <thead><tr><th>ID</th><th>Problema</th><th>Categoria</th><th>Status</th></tr></thead>
+        <tbody>${rowsD}</tbody></table></div>`
+        : `<p class="dim" style="font-size:11.5px;margin:0">Nenhum problema Davis ativo nesta camada.</p>`}
+
+      <div class="dd__h" style="color:var(--trace-info)">Alertas customizados
+        <em>event.provider = METRIC_EVENTS</em></div>
+      ${s.custom.length ? `<div style="overflow-x:auto"><table class="dt">
+        <thead><tr><th>Alerta</th><th>Status</th><th>Ocorrências 24h</th></tr></thead>
+        <tbody>${rowsC}</tbody></table></div>`
+        : `<p class="dim" style="font-size:11.5px;margin:0">Nenhum alerta customizado configurado para esta camada.</p>`}
+
+      <div class="dd__h" style="color:var(--accent)">Extensions &amp; fontes de ingestão
+        <em>event.provider · 24h</em></div>
+      <div style="overflow-x:auto"><table class="dt">
+        <thead><tr><th>Provedor</th><th>Sinal</th><th>Volume</th></tr></thead>
+        <tbody>${rowsE}</tbody></table></div>`;
+  }
+
+  /* ═══ estatísticas por elo — todas medidas via DQL (user.events + Smartscape, 2h) ═══ */
+  const kpi = (l, v, tone) => `<div class="dd__k" style="border-bottom-color:var(--trace-${tone || "good"})">
+      <div class="dd__kl">${l}</div><div class="dd__kv">${v}</div></div>`;
+  const barsBlock = (title, sub, items, tone) => {
+    const tot = items.reduce((a, i) => a + i[1], 0) || 1;
+    return `<div class="dd__h">${title} <em>${sub}</em></div>` + items.map(([k, v]) => `
+      <div class="db"><span class="db__n">${k}</span>
+        <span class="db__t"><span class="db__f" style="width:${(v / tot) * 100}%;background:var(--trace-${tone(k)})"></span></span>
+        <span class="db__v">${fmtN(v)} · ${((v / tot) * 100).toFixed(1)}%</span></div>`).join("");
+  };
+  const tableBlock = (title, sub, cols, rows) => `<div class="dd__h">${title} <em>${sub}</em></div>
+    <div style="overflow-x:auto"><table class="dt">
+      <thead><tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table></div>`;
+  const noteBlock = (t) => `<p class="dd__note">${t}</p>`;
+
+  /* dados reais coletados por camada */
+  const DOMAINS = [
+    ["astroshop-frontendproxy", "first_party", 72508, "116ms", 0, "4,44 GB"],
+    ["fonts.gstatic.com", "cdn", 902, "162ms", 0, "39,1 MB"],
+    ["localhost", "third_party", 902, "125ms", 0, "—"],
+  ];
+  const TOP_PATHS = [
+    ["/icons/Chevron.svg", "—", "200", 5237, "71ms", "145ms"],
+    ["/images/opentelemetry-demo-logo.png", "—", "200", 4943, "58ms", "126ms"],
+    ["/api/recommendations", "GET", "200", 3330, "142ms", "291ms"],
+    ["/api/cart", "GET", "200", 2962, "110ms", "200ms"],
+    ["//icons/CartIcon.svg", "—", "200", 2619, "234ms", "431ms"],
+    ["/images/products/LensCleaningKit.jpg", "GET", "200", 2072, "108ms", "225ms"],
+  ];
+  const PODS = [
+    ["astroshop-cartservice-7c7bd8c9bc-6qv2k", "cart", "gke-salsa…-86abe6ed-8tfs", "GKE"],
+    ["astroshop-frontend-7d8959df44-5dvgh", "frontend", "gke-salsa…-86abe6ed-8tfs", "GKE"],
+    ["astroshop-frontendproxy-7f66f5f4bd-6fdt9", "frontend-proxy", "gke-salsa…-092fc55d-gnkg", "GKE"],
+    ["opentelemetry-demo-frontend-586f54d966-vlb57", "frontend (otel)", "gke-salsa…-092fc55d-gnkg", "GKE"],
+    ["frontend-59766c6f67-x56zl", "frontend", "aks-agentpool…vmss00000l", "AKS"],
+  ];
+  const SVC_CALLS = [
+    ["frontend", "cart · checkout · product-catalog · recommendation · ad · currency · shipping", 7],
+    ["checkout", "cart · payment · shipping · email · currency · product-catalog", 6],
+    ["recommendation", "product-catalog · flagd", 2],
+    ["shipping", "quote", 1],
+    ["cart", "flagd · valkey", 2],
+  ];
+
+  /* estatísticas por camada (índice da coluna) */
+  function statsFor(ti, n) {
+    const tone = (k) => k.includes("gstatic") || k.includes("cdn") ? "info"
+      : k.includes("localhost") || k.includes("third") ? "warn" : "good";
+    if (ti === 0) return deviceRich();
+    if (ti === 1) return `
+      <div class="dd">
+        ${kpi("Domínios distintos", DOMAINS.length, "good")}
+        ${kpi("Requisições 2h", "74,3k", "good")}
+        ${kpi("Erros 4xx/5xx", "0", "good")}
+        ${kpi("Transferido", "4,48 GB", "warn")}
+        ${kpi("Protocolos", "3", "info")}
+      </div>
+      ${barsBlock("Requisições por provedor", "url.provider · medido",
+        [["first_party", 72508], ["cdn", 902], ["third_party", 902]], (k) => k === "cdn" ? "info" : k === "third_party" ? "warn" : "good")}
+      ${barsBlock("Protocolo de transporte", "performance.next_hop_protocol · medido",
+        [["http/1.1", 77940], ["h2", 1122], ["h3", 3]], (k) => k === "http/1.1" ? "warn" : "good")}
+      ${tableBlock("Domínios contactados", "url.domain · 2h",
+        ["Domínio", "Provedor", "Req", "p50", "Erros", "Bytes"],
+        DOMAINS.map((d) => [d[0], d[1], fmtN(d[2]), d[3], d[4], d[5]]))}
+      ${noteBlock("Nenhum domínio devolveu erro HTTP no período. O tráfego de primeira parte ainda usa <b>http/1.1</b> — migrar para h2/h3 reduziria a latência de conexão; o CDN de fontes já usa h2 e responde em 162ms.")}`;
+    if (ti === 2) return `
+      <div class="dd">
+        ${kpi("Sessões 2h", "1.036", "bad")}
+        ${kpi("Views", "3.953", "warn")}
+        ${kpi("Erros", "10.635", "bad")}
+        ${kpi("Erros por view", "2,7", "bad")}
+        ${kpi("XScore", "32", "bad")}
+      </div>
+      ${barsBlock("Sessões por view detectada", "view.detected_name · medido",
+        [["/", 1005], ["/cart", 993], ["/product/OLJCESPC7Z", 983]], () => "warn")}
+      ${tableBlock("Views da aplicação", "view_summary · 2h",
+        ["View", "Sessões", "Views", "p50", "Perf"],
+        [["/", "1.005", "1.970", "3,2s", "68"],
+         ["/cart", "993", "993", "1,1min", "4"],
+         ["/product/OLJCESPC7Z", "983", "983", "1,1min", "5"]])}
+      ${noteBlock("O p50 de <b>1,1 minuto</b> em /cart e /product é o pior sinal do ambiente — e o p90 é idêntico ao p50, assinatura de <b>timeout sistêmico</b>, não de lentidão gradual.")}`;
+    if (ti === 3) return `
+      <div class="dd">
+        ${kpi("Requisições 2h", "72,5k", "good")}
+        ${kpi("p50", "116ms", "good")}
+        ${kpi("p90", "372ms", "good")}
+        ${kpi("TTFB p50", "108ms", "good")}
+        ${kpi("Erros", "0", "good")}
+      </div>
+      ${tableBlock("Caminhos mais requisitados", "url.path · 2h",
+        ["Caminho", "Método", "Status", "Req", "p50", "p90"],
+        TOP_PATHS.map((r) => [r[0], r[1], r[2], fmtN(r[3]), r[4], r[5]]))}
+      ${noteBlock("A borda está <b>saudável</b>: 72,5 mil requisições sem um único 4xx/5xx e TTFB de 108ms. Ou seja, a lentidão da jornada <b>não nasce aqui</b> — nasce nos serviços de negócio abaixo.")}`;
+    if (ti === 4) return `
+      <div class="dd">
+        ${kpi("Serviços no cluster", "86", "good")}
+        ${kpi("Relações calls", "85", "good")}
+        ${kpi("Serviços críticos", "1", "bad")}
+        ${kpi("Maior fan-out", "7", "warn")}
+        ${kpi("API p50", "110–142ms", "good")}
+      </div>
+      ${barsBlock("Chamadas de API por endpoint", "url.path · medido",
+        [["/api/recommendations", 3330], ["/api/cart", 2962]], () => "good")}
+      ${tableBlock("Dependências mapeadas pelo Smartscape", 'smartscapeEdges "calls"',
+        ["Serviço", "Chama", "Nº"],
+        SVC_CALLS.map((r) => [r[0], r[1], r[2]]))}
+      ${noteBlock("As APIs respondem em 110–142ms no navegador, mas o <b>cart</b> acumula 12,4% de erro no lado servidor — a diferença entre o tempo de rede e o tempo total é onde a experiência se perde.")}`;
+    if (ti === 5) return `
+      <div class="dd">
+        ${kpi("Pods mapeados", PODS.length, "good")}
+        ${kpi("Clusters", "2", "warn")}
+        ${kpi("Relação", "runs_on", "good")}
+        ${kpi("Provedores", "GKE + AKS", "warn")}
+      </div>
+      ${tableBlock("Pods e onde rodam", "SERVICE runs_on K8S_POD runs_on K8S_NODE",
+        ["Pod", "Serviço", "Nó", "Nuvem"], PODS)}
+      ${noteBlock("O ambiente é <b>multi-cloud</b>: a mesma malha de serviços tem pods em GKE (salsa-cluster) e em AKS (agentpool vmss). Isso é topologia real do Smartscape, não configuração declarada.")}`;
+    return `
+      <div class="dd">
+        ${kpi("Clusters K8s", "5", "good")}
+        ${kpi("Serviços no ns", "68", "good")}
+        ${kpi("Nós usados", "4", "good")}
+        ${kpi("Dados de apoio", "3", "bad")}
+      </div>
+      ${barsBlock("Nós por provedor", "K8S_NODE · medido", [["GKE (salsa-cluster)", 2], ["AKS (agentpool)", 2]], () => "good")}
+      ${tableBlock("Plataforma", "smartscapeNodes · belongs_to / runs_on",
+        ["Elemento", "Tipo", "Detalhe"],
+        [["astroshop", "K8S_NAMESPACE", "68 serviços"],
+         ["salsa-cluster", "K8S_CLUSTER", "pool basic-salsa · GKE"],
+         ["aks-agentpool-21707267-vmss", "K8S_NODE", "vmss00000k · l · AKS"],
+         ["valkey / PostgreSQL / Kafka", "dependências", "valkey saturado"]])}
+      ${noteBlock("A base da cadeia mistura dois provedores de nuvem. O único elo crítico aqui é o <b>valkey</b>, cache do carrinho — a causa raiz que propaga até o topo da cadeia.")}`;
+  }
+
+  function renderChainDetail() {
+    if (!dcSel) {
+      $("dc-sel").textContent = "clique em qualquer elo";
+      $("dc-detail").innerHTML = `<p class="dim" style="font-size:12.5px;margin:0;line-height:1.55">
+        A cadeia é lida da esquerda para a direita: cada coluna é uma camada da entrega, com o
+        elemento visual próprio daquela camada. Colunas em âmbar são camadas que o Smartscape
+        não enxerga por falta de instrumentação.</p>`;
+      return;
+    }
+    const [ti, ni] = dcSel.split("-").map(Number);
+    const n = DC[dcApp][ti][ni];
+    $("dc-sel").textContent = `camada ${String(ti + 1).padStart(2, "0")} · ${DC_TIERS[ti][0]}`;
+    $("dc-detail").innerHTML = `
+      <div class="chain" style="margin-bottom:12px">
+        <span class="chain__node"><i class="sig" style="background:${TCOLOR[n.tone] || "var(--trace-info)"}"></i>${n.nm}</span>
+      </div>
+      ${n.det.map(([k, v]) => `<div class="rr"><span>${k}</span><b>${v}</b></div>`).join("")}
+      ${!n.miss ? `<div style="margin-top:18px">${statsFor(ti, n)}</div>` : ""}
+      <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border-2)">${signalsBlock(ti)}</div>
+      ${n.miss ? `<p style="font-size:12.5px;color:var(--trace-warn);margin:12px 0 0">
+        Este elo não existe no Smartscape — instale o OneAgent para fechar a cadeia.</p>` : ""}`;
+  }
+  const buildChain = renderChain;
+  const drawChain = () => {};
+
+  $("dc").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-dc]"); if (!el) return;
+    dcSel = dcSel === el.dataset.dc ? null : el.dataset.dc;
+    renderChain();
+  });
+  $("dc").addEventListener("keydown", (e) => {
+    const el = e.target.closest("[data-dc]");
+    if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); el.click(); }
+  });
+  $("dc-app").addEventListener("change", (e) => { dcApp = e.target.value; dcSel = null; renderChain(); });
+
+  /* ═══════════ jornada — por aplicação ═══════════ */
+  const PERSONAS = {
+    mobile: {
+      frame: "",
+      details: [["Dispositivo", "Galaxy S24"], ["SO", "Android 14"], ["Navegador", "Chrome 126"],
+        ["Tela", "412×915 @3x"], ["Conexão", "4G · 38 Mbps"], ["Local", "São Paulo, BR"]],
+    },
+    desktop: {
+      frame: "desktop",
+      details: [["Dispositivo", "Notebook Win11"], ["SO", "Windows 11"], ["Navegador", "Edge 126"],
+        ["Tela", "1920×1080 @1x"], ["Conexão", "Fibra · 240 Mbps"], ["Local", "Curitiba, BR"]],
+    },
+  };
+
+  const JOURNEYS = {
+    mwa: {
+      session: {
+        mobile:  { score: 61, id: "ERRAQCSC-0", dur: "6min 12s",  views: 7,  actions: 14, errors: 3, crashes: 0 },
+        desktop: { score: 74, id: "BF4A5576-0", dur: "11min 40s", views: 12, actions: 31, errors: 2, crashes: 0 },
+      },
+      nodes: {
+        "v-home":  { col: "col-views", cls: "n-ok",   name: "/",            meta: "carga 3,2s · 68", stats: [["Perf", 68], ["Carga p50", "3,2s"], ["Sessões", "1.005"]] },
+        "v-cart":  { col: "col-views", cls: "n-bad",  name: "/cart",        meta: "carga 1,1min · 4", stats: [["Perf", 4], ["Carga p50", "1,1min"], ["Sessões", "993"]] },
+        "v-prod":  { col: "col-views", cls: "n-bad",  name: "/product/*",   meta: "carga 1,1min · 5", stats: [["Perf", 5], ["Carga p50", "1,1min"], ["Sessões", "983"]] },
+        "r-prods": { col: "col-requests", cls: "n-ok",   name: "GET /api/products",        meta: "210ms · 0,2% err", stats: [["p50", "210ms"], ["Falhas", "0,2%"]] },
+        "r-cart":  { col: "col-requests", cls: "n-bad",  name: "POST /api/cart",           meta: "2,4s · 12,4% err", stats: [["p50", "2,4s"], ["p90", "8,9s"], ["Falhas", "12,4%"]] },
+        "r-reco":  { col: "col-requests", cls: "n-ok",   name: "GET /api/recommendations", meta: "480ms · 0,8% err", stats: [["p50", "480ms"], ["Falhas", "0,8%"]] },
+        "r-assets":{ col: "col-requests", cls: "n-warn", name: "assets · fontes",          meta: "CDN 85ms · fontes 1,9s", stats: [["CDN p50", "85ms"], ["Fontes p50", "1,9s"]] },
+        "s-front": { col: "col-services", cls: "n-ok",   name: "frontend-proxy",  meta: "96ms · 0,4% err", stats: [["p50", "96ms"], ["Err", "0,4%"]] },
+        "s-cart":  { col: "col-services", cls: "n-bad",  name: "cart-service",    meta: "2,4s · 12,4% err ⚠", stats: [["p50", "2,4s"], ["Err", "12,4%"], ["Status", '<span style="color:var(--trace-bad)">degradado</span>']] },
+        "s-cat":   { col: "col-services", cls: "n-ok",   name: "product-catalog", meta: "145ms · 0,2% err", stats: [["p50", "145ms"], ["Err", "0,2%"]] },
+        "s-check": { col: "col-services", cls: "n-warn", name: "checkout-service", meta: "890ms · 4,1% err", stats: [["p50", "890ms"], ["Err", "4,1%"]] },
+        "d-redis": { col: "col-deps", cls: "n-bad",  name: "Redis (cache carrinho)", meta: "timeout · saturado", stats: [["Latência", "2,1s"], ["Hit rate", "31%"]] },
+        "d-pg":    { col: "col-deps", cls: "n-ok",   name: "PostgreSQL",            meta: "9ms · ok", stats: [["p50", "9ms"]] },
+        "d-ga":    { col: "col-deps", cls: "n-ok",   name: "Google Analytics",      meta: "120ms · beacon", stats: [["p50", "120ms"]] },
+        "d-fonts": { col: "col-deps", cls: "n-warn", name: "fonts.gstatic.com",     meta: "1,9s · degradado", stats: [["p50", "1,9s"], ["Impacto", "FCP +0,8s"]] },
+      },
+      edges: [
+        ["device", "v-home", "ok"], ["device", "v-cart", "bad"], ["device", "v-prod", "bad"],
+        ["v-home", "r-prods", "ok"], ["v-prod", "r-prods", "ok"], ["v-prod", "r-reco", "ok"],
+        ["v-cart", "r-cart", "bad"], ["v-home", "r-assets", "warn"],
+        ["r-prods", "s-front", "ok"], ["r-cart", "s-front", "bad"], ["r-reco", "s-front", "ok"],
+        ["s-front", "s-cat", "ok"], ["s-front", "s-cart", "bad"], ["s-cart", "s-check", "warn"],
+        ["s-cart", "d-redis", "bad"], ["s-cat", "d-pg", "ok"],
+        ["v-home", "d-ga", "ok"], ["r-assets", "d-fonts", "warn"],
+      ],
+    },
+    snow: {
+      session: {
+        mobile:  { score: 88, id: "SNOWMB01-0", dur: "3min 40s", views: 5, actions: 9,  errors: 0, crashes: 0 },
+        desktop: { score: 92, id: "SNOWDT02-0", dur: "5min 05s", views: 8, actions: 15, errors: 0, crashes: 0 },
+      },
+      nodes: {
+        "v-home": { col: "col-views", cls: "n-ok", name: "/",          meta: "carga 1,9s · 87", stats: [["Perf", 87], ["Carga p50", "1,9s"], ["Sessões", "751"]] },
+        "v-prod": { col: "col-views", cls: "n-ok", name: "/product/*", meta: "carga 1,1s · 97", stats: [["Perf", 97], ["Carga p50", "1,1s"], ["Sessões", "750"]] },
+        "r-prods": { col: "col-requests", cls: "n-ok", name: "GET /api/products", meta: "145ms · 0,2% err", stats: [["p50", "145ms"], ["Falhas", "0,2%"]] },
+        "r-assets": { col: "col-requests", cls: "n-ok", name: "assets (CDN)", meta: "85ms", stats: [["p50", "85ms"]] },
+        "s-front": { col: "col-services", cls: "n-ok", name: "frontend-proxy",  meta: "96ms · 0,4% err", stats: [["p50", "96ms"]] },
+        "s-cat":   { col: "col-services", cls: "n-ok", name: "product-catalog", meta: "145ms · 0,2% err", stats: [["p50", "145ms"]] },
+        "d-pg":  { col: "col-deps", cls: "n-ok", name: "PostgreSQL",     meta: "9ms · ok", stats: [["p50", "9ms"]] },
+        "d-cdn": { col: "col-deps", cls: "n-ok", name: "Cloudflare CDN", meta: "85ms · assets", stats: [["p50", "85ms"]] },
+        "d-ga":  { col: "col-deps", cls: "n-ok", name: "Google Analytics", meta: "120ms · beacon", stats: [["p50", "120ms"]] },
+      },
+      edges: [
+        ["device", "v-home", "ok"], ["device", "v-prod", "ok"],
+        ["v-home", "r-prods", "ok"], ["v-prod", "r-prods", "ok"], ["v-home", "r-assets", "ok"],
+        ["r-prods", "s-front", "ok"], ["s-front", "s-cat", "ok"],
+        ["s-cat", "d-pg", "ok"], ["r-assets", "d-cdn", "ok"], ["v-home", "d-ga", "ok"],
+      ],
+    },
+    legacy: {
+      session: {
+        mobile:  { score: 18, id: "LEGCY001-0", dur: "4min 05s", views: 5, actions: 6, errors: 22, crashes: 0 },
+        desktop: { score: 21, id: "LEGCY002-0", dur: "3min 50s", views: 5, actions: 5, errors: 19, crashes: 0 },
+      },
+      nodes: {
+        "v-home":  { col: "col-views", cls: "n-bad",  name: "/",                       meta: "carga 8,8s · 0", stats: [["Perf", 0], ["Carga p50", "8,8s"], ["Sessões", "71"]] },
+        "v-prod":  { col: "col-views", cls: "n-warn", name: "/product/*",              meta: "carga 5,3s · 38", stats: [["Perf", 38], ["Carga p50", "5,3s"], ["Sessões", "71"]] },
+        "v-cart":  { col: "col-views", cls: "n-warn", name: "/cart",                   meta: "carga 5,3s · 38", stats: [["Perf", 38], ["Carga p50", "5,3s"], ["Sessões", "71"]] },
+        "v-check": { col: "col-views", cls: "n-warn", name: "/cart/checkout/{id}",     meta: "carga 4,8s · 46", stats: [["Perf", 46], ["Carga p50", "4,8s"], ["Pedidos", "72"]] },
+        "r-pages": { col: "col-requests", cls: "n-warn", name: "GET páginas", meta: "5–9s por view", stats: [["p50", "5–9s"], ["Densidade de erros", "4,4/view"]] },
+        "r-check": { col: "col-requests", cls: "n-warn", name: "POST /checkout", meta: "4,8s", stats: [["p50", "4,8s"]] },
+        "s-unk": { col: "col-services", cls: "n-warn", name: "backend não instrumentado", meta: "instalar OneAgent", stats: [["Visibilidade", "somente frontend (RUM)"], ["Ação", "instrumentar com OneAgent"]] },
+        "d-unk": { col: "col-deps", cls: "n-warn", name: "dependências desconhecidas", meta: "sem visibilidade", stats: [["Ação", "instrumentação + Smartscape"]] },
+      },
+      edges: [
+        ["device", "v-home", "bad"], ["device", "v-prod", "warn"], ["device", "v-cart", "warn"], ["device", "v-check", "warn"],
+        ["v-home", "r-pages", "warn"], ["v-prod", "r-pages", "warn"], ["v-cart", "r-pages", "warn"], ["v-check", "r-check", "warn"],
+        ["r-pages", "s-unk", "warn"], ["r-check", "s-unk", "warn"], ["s-unk", "d-unk", "warn"],
+      ],
+    },
+    chat: {
+      session: {
+        mobile:  { score: 45, id: "CHAT0001-0", dur: "1min 18s", views: 1, actions: 6,  errors: 0, crashes: 0 },
+        desktop: { score: 45, id: "CHAT0002-0", dur: "2min 02s", views: 1, actions: 11, errors: 0, crashes: 0 },
+      },
+      nodes: {
+        "v-conv": { col: "col-views", cls: "n-info", name: 'Conversa "/"', meta: "1,3min de conversa (mediana)", stats: [["Sessões", "53"], ["Duração mediana", "1,3min"], ["Erros", 0]] },
+        "r-chat": { col: "col-requests", cls: "n-warn", name: "POST /api/chat (stream)", meta: "1,9s até 1ª resposta", stats: [["Até 1ª resposta", "1,9s"], ["Streaming", "sim"]] },
+        "r-hist": { col: "col-requests", cls: "n-ok", name: "GET /api/history", meta: "120ms", stats: [["p50", "120ms"]] },
+        "s-fe": { col: "col-services", cls: "n-ok", name: "chat-frontend", meta: "90ms", stats: [["p50", "90ms"]] },
+        "s-gw": { col: "col-services", cls: "n-ok", name: "llm-gateway",   meta: "240ms", stats: [["p50", "240ms"]] },
+        "d-llm":   { col: "col-deps", cls: "n-warn", name: "Provedor LLM",     meta: "~900ms/token · custo", stats: [["Latência", "~900ms/token"], ["Sinal certo", "tempo até 1ª resposta"]] },
+        "d-redis": { col: "col-deps", cls: "n-ok",   name: "Redis (contexto)", meta: "4ms", stats: [["p50", "4ms"]] },
+      },
+      edges: [
+        ["device", "v-conv", "ok"],
+        ["v-conv", "r-chat", "warn"], ["v-conv", "r-hist", "ok"],
+        ["r-chat", "s-gw", "warn"], ["r-hist", "s-fe", "ok"],
+        ["s-gw", "d-llm", "warn"], ["s-fe", "d-redis", "ok"],
+      ],
+    },
+  };
+  const EDGE_COLOR = {
+    ok: "color-mix(in srgb, var(--trace-good) 55%, transparent)",
+    warn: "color-mix(in srgb, var(--trace-warn) 70%, transparent)",
+    bad: "color-mix(in srgb, var(--trace-bad) 85%, transparent)",
+  };
+
+  let persona = "mobile", selNode = "device", jnApp = "mwa";
+  const jn = () => JOURNEYS[jnApp];
+
+  function renderDevice() {
+    const p = PERSONAS[persona], s = jn().session[persona];
+    $("node-device").innerHTML = `
+      <div class="device__frame ${p.frame}"><span class="device__score" style="color:${gradeColor(s.score)}">${s.score}</span></div>
+      <dl class="device__list">${[...p.details, ["Sessão", s.id], ["Duração", s.dur]]
+        .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
+  }
+  function renderJourneyNodes() {
+    ["col-views", "col-requests", "col-services", "col-deps"].forEach((col) => {
+      const h = $(col).querySelector("h3");
+      $(col).innerHTML = ""; $(col).appendChild(h);
+    });
+    Object.entries(jn().nodes).forEach(([id, n]) => {
+      const el = document.createElement("div");
+      el.className = `node ${n.cls}` + (selNode === id ? " sel" : "");
+      el.id = "node-" + id; el.dataset.node = id;
+      el.innerHTML = `<span class="node__name"><span class="node__dot"></span>${n.name}</span>
+        <span class="node__meta">${n.meta}</span>`;
+      $(n.col).appendChild(el);
+    });
+  }
+  /* todo detalhe disponível por nó — grupos "medido" (das consultas) e
+     "estimado" (ilustrativo até correlação via spans/Smartscape) */
+  function detailGroups(n) {
+    const bad = n.cls === "n-bad", warn = n.cls === "n-warn";
+    const g = [];
+    if (n.col === "col-views") {
+      g.push({ t: "Composição da carga", est: true, rows: [
+        ["Backend (TTFB)", bad ? "~62%" : "~28%"], ["Recursos/JS", bad ? "~26%" : "~48%"],
+        ["Renderização", bad ? "~12%" : "~24%"]] });
+      g.push({ t: "Público", est: true, rows: [
+        ["Mobile", "58%"], ["Desktop", "42%"], ["Top local", "São Paulo, BR"], ["Navegador líder", "Chrome 126"]] });
+      g.push({ t: "Fonte do dado", est: false, rows: [
+        ["Evento", "view_summary"], ["Tabela", "user.events"], ["Janela", "2h"], ["Amostragem", "100%"]] });
+      g.push({ t: "Próxima ação", est: false, rows: [
+        ["Replay", "ver sessões desta view"],
+        ["Trace", bad || warn ? "abrir requisições lentas" : "nada a fazer"]] });
+    } else if (n.col === "col-requests") {
+      g.push({ t: "Resposta (status)", est: true, rows: bad
+        ? [["2xx", "86%"], ["4xx", "1,6%"], ["5xx", "10,8%"], ["Timeout > 30s", "1,6%"]]
+        : warn
+        ? [["2xx", "97%"], ["4xx", "1,2%"], ["5xx", "1,8%"]]
+        : [["2xx", "99,7%"], ["4xx", "0,2%"], ["5xx", "0,1%"]] });
+      g.push({ t: "Características", est: false, rows: [
+        ["Tipo", "XHR / fetch"], ["Método", n.name.startsWith("POST") ? "POST" : "GET"],
+        ["Evento", "request · user.events"], ["Janela", "2h"]] });
+      g.push({ t: "Público", est: true, rows: [
+        ["Mobile", "58%"], ["Desktop", "42%"], ["Conexão típica", "4G · 38 Mbps"]] });
+      g.push({ t: "Próxima ação", est: false, rows: [
+        ["Trace", "abrir no Distributed Tracing"],
+        ["Falhas", bad || warn ? "ver Session Replay das falhas" : "monitorar"]] });
+    } else if (n.col === "col-services") {
+      const unknown = n.name.includes("não instrumentado");
+      g.push({ t: "Topologia", est: !unknown, rows: unknown
+        ? [["Visibilidade", "somente frontend (RUM)"], ["Smartscape", "sem nó de serviço"]]
+        : [["Chamado por", "frontend-proxy"], ["Descoberta", "Smartscape · spans"]] });
+      g.push({ t: "Fonte do dado", est: false, rows: unknown
+        ? [["Evento", "inexistente — sem OneAgent"], ["Cobertura", "0%"]]
+        : [["Evento", "spans"], ["Cobertura", "OneAgent"], ["Janela", "2h"]] });
+      g.push({ t: "Próxima ação", est: false, rows: unknown
+        ? [["1", "instalar OneAgent no host"], ["2", "nomear app e definir dono"]]
+        : [["Davis", "correlacionar problemas ativos"], ["Trace", "abrir PurePaths do serviço"]] });
+    } else if (n.col === "col-deps") {
+      const unknown = n.name.includes("desconhecidas");
+      g.push({ t: "Disponibilidade", est: true, rows: unknown
+        ? [["Visibilidade", "nenhuma"]]
+        : [["Últimas 24h", bad ? "97,1%" : warn ? "99,2%" : "99,98%"], ["Incidentes 7d", bad ? "3" : warn ? "1" : "0"]] });
+      g.push({ t: "Impacto no usuário", est: true, rows: bad
+        ? [["Sessões afetadas", "todas do fluxo de carrinho"], ["Sintoma", "espera > 1min"]]
+        : warn
+        ? [["Sintoma", "render atrasado / custo"], ["Abrangência", "parcial"]]
+        : [["Sintoma", "nenhum"], ["Abrangência", "—"]] });
+      g.push({ t: "Próxima ação", est: false, rows: unknown
+        ? [["1", "instrumentar + Smartscape"]]
+        : bad ? [["1", "escalar/failover do recurso"], ["2", "alerta Davis no limiar"]]
+        : [["Monitorar", "synthetic + Davis"]] });
+    }
+    return g;
+  }
+
+  function renderJnDetail() {
+    const groupsHtml = (gs) => gs.length ? `<div class="jn-detail__groups">${gs.map((gr) => `
+      <div class="jn-detail__g"><h5>${gr.t}${gr.est ? "<em>estimado</em>" : "<em>medido</em>"}</h5>
+        ${gr.rows.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${v}</span></div>`).join("")}
+      </div>`).join("")}</div>` : "";
+
+    if (selNode === "device") {
+      const p = PERSONAS[persona], s = jn().session[persona];
+      const gs = [
+        { t: "Sessão", est: false, rows: [["ID", s.id], ["Duração", s.dur], ["Views", s.views], ["Ações", s.actions]] },
+        { t: "Qualidade da sessão", est: false, rows: [["XScore", s.score], ["Erros", s.errors], ["Crashes", s.crashes]] },
+        { t: "Hardware & rede", est: false, rows: p.details },
+        { t: "Próxima ação", est: false, rows: [["Replay", "assistir esta sessão"], ["Segmento", "comparar com sessões similares"]] },
+      ];
+      $("jn-detail").innerHTML = `
+        <div class="jn-detail__title n-ok"><span class="node__dot"></span>Dispositivo do usuário</div>
+        <div class="jn-detail__stats">${[["XScore da sessão", s.score], ["Views", s.views], ["Ações", s.actions], ["Erros", s.errors], ["Crashes", s.crashes]]
+          .map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join("")}</div>
+        ${groupsHtml(gs)}`;
+      return;
+    }
+    const n = jn().nodes[selNode];
+    if (!n) return;
+    $("jn-detail").innerHTML = `
+      <div class="jn-detail__title ${n.cls || "n-ok"}"><span class="node__dot"></span>${n.name}</div>
+      <div class="jn-detail__stats">${n.stats.map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join("")}</div>
+      ${groupsHtml(detailGroups(n))}`;
+  }
+  function drawEdges() {
+    const svg = $("jn-svg");
+    const canvas = svg.parentElement.getBoundingClientRect();
+    svg.setAttribute("viewBox", `0 0 ${canvas.width} ${canvas.height}`);
+    const anchor = (id, side) => {
+      const el = $("node-" + id); if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: (side === "r" ? r.right : r.left) - canvas.left, y: r.top + r.height / 2 - canvas.top };
+    };
+    svg.innerHTML = jn().edges.map(([from, to, health]) => {
+      const a = anchor(from, "r"), b = anchor(to, "l");
+      if (!a || !b) return "";
+      const mx = (a.x + b.x) / 2;
+      const dim = selNode !== "device" && from !== selNode && to !== selNode;
+      return `<path d="M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}"
+        stroke="${EDGE_COLOR[health]}" ${health === "bad" ? 'class="edge-bad"' : ""}
+        style="opacity:${dim ? 0.15 : 0.85}"></path>`;
+    }).join("");
+  }
+  $("jn-grid").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-node]"); if (!el) return;
+    selNode = el.dataset.node;
+    document.querySelectorAll("#jn-grid .node, #jn-grid .device").forEach((n) =>
+      n.classList.toggle("sel", n.dataset.node === selNode));
+    renderJnDetail(); drawEdges();
+  });
+  $("jn-app-select").addEventListener("change", (e) => {
+    jnApp = e.target.value;
+    selNode = "device";
+    document.querySelectorAll("#jn-grid .device").forEach((n) => n.classList.add("sel"));
+    renderDevice(); renderJourneyNodes(); renderJnDetail();
+    drawEdges(); setTimeout(drawEdges, 60);
+  });
+  $("persona-chips").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-p]"); if (!b) return;
+    persona = b.dataset.p;
+    document.querySelectorAll("#persona-chips button").forEach((c) => c.classList.toggle("on", c === b));
+    renderDevice();
+    if (selNode === "device") renderJnDetail();
+    drawEdges(); setTimeout(drawEdges, 60);
+  });
+  window.addEventListener("resize", () => {
+    if ($("view-journey").classList.contains("on")) drawEdges();
+  });
+
+  /* ═══════════ boot ═══════════ */
+  renderSummary();
+  makeChart($("chart-main"));
+  buildFlow();
+  renderFwSide();
+  renderChain();
+  renderDevice();
+  renderJourneyNodes();
+  renderJnDetail();
+  requestAnimationFrame(loop);
+  if (reduceMotion) for (const s of charts) drawChart(s, 0);
+</script>

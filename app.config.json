@@ -1,0 +1,63 @@
+{
+  "environmentUrl": "https://bwm98081.apps.dynatrace.com",
+  "app": {
+    "name": "DeliveryChain UX",
+    "version": "0.1.0",
+    "description": "Smartscape delivery chain crossed with RUM, Davis, alerts and extensions.",
+    "id": "my.deliverychain.ux",
+    "scopes": [
+      {
+        "name": "storage:user.events:read",
+        "comment": "RUM on Grail: views, requests, errors and actions"
+      },
+      {
+        "name": "storage:events:read",
+        "comment": "Davis problems, custom alerts and extension events"
+      },
+      {
+        "name": "storage:entities:read",
+        "comment": "Names of applications, services and other entities"
+      },
+      {
+        "name": "storage:smartscape:read",
+        "comment": "Topology: smartscapeNodes and smartscapeEdges (delivery chain)"
+      },
+      {
+        "name": "storage:buckets:read",
+        "comment": "Bucket metadata required by the DQL client"
+      },
+      {
+        "name": "storage:system:read",
+        "comment": "System tables used by DQL"
+      },
+      {
+        "name": "davis-copilot:conversations:execute",
+        "comment": "list + run the conversation skill (Assist conversation starters)"
+      },
+      {
+        "name": "state:user-app-states:read",
+        "comment": "read the per-user query cache"
+      },
+      {
+        "name": "state:user-app-states:write",
+        "comment": "write the per-user query cache"
+      },
+      {
+        "name": "davis:analyzers:read",
+        "comment": "read the predictive analyzer definitions"
+      },
+      {
+        "name": "davis:analyzers:execute",
+        "comment": "run the forecast analyzer"
+      },
+      {
+        "name": "storage:spans:read",
+        "comment": "Opens one specific request in Distributed Tracing \u2014 that app accepts a trace id and nothing else."
+      },
+      {
+        "name": "storage:metrics:read",
+        "comment": "Throughput forecast per service rides the metric store \u2014 orders cheaper than re-scanning 24h of spans."
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Dynatrace app toolkit state — build cache, logs, and .tokens.json, which
+# holds the live app_token and toolkit_token for the tenant. Never committed.
+.dt-app/
+
+# macOS
+.DS_Store
+*.log
