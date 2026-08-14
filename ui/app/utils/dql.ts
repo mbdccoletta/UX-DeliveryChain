@@ -147,6 +147,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | summarize sessions = countDistinct(dt.rum.session.id),
     views = countIf(characteristics.classifier == "view_summary"),
     errors = countIf(characteristics.classifier == "error"),
+    crashes = countIf(characteristics.classifier == "error" and error.type == "crash"),
+    anrs = countIf(characteristics.classifier == "error" and error.type == "anr"),
     p50View = percentile(if(characteristics.classifier == "view_summary", toLong(duration)), 50),
     p90View = percentile(if(characteristics.classifier == "view_summary", toLong(duration)), 90),
     p95View = percentile(if(characteristics.classifier == "view_summary", toLong(duration)), 95),
