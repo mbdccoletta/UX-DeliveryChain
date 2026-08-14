@@ -252,6 +252,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
         series={pulse?.series ?? []}
         actionsPerMin={perMin(pulse?.actions ?? 0)}
         errors={app.errors} errorsPerMin={perMin(app.errors)}
+        crashes={app.crashes} anrs={app.anrs}
         anomalies={problems.length + scopeProblems}
         /* The core shows an Apdex, which is a speed reading and says nothing
            about what Davis detected. The problems belong beside it — named by
@@ -325,6 +326,9 @@ interface CardProps {
   /** The per-bin series; `t` is what the hover read-out puts on screen. */
   series: Array<{ t: string; sessions: number; errors: number; requests: number }>;
   actionsPerMin: string; errors: number; errorsPerMin: string;
+  /** The fatal subset of `errors` — crashes end the session, ANRs freeze it
+   *  until Android kills it. Mobile only, by what the types can occur on. */
+  crashes: number; anrs: number;
   anomalies: number;
   requests: number; reqFail: number; loadP50: number;
   /** Apdex over this application's user actions, or null when none were rated. */
@@ -587,6 +591,17 @@ function CleanCard(p: CardProps) {
             tone={p.errors > 0 ? "bad" : "info"} />
             <em className="tk-block__sparkv">{p.errorsPerMin}/min<br />error rate</em></>}>
           <div className="tk-row2">
+            {/* A mobile application's card leads with its FATAL failures.
+                Measured on guu84124: Astroshop Android had 289 crashes and
+                247 ANRs inside its error count — a crash ends the session
+                where an ordinary error merely dents it, and burying both in
+                "errors" hid the number that decides whether anyone ships a
+                hotfix tonight. Web apps cannot crash this way, so the stat
+                exists only where the types can occur. */}
+            {p.isMobile && (
+              <Stat v={fmtK(p.crashes)} l="crashes"
+                tone={p.crashes > 0 ? "bad" : "good"} />
+            )}
             <Stat v={fmtK(p.errors)} l="errors" tone={p.errors > 0 ? "bad" : undefined} />
             {/* The count that decides whether anyone should be woken up: how
                 many of those errors a person actually met. Red only for those. */}
@@ -597,6 +612,10 @@ function CleanCard(p: CardProps) {
           </div>
 
           <div className="tk-apdex">
+            {/* ANRs ride the note line rather than a fourth stat: the row
+                already carries the two fatal/triage numbers, and an ANR is
+                the crash's sibling — named beside it, not competing with it. */}
+            {p.isMobile && p.anrs > 0 && `${fmtK(p.anrs)} ANRs — app frozen until Android killed it · `}
             {p.realErrors === 0 && p.errors > 0
               ? "none reached a real user — robot and synthetic traffic only"
               : p.errorsThird > 0
