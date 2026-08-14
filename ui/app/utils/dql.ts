@@ -884,6 +884,35 @@ smartscapeEdges "runs_on"
 | limit 60`;
 
 /**
+ * The Databases app's entity behind a store address, when one exists.
+ *
+ * A store card is discovered from spans and carries an ADDRESS, while the
+ * Gen3 Databases app (dynatrace.database.overview — read off this tenant's
+ * registry) is keyed on DB_INSTANCE_* / DB_DATABASE_* smartscape ids. The
+ * bridge is the name, and it was measured before it became a rule:
+ *
+ *   store ns  "TradeManagement"  == DB_DATABASE_MSSQL "TradeManagement"
+ *   store     "easytrade-db"     ~  DB_INSTANCE_MSSQL "MSSQLSERVER@easytrade-db-0"
+ *   rds hosts appear as          "host:5432" for a store address "host"
+ *
+ * So: exact name, or "@address" inside an instance name (the host half of
+ * INSTANCE@HOST), or "address:" as its prefix. valkey/redis have no DB_*
+ * node at all — the hook returns nothing and the route offers nothing,
+ * rather than a filtered-looking page of everything.
+ */
+export const qDbEntity = (address: string, ns?: string) => {
+  const a = address.replace(/["\\]/g, "");
+  const n = (ns ?? "").replace(/["\\]/g, "");
+  return `
+smartscapeNodes "*"
+| filter startsWith(type, "DB_INSTANCE_") or startsWith(type, "DB_DATABASE_")
+| filter name == "${a}"${n ? ` or name == "${n}"` : ""}
+    or contains(name, "@${a}") or startsWith(name, "${a}:")
+| fields id, type, name
+| limit 4`;
+};
+
+/**
  * The provider behind a serverless placement.
  *
  * A lambda-backed service produces no HOST, so the Cloud layer — born only

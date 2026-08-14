@@ -13,6 +13,7 @@ import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
+import { useDbEntity } from "../hooks/useDbEntity";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
 import { davisCategory, verdictOf, worseOf, type Tone } from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
@@ -1074,6 +1075,13 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     return null;
   }, [selElo, selTier, appId]);
   const met = useNodeMetrics(metTarget);
+  /* The Databases app's entity behind the selected store, resolved only
+   * while its drawer is open. The namespace rides along because the measured
+   * exact match was on it (TradeManagement), not on the address. */
+  const selStore = selElo?.store ?? null;
+  const selStoreNs = selStore
+    ? stores?.find((st) => st.store === selStore && st.ns)?.ns : undefined;
+  const dbEntity = useDbEntity(selStore, selStoreNs, !!selStore);
 
   // Whether the selected domain- or store-kind card has spans behind it —
   // decides whether its investigation route can offer Distributed Tracing
@@ -1510,6 +1518,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   // the fatal subset, so a mobile application's route can
                   // lead with the thing its card leads with
                   crashes: scopedApp?.crashes,
+                  dbEntity: dbEntity ?? undefined,
                   // A store card carries no `domain`, it carries `store` — the
                   // same address shape, just named for what it is.
                   domain: selElo.domain ?? selElo.store,

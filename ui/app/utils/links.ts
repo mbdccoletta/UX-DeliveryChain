@@ -517,6 +517,13 @@ export interface LinkContext {
   /** Crashes measured on the scoped application — the fatal subset of its
    *  errors, so a mobile route can lead with them. */
   crashes?: number;
+  /**
+   * The Databases app's entity resolved behind a store address — measured by
+   * name against DB_INSTANCE / DB_DATABASE nodes (useDbEntity), never
+   * guessed. Present, the store route opens the platform's own Databases
+   * app; absent, the store has no page there and none is offered.
+   */
+  dbEntity?: { id: string; type: string; name: string };
   /** An active Davis problem on this element, opened directly in the Problems app. */
   problem?: {
     eventId: string; display_id: string; name: string;
@@ -655,7 +662,7 @@ function domainTracesLink(address: string, apps: AppMap | undefined, tf: Timefra
  */
 export function investigationPaths(
   { ids, name, tf, rumAppId, scopedAppName, scopedEntity, kind, errors, sessions,
-    crashes, problem, problems = 0,
+    crashes, dbEntity, problem, problems = 0,
     problemHints = [], domain, domainHasSpans = false, facts,
     assist = false, apps = {}, impacted, signals = 0, forecastRising = false }: LinkContext,
 ): Route[] {
@@ -1066,6 +1073,26 @@ export function investigationPaths(
       if (domainHop) tech.push(domainHop);
       break;
     case "store":
+      /* The platform's own Databases app leads, when the store resolves to
+       * one of its entities. App id and intent read off THIS tenant's
+       * registry (dynatrace.database.overview; view-instance-details /
+       * view-database-details, each requiring exactly its smartscape id);
+       * the id itself comes from the measured name bridge in useDbEntity.
+       * A valkey has no DB_* node and simply keeps the traces hop alone. */
+      if (dbEntity) {
+        const isInstance = dbEntity.type.startsWith("DB_INSTANCE_");
+        tech.push(link("Open the database", dbEntity.name,
+          withTf(tf, {
+            [isInstance ? "dt.smartscape.db_instance_id"
+              : "dt.smartscape.db_database_id"]: dbEntity.id,
+          }),
+          { keyProperties: [isInstance ? "dt.smartscape.db_instance_id"
+              : "dt.smartscape.db_database_id"],
+            appId: "dynatrace.database.overview",
+            intentId: isInstance ? "view-instance-details" : "view-database-details",
+            app: "Databases",
+            proves: "the platform's own view of this store — statements, load and health" }));
+      }
       if (storeHop) tech.push(storeHop);
       break;
     case "element":
