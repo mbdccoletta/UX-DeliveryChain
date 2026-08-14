@@ -584,10 +584,13 @@ function CleanCard(p: CardProps) {
             );
           })()}
         </Module>
-        {/* The mobile card's headline names the thing it leads with — the
-            reader asked for the word itself, not only the number under it. */}
+        {/* The headline names what the card actually shows: crashes (mobile),
+            errors, and Davis problems. "Anomalies" was dropped — the stat
+            beside it counts active PROBLEMS, and a title promising a signal
+            the card does not carry is the kind of quiet lie this project
+            keeps hunting elsewhere. */}
         <Module Icon={WarningIcon}
-          title={p.isMobile ? "Crashes, errors & anomalies" : "Errors & anomalies"}
+          title={p.isMobile ? "Crashes & errors" : "Errors"}
           tone={errTone}
           pulse={p.anomalies > 0}
           metric="errors" active={p.detail === "errors"} onPick={p.onMetric}
