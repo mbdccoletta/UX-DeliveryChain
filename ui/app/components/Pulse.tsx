@@ -135,10 +135,22 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
   const scopeProbs = data.problems.filter((pr) =>
     (pr.entityIds ?? []).some((id) => scope.services.has(id)));
   const scopeProblems = scopeProbs.length;
+  /* Anomalies, counted by the SAME rule that turns a chain card amber:
+   * BASELINING signals bound to this application's entity or anything in its
+   * delivery scope. The Overview never read data.signals before — the card
+   * knocked and the legend said "anomaly" while the number behind both was
+   * the problem count wearing the wrong name. */
+  const scopeIds = new Set<string>([
+    ...(app.entity ? [app.entity] : []),
+    ...scope.services, ...scope.runtime,
+  ]);
+  const anomalies = data.signals.filter((sg) =>
+    sg.provider === "BASELINING" && scopeIds.has(sg.entityId)).length;
   // ONE verdict, from utils/verdict.ts, shared with the chain, the estate
   // table and the report — so no two screens can disagree about this app.
   const verdict = verdictOf({
     problems: problems.length + scopeProblems,
+    anomalies,
     categories: [...problems, ...scopeProbs].map((p) => p.category),
     sessions: impacted?.sessions, hit: impacted?.hit,
     // the population that can actually be harmed decides the verdict
@@ -253,7 +265,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
         actionsPerMin={perMin(pulse?.actions ?? 0)}
         errors={app.errors} errorsPerMin={perMin(app.errors)}
         crashes={app.crashes} anrs={app.anrs}
-        anomalies={problems.length + scopeProblems}
+        anomalies={anomalies}
         /* The core shows an Apdex, which is a speed reading and says nothing
            about what Davis detected. The problems belong beside it — named by
            category, in the platform's own words, so the card carries both what
@@ -547,7 +559,7 @@ function CleanCard(p: CardProps) {
   const errs = p.series.map((s) => s.errors);
   const reqs = p.series.map((s) => s.requests);
   const times = p.series.map((s) => s.t);
-  const errTone: Tone = p.errors > 0 ? "bad" : "good";
+  const errTone: Tone = p.errors > 0 ? "bad" : p.anomalies > 0 ? "warn" : "good";
   // A failure RATE, not a failure count: with 927k requests a single 4xx is
   // 0.0% — turning the box red and making it knock for that is a false alarm,
   // and a card that cries wolf is worse than one that says nothing.
@@ -584,13 +596,12 @@ function CleanCard(p: CardProps) {
             );
           })()}
         </Module>
-        {/* The headline names what the card actually shows: crashes (mobile),
-            errors, and Davis problems. "Anomalies" was dropped — the stat
-            beside it counts active PROBLEMS, and a title promising a signal
-            the card does not carry is the kind of quiet lie this project
-            keeps hunting elsewhere. */}
+        {/* The headline earned "anomalies" back: the stat beside it now
+            counts real BASELINING signals in this app's delivery scope — the
+            same rule that turns a chain card amber — where it used to wear
+            the problem count under the wrong name. */}
         <Module Icon={WarningIcon}
-          title={p.isMobile ? "Crashes & errors" : "Errors"}
+          title={p.isMobile ? "Crashes, errors & anomalies" : "Errors & anomalies"}
           tone={errTone}
           pulse={p.anomalies > 0}
           metric="errors" active={p.detail === "errors"} onPick={p.onMetric}
@@ -614,8 +625,12 @@ function CleanCard(p: CardProps) {
                 many of those errors a person actually met. Red only for those. */}
             <Stat v={p.realErrors === null ? "…" : fmtK(p.realErrors)} l="reached a user"
               tone={p.realErrors ? "bad" : "good"} />
-            <Stat v={String(p.anomalies)} l={`active problem${p.anomalies === 1 ? "" : "s"}`}
-              tone={p.anomalies > 0 ? "bad" : "good"} />
+            {/* amber, never red: an anomaly is Davis noticing a deviation,
+                not measured user harm — the chain draws it the same way */}
+            <Stat v={String(p.anomalies)} l={`anomal${p.anomalies === 1 ? "y" : "ies"}`}
+              tone={p.anomalies > 0 ? "warn" : "good"} />
+            <Stat v={String(p.problems)} l={`active problem${p.problems === 1 ? "" : "s"}`}
+              tone={p.problems > 0 ? "bad" : "good"} />
           </div>
 
           <div className="tk-apdex">
