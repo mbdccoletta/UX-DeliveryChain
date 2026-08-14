@@ -178,6 +178,12 @@ svg { shape-rendering: geometricPrecision; }
 .flow-empty em { display: block; margin-top: 6px; font-style: normal;
   font: 400 11px var(--mono); color: var(--ink-3); }
 
+/* the sessions matching a custom path — chips that open the platform viewer */
+.flow-sess { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 8px 14px; border-top: 1px solid var(--border); }
+.flow-sess__none { font: 400 11px var(--mono); color: var(--ink-3);
+  font-style: normal; }
+
 /* the custom path's own band: each waypoint a removable chip */
 .flow-sel--path { border-left: 3px solid var(--accent); }
 .flow-pick { font: 600 10px var(--mono); color: var(--accent);

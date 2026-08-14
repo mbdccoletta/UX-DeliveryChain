@@ -2,7 +2,9 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INTENT, fmtMs, fmtN, reachesOutcome } from "../utils/dql";
+import { DONE, INTENT, fmtMs, fmtN, normalizeView, qPathSessions,
+  reachesOutcome, runDql, type Timeframe } from "../utils/dql";
+import { open as openLink, sessionViewerLink } from "../utils/links";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor, priorities } from "../utils/friction";
 
@@ -372,9 +374,12 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 }
 
 export function FlowSankey({
-  apps, seqs, appId, transitions = [], friction = [], views = [], ux, onPickApp, onOpen,
+  apps, seqs, appId, transitions = [], friction = [], views = [], ux, tf,
+  onPickApp, onOpen,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
+  /** The window on screen — the matching-sessions fetch scans exactly it. */
+  tf?: Timeframe;
   transitions?: TransitionRow[]; friction?: FrictionRow[];
   /** Per-app UX aggregate — the funnel reads window-fragment counts from it. */
   ux?: Map<string, { fragments: number }> | null;
@@ -398,6 +403,11 @@ export function FlowSankey({
    * every number on screen is the isolated cohort's own, not a lit subset
    * of the old ones. */
   const [picks, setPicks] = useState<string[]>([]);
+  /* The sessions behind the picked path, fetched only when asked: one scan
+   * per click of the drill-down button, matched client-side with the SAME
+   * normalisation and pick rules the diagram used. null = not asked. */
+  const [pathSessions, setPathSessions] =
+    useState<null | "loading" | Array<{ sid: string; start: string }>>(null);
   const [mode, setMode] = useState<"steps" | "paths">("steps");
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
@@ -645,6 +655,29 @@ export function FlowSankey({
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
   useEffect(() => { setPicks([]); }, [appId, mode]);
+  // the fetched list describes ONE set of picks over one window
+  useEffect(() => { setPathSessions(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
+
+  const fetchPathSessions = async () => {
+    if (!appId || !tf) return;
+    setPathSessions("loading");
+    try {
+      const rows = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
+      const hits: Array<{ sid: string; start: string }> = [];
+      for (const r of rows) {
+        const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
+          .map(normalizeView)
+          // the same adjacent-duplicate collapse mergeJourneys applies — a
+          // summary closes the very view its navigation opened
+          .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
+        if (journey.length && matchesPicks(journey, picks)) {
+          hits.push({ sid: String(r.sid), start: String(r.start) });
+        }
+      }
+      hits.sort((a, b) => b.start.localeCompare(a.start));
+      setPathSessions(hits);
+    } catch { setPathSessions([]); }
+  };
 
   /* the lit-path ids belong to one model; changing mode invalidates them */
   useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId]);
@@ -793,12 +826,43 @@ export function FlowSankey({
               {all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}
             </span>
             <div className="spacer" />
+            {/* the drill-down the reader asked for: the SESSIONS matching the
+                picked path, each opening the platform's own session viewer */}
+            <button className="flow-sel__b"
+              onClick={fetchPathSessions}
+              disabled={pathSessions === "loading"}
+              title="Fetch the sessions matching this path — each opens in Users & Sessions">
+              {pathSessions === "loading" ? "matching…" : "open matching sessions"}
+            </button>
             <button className="flow-sel__b" onClick={() => setPicks([])}>
               clear path ✕
             </button>
           </div>
         );
       })()}
+
+      {/* The matching sessions, newest first — capped and saying so. Each row
+          is the verified session-details-from-event hand-off, so it opens the
+          exact viewer the reader compared us against. */}
+      {Array.isArray(pathSessions) && (
+        <div className="flow-sess">
+          {pathSessions.length === 0 && (
+            <em className="flow-sess__none">no session in this window matches the whole path</em>
+          )}
+          {pathSessions.slice(0, 12).map((x) => (
+            <button key={x.sid} className="flow-pick"
+              title={`Open session ${x.sid} in Users & Sessions`}
+              onClick={() => openLink(sessionViewerLink(x.sid, x.start))}>
+              {x.start.slice(11, 19)} · …{x.sid.slice(-8)}
+            </button>
+          ))}
+          {pathSessions.length > 12 && (
+            <em className="flow-sess__none">
+              showing 12 of {fmtN(pathSessions.length)} — narrow the path or the window for the rest
+            </em>
+          )}
+        </div>
+      )}
 
       {/* Second band: only when something is selected — what it is and where to go. */}
       {selNode ? (

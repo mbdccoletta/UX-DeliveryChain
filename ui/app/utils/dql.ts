@@ -228,6 +228,39 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | sort sessions desc | limit 200`;
 
 /**
+ * The SESSIONS behind a mined path — same pipeline as qSequences, stopped one
+ * aggregation earlier.
+ *
+ * The custom-path picker isolates journeys; this answers "show me those
+ * sessions": per-session ordered views through the identical normalisation
+ * (VIEW_NAME, the id-collapsing patterns, the depth cap), plus the session id
+ * and its first event time — exactly the pair the verified
+ * session-details-from-event intent requires. Matching against the picks
+ * happens client-side with the same rules the diagram used, so the list and
+ * the ribbon can never disagree about who belongs.
+ *
+ * Fetched on demand (the button), never with the page: it scans the window
+ * per click, and only the click has asked for it.
+ */
+export const qPathSessions = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter (characteristics.classifier == "navigation"
+    or characteristics.classifier == "view_summary")
+  and isNotNull(${VIEW_NAME})
+| fieldsAdd v = replacePattern(${VIEW_NAME},
+    "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
+| fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
+| fieldsAdd v = replacePattern(v, "'/' INT", "/*")
+| fieldsAdd seg = splitString(v, "/")
+| fieldsAdd v = if(arraySize(seg) > 3, concat("/", seg[1], "/", seg[2], "/*"), else: v)
+| fieldsRemove seg
+| sort start_time asc
+| summarize path = collectArray(v), start = min(start_time),
+  by: { sid = dt.rum.session.id }
+| limit 2000`;
+
+/**
  * Collapses the identifier-looking parts of a view name, so two sessions that
  * differ only by a product id or an order UUID count as the same journey.
  *

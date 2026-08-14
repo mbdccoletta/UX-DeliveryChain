@@ -252,6 +252,7 @@ export function App() {
             <div className="stack">
               <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={appId}
                 transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
+                tf={tf}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
             </div>
