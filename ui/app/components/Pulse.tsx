@@ -845,6 +845,14 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
               + (dd ? " svcf__row--go" : ""),
             ...rowProps,
           }, <>
+            {/* A fatal row says so before its name. A crash arrives here
+                titled by its exception message — "26 crashes" on the card
+                above and not the word crash anywhere in this list was the
+                reader's own complaint. The row's error.type is already
+                measured; this only stops hiding it. */}
+            {metric === "errors" && (r.type === "crash" || r.type === "anr") && (
+              <b className="svcf__fatal">{r.type === "anr" ? "ANR" : "CRASH"}</b>
+            )}
             <span className="svcf__nm" title={r.name}>{r.name}</span>
             <span className="svcf__bar" aria-hidden="true">
               <i style={{ width: `${(r.vol / max) * 100}%` }} />
@@ -860,8 +868,12 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
                     : <em className="dim">no real user</em>}
                 </span>
                 <span className="svcf__f">
-                  <em className="dim">{r.third ? "third party" : "own code"}
-                    {r.src ? ` · ${r.src}` : ""}</em>
+                  <em className="dim">
+                    {r.type === "crash" ? "fatal — the session ends here"
+                      : r.type === "anr" ? "fatal — frozen until Android killed it"
+                      : <>{r.third ? "third party" : "own code"}
+                          {r.src ? ` · ${r.src}` : ""}</>}
+                  </em>
                 </span>
               </>
             ) : (
