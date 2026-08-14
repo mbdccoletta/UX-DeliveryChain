@@ -986,6 +986,15 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    only exists because something is wrong */
 .tk-btn--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border-2)); }
 
+/* The Serve column's seams: a labelled rule where the cards change nature —
+   services above, classic topology (the mainframe's home) and data stores
+   below. Identification was the ask; the label does it without a colour. */
+.gdiv { width: 100%; display: flex; align-items: center; gap: 8px;
+  margin: 2px 0 -6px; font: 600 8px var(--mono); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.gdiv::before, .gdiv::after { content: ""; flex: 1; height: 1px;
+  background: var(--border-2); }
+
 /* the badge a signalled card wears: its own anomaly count, always on.
    Amber and numeric, so seven signals on two grouped cards still add up to
    seven before anything is clicked. Red problems keep the tone; this is the
