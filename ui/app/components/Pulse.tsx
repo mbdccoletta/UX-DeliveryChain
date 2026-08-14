@@ -13,7 +13,7 @@
 // green is a session that made it, red is one that did not.
 import React, { useEffect, useRef, useState } from "react";
 import { fmtK, fmtMs, fmtN } from "../utils/dql";
-import type { ChainData } from "../hooks/useChainData";
+import type { ChainData, SignalRow } from "../hooks/useChainData";
 import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
@@ -144,8 +144,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
     ...(app.entity ? [app.entity] : []),
     ...scope.services, ...scope.runtime,
   ]);
-  const anomalies = data.signals.filter((sg) =>
-    sg.provider === "BASELINING" && scopeIds.has(sg.entityId)).length;
+  /* The ROWS, not just their count — the card said "9 anomalies" and nowhere
+   * on this page could the nine be seen. The number without its evidence is
+   * the defect this project keeps removing elsewhere. */
+  const anomalyRows = data.signals.filter((sg) =>
+    sg.provider === "BASELINING" && scopeIds.has(sg.entityId));
+  const anomalies = anomalyRows.length;
   // ONE verdict, from utils/verdict.ts, shared with the chain, the estate
   // table and the report — so no two screens can disagree about this app.
   const verdict = verdictOf({
@@ -308,6 +312,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
       {detail && detail !== "services" && (
         <DetailPanel metric={detail} rows={detailRows} tf={data.tf}
           appEntity={appEntityOf(app.entity, appId)} appName={app.name}
+          anomalies={detail === "errors" ? anomalyRows : undefined}
+          entityName={(id) => scope.names.get(id)}
           tracedDomains={domainTraces} onClose={() => setDetail(null)} />
       )}
     </div>
@@ -780,8 +786,13 @@ function Stat({ v, l, tone, title }: {
  * components repeating the same frame.
  */
 function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
-  onClose }: {
+  anomalies, entityName, onClose }: {
   metric: DetailMetric; rows: DetailRow[] | null; tf: TimeframeT;
+  /** The anomaly signals behind the card's count — the evidence the "9" on
+   *  the card was missing. Errors panel only. */
+  anomalies?: SignalRow[];
+  /** Resolves a scoped entity id to its display name, where one is known. */
+  entityName?: (id: string) => string | undefined;
   /** The application's entity id — what the intent hand-offs are keyed on. */
   appEntity?: string;
   /** Its display name — what the Error Inspector's filter bar matches on. */
@@ -943,6 +954,25 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           </>);
         })}
       </div>
+
+      {/* The anomalies behind the card's count. "9 anomalies" with nowhere
+          to see the nine was the reader's own question — each row is one
+          BASELINING signal, named by Davis, bound to something in this
+          application's delivery scope. */}
+      {anomalies && anomalies.length > 0 && (
+        <>
+          <div className="dtp-anhd">Anomalies
+            <em> · Davis baselining, on this application&apos;s delivery scope</em></div>
+          {anomalies.map((a, i2) => (
+            <div className="dtp-an" key={`${a.entityId}-${i2}`}>
+              <span className="dtp-an__nm" title={a.entityId}>{a.name}</span>
+              <span className="dtp-an__on">{entityName?.(a.entityId) ?? a.entityId}</span>
+              <span className="dtp-an__v">{fmtN(a.events)} events
+                {a.status ? ` · ${a.status.toLowerCase()}` : ""}</span>
+            </div>
+          ))}
+        </>
+      )}
       <div className="svcf__note">
         {metric === "errors"
           ? "one row per KIND of failure — ids in the url are collapsed, so a broken "
