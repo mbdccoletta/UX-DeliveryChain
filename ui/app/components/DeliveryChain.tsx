@@ -1407,6 +1407,9 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
                   // hand-off is gated on it, so a segment with nothing to
                   // list offers no list
                   sessions: selTier === 0 ? selElo.vol : undefined,
+                  // the fatal subset, so a mobile application's route can
+                  // lead with the thing its card leads with
+                  crashes: scopedApp?.crashes,
                   // A store card carries no `domain`, it carries `store` — the
                   // same address shape, just named for what it is.
                   domain: selElo.domain ?? selElo.store,

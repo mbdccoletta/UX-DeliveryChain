@@ -497,6 +497,9 @@ export interface LinkContext {
   /** Sessions measured on this element — an origin card's own count, so the
    *  sessions hand-off is offered exactly when there is something to list. */
   sessions?: number;
+  /** Crashes measured on the scoped application — the fatal subset of its
+   *  errors, so a mobile route can lead with them. */
+  crashes?: number;
   /** An active Davis problem on this element, opened directly in the Problems app. */
   problem?: {
     eventId: string; display_id: string; name: string;
@@ -635,7 +638,7 @@ function domainTracesLink(address: string, apps: AppMap | undefined, tf: Timefra
  */
 export function investigationPaths(
   { ids, name, tf, rumAppId, scopedAppName, scopedEntity, kind, errors, sessions,
-    problem, problems = 0,
+    crashes, problem, problems = 0,
     problemHints = [], domain, domainHasSpans = false, facts,
     assist = false, apps = {}, impacted, signals = 0, forecastRising = false }: LinkContext,
 ): Route[] {
@@ -972,7 +975,24 @@ export function investigationPaths(
        * behind the overview when it is not. */
       if (errors && errors > 0) {
         const insp = errorsLink(tf, name, errors);
-        if (failing) tech.unshift(insp); else tech.push(insp);
+        /* The hints regex only saw Davis problems — an application with a
+         * third of its sessions hit but no active problem still filed its
+         * errors last, behind the vitals. Measured harm is the same
+         * evidence. */
+        if (failing || (impacted && impacted.hit > 0)) tech.unshift(insp);
+        else tech.push(insp);
+      }
+      /* A crashing MOBILE application leads with its crashes — the fatal
+       * subset the whole card exists to surface, opened already narrowed
+       * (Frontend + "Error Type" = Crash, both read off real urls). Unshifted
+       * AFTER the error step so it lands first: crashes, then all errors,
+       * then the vitals. */
+      if (kind === "mobileApp" && crashes && crashes > 0) {
+        tech.unshift(link("Inspect the crashes",
+          `Error Inspector · ${crashes.toLocaleString()} crashes · ${tf.label}`, {},
+          { app: "Error Inspector",
+            href: errorsExplorerHref(tf, name, undefined, "Crash"),
+            proves: "every crash, ranked by users affected" }));
       }
       break;
     case "process":
