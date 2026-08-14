@@ -874,15 +874,18 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
               + (dd ? " svcf__row--go" : ""),
             ...rowProps,
           }, <>
-            {/* A fatal row says so before its name. A crash arrives here
-                titled by its exception message — "26 crashes" on the card
-                above and not the word crash anywhere in this list was the
-                reader's own complaint. The row's error.type is already
-                measured; this only stops hiding it. */}
-            {metric === "errors" && (r.type === "crash" || r.type === "anr") && (
-              <b className="svcf__fatal">{r.type === "anr" ? "ANR" : "CRASH"}</b>
-            )}
-            <span className="svcf__nm" title={r.name}>{r.name}</span>
+            {/* The tag lives INSIDE the name cell. As a sibling it became a
+                sixth child of a five-column positional grid — every cell
+                slid one column over, the name landed centred in the bar's
+                track and the fatal note wrapped onto a second grid row. The
+                reader saw it as "muitos espaços desnecessários", and it was
+                literally the layout misaligned. */}
+            <span className="svcf__nm" title={r.name}>
+              {metric === "errors" && (r.type === "crash" || r.type === "anr") && (
+                <b className="svcf__fatal">{r.type === "anr" ? "ANR" : "CRASH"}</b>
+              )}
+              {r.name}
+            </span>
             <span className="svcf__bar" aria-hidden="true">
               <i style={{ width: `${(r.vol / max) * 100}%` }} />
             </span>
