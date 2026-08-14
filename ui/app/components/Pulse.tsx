@@ -856,8 +856,15 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
             href: dd.href, target: "_blank", rel: "noreferrer",
             title: `${dd.label} — ${dd.proves}`,
             onClick: (e: React.MouseEvent) => {
-              if ((dd as DeepLink).payload && intentsAvailable()) {
-                e.preventDefault(); open(dd as DeepLink);
+              /* Only a REAL intent payload goes to the bus. The error rows
+                 travel by url now (viaHref, payload {}), and `{}` is truthy —
+                 this guard used to swallow their href and send an empty
+                 intent instead, which opened the chooser with "No compatible
+                 intents found". Screenshotted on the crash rows. */
+              const d = dd as DeepLink;
+              if (!d.viaHref && d.payload
+                  && Object.keys(d.payload).length > 0 && intentsAvailable()) {
+                e.preventDefault(); open(d);
               }
             },
           } : {};
