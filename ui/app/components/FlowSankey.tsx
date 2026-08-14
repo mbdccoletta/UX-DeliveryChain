@@ -720,15 +720,15 @@ export function FlowSankey({
       {/* One band: what you are asking, and the answer in numbers. */}
       <div className="flow-hd">
         <div className="seg" role="group" aria-label="Question">
-          <button className={mode === "steps" ? "on" : ""} aria-pressed={mode === "steps"}
-            onClick={() => setMode("steps")}
-            title="One column per view position — shows the order and where sessions stop">
-            Where they drop off
-          </button>
           <button className={mode === "paths" ? "on" : ""} aria-pressed={mode === "paths"}
             onClick={() => setMode("paths")}
             title="One ribbon per complete route through the application">
             Which routes they take
+          </button>
+          <button className={mode === "steps" ? "on" : ""} aria-pressed={mode === "steps"}
+            onClick={() => setMode("steps")}
+            title="One column per view position — shows the order and where sessions stop">
+            Where they drop off
           </button>
         </div>
         {sum && (
