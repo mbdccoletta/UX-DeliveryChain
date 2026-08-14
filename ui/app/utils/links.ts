@@ -408,6 +408,18 @@ function safeLink(payload: IntentPayload, appId?: string, intentId?: string): st
 }
 
 /**
+ * One session in the platform's own viewer — the verified
+ * session-details-from-event pair (dt.rum.session.id + start_time), the same
+ * payload the routes' "Open an impacted session" step already sends.
+ */
+export const sessionViewerLink = (sid: string, start: string): DeepLink =>
+  link("Open this session", sid,
+    { "dt.rum.session.id": sid, "start_time": start },
+    { keyProperties: ["dt.rum.session.id"], app: "Users & Sessions",
+      appId: SESSION_GEN3.appId, intentId: SESSION_GEN3.intentId,
+      proves: "this session, event by event, in the platform's own viewer" });
+
+/**
  * An app's own front door — `/ui/apps/<id>` — absolute so it survives the
  * iframe. The backend summary hands whole subjects to the apps that manage
  * them, and an app's home is the one url that needs no observed grammar.
