@@ -391,7 +391,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * the Serve layer room for at least two of its own services while letting
    * a classic-only chain arrive whole. */
   const gen2Cards: Elo[] = (gen2 ?? []).slice(0, 10).map<Elo>((g) => ({
-    nm: g.name, mt: `${KIND_LABEL(g.kind)} · Gen2 only`,
+    nm: g.name, mt: `${KIND_LABEL(g.kind)} · topology-mapped`,
     v: String(g.callers.length || "·"), tone: "info",
     vol: Math.max(g.callers.length * 40, 1),
     ids: [g.id], gen2: g.id, gen2Db: /DATABASE|DATASTORE/.test(g.kind),
@@ -1260,7 +1260,12 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                       return (<React.Fragment key={id}>
                         {seam && (
                           <div className="gdiv" aria-hidden="true">
-                            {seam === "classic" ? "classic topology" : "data stores"}
+                            {/* Not "classic": in this platform's vocabulary
+                                Classic names the Gen2 APPS, and the seam is
+                                about these ELEMENTS' origin — they were
+                                mapped from the topology model, not from
+                                traces. The reader flagged the collision. */}
+                            <b>{seam === "classic" ? "mapped from topology" : "data stores"}</b>
                           </div>
                         )}
                         <div data-node

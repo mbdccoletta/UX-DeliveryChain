@@ -991,9 +991,14 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    below. Identification was the ask; the label does it without a colour. */
 .gdiv { width: 100%; display: flex; align-items: center; gap: 8px;
   margin: 2px 0 -6px; font: 600 8px var(--mono); letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+  text-transform: uppercase; color: var(--ink-3); white-space: nowrap;
+  position: relative; z-index: 3; }
 .gdiv::before, .gdiv::after { content: ""; flex: 1; height: 1px;
   background: var(--border-2); }
+/* the label sits on its own ground — the mesh's edges run behind every card
+   and were running straight through the lettering */
+.gdiv b { font-weight: 600; background: var(--panel-2); border-radius: 4px;
+  padding: 1px 7px; }
 
 /* the badge a signalled card wears: its own anomaly count, always on.
    Amber and numeric, so seven signals on two grouped cards still add up to
