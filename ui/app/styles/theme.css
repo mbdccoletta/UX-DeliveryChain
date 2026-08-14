@@ -1000,6 +1000,35 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .gdiv b { font-weight: 600; background: var(--panel-2); border-radius: 4px;
   padding: 1px 7px; }
 
+/* ── the Backend block: the summarised half of the chain ──
+   One column standing for Serve→Cloud, each row a subject and the platform
+   app that manages it. It is a DESTINATION LIST, not a graph — that is the
+   point of the pivot. */
+.gcol--bsum { justify-content: flex-start; }
+.bsum { display: flex; flex-direction: column; gap: 4px; padding: 10px 10px 14px;
+  align-items: stretch; position: relative; }
+.bsum__c { width: 34px; height: 34px; margin: 6px auto 10px; }
+.bsum__row { display: grid; grid-template-columns: 1fr auto; column-gap: 10px;
+  align-items: baseline; padding: 7px 9px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  text-decoration: none; }
+.bsum__row--go { cursor: pointer; }
+.bsum__row--go:hover, .bsum__row--go:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent); }
+.bsum__l { font: 600 10px var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-2); }
+.bsum__v { font: 700 15px var(--mono); color: var(--ink); text-align: right; }
+.bsum__s { grid-column: 1; font: 400 9px var(--mono); color: var(--ink-3);
+  font-style: normal; }
+.bsum__go { grid-column: 2; font: 600 9px var(--mono); color: var(--accent);
+  font-style: normal; text-align: right; }
+/* the spotlight treats the block as one component */
+.graph--hl .bsum--dim { opacity: 0.22; filter: saturate(0.3); }
+.graph--hl .bsum--spot .bsum__c {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--warn) 45%, transparent);
+  animation: hlspot 1.6s ease-in-out infinite; }
+
 /* the badge a signalled card wears: its own anomaly count, always on.
    Amber and numeric, so seven signals on two grouped cards still add up to
    seven before anything is clicked. Red problems keep the tone; this is the

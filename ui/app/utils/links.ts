@@ -407,6 +407,19 @@ function safeLink(payload: IntentPayload, appId?: string, intentId?: string): st
   return appId && intentId ? intentUrl(appId, intentId, payload) : "#";
 }
 
+/**
+ * An app's own front door — `/ui/apps/<id>` — absolute so it survives the
+ * iframe. The backend summary hands whole subjects to the apps that manage
+ * them, and an app's home is the one url that needs no observed grammar.
+ */
+export function appHomeHref(appId: string): string {
+  const path = `/ui/apps/${appId}`;
+  try {
+    const base = getEnvironmentUrl();
+    return base ? new URL(path, base).toString() : path;
+  } catch { return path; }
+}
+
 let runtime: boolean | null = null;
 /**
  * True when the app is running inside the Dynatrace shell. Standalone on
