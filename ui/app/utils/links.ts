@@ -301,8 +301,12 @@ export const errorsExplorerHref = (
    *
    * Two facts that url settled: a MOBILE application's name works in this
    * bar (quoted, it carries a space), and the crash facet value is `Crash` —
-   * capitalised, bare. Only observed values may be passed here; ANR's has
-   * not been read off a url yet, so ANR rows open frontend-wide until it is.
+   * capitalised, bare.
+   *
+   * The facet's full vocabulary, read off the app's own facet list:
+   * "Application not responding" (ANR), "Crash", "Failed request". Multi-word
+   * values travel quoted, per the convention every observed chip follows —
+   * val() below applies it. Only values from that list may be passed here.
    */
   errorType?: string,
 ): string => {
@@ -1437,16 +1441,20 @@ export function rowDrilldown(
      * name itself (from a status code) leads nowhere. */
     if (row.named === 0) return null;
     if (!appName) return null;
-    /* The card's list already tags the row CRASH; the destination now keeps
-     * the distinction — the reader asked for the filter at the far end.
-     * Only the observed facet value travels: crash → "Crash" (read off the
-     * url above). An ANR row opens frontend-wide until its value is read
-     * off a url too — a guessed chip opens the explorer unfiltered while
-     * looking filtered, which is worse than the honest wide list. */
-    const et = row.type === "crash" ? "Crash" : undefined;
-    return link(et ? "Inspect these crashes" : "Inspect this failure", row.name, {},
+    /* The card's list tags the row CRASH or ANR; the destination keeps the
+     * distinction — the reader asked for the filter at the far end. The
+     * values come from the app's own facet list ("Application not
+     * responding", "Crash", "Failed request"), never from a guess; RUM's
+     * lowercase "anr" and the bar's spelled-out value are the same
+     * vocabulary shift the sessions bar already taught us (robot → Bots). */
+    const et = row.type === "crash" ? "Crash"
+      : row.type === "anr" ? "Application not responding" : undefined;
+    return link(
+      row.type === "crash" ? "Inspect these crashes"
+        : row.type === "anr" ? "Inspect these ANRs" : "Inspect this failure",
+      row.name, {},
       { app: "Error Inspector", href: errorsExplorerHref(tf, appName, undefined, et),
-        proves: et ? "every crash of this application, ranked by users affected"
+        proves: et ? "every occurrence of this fatal type, ranked by users affected"
           : "every occurrence of this failure" });
   }
   return null;
