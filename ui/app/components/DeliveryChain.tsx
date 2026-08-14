@@ -3,7 +3,7 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { fmtK, fmtMs, fmtN, perfScore } from "../utils/dql";
 import { insightsFor, type Insight } from "../utils/insights";
-import { intentsAvailable, investigationPaths, open, type Persona, type Route } from "../utils/links";
+import { intentsAvailable, investigationPaths, kindOf, open, type Persona, type Route } from "../utils/links";
 import type { ChainData } from "../hooks/useChainData";
 import { usePanZoom } from "../hooks/usePanZoom";
 import { useAssist } from "../hooks/useAssist";
@@ -14,9 +14,9 @@ import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
-import { useAppDevices } from "../hooks/useAppDevices";
 import { davisCategory, verdictOf, worseOf, type Tone } from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
+import { useDomainTraces } from "../hooks/useDomainTraces";
 import type { Forecast } from "../utils/forecast";
 import type { SvgIconProps } from "@dynatrace/strato-icons";
 import {
@@ -66,11 +66,6 @@ const LAYER_ICON = [
  * names for them would only stop the reader finding the same thing in the
  * platform. Anything unmapped falls through as itself rather than as "other".
  */
-/** IOS -> iOS, ANDROID -> Android. The platform SHOUTS; the card need not. */
-const DEVICE_LABEL = (os: string): string =>
-  /^ios$/i.test(os) ? "iOS"
-    : os.charAt(0).toUpperCase() + os.slice(1).toLowerCase();
-
 const KIND_LABEL = (kind: string): string => kind
   ? kind.replace(/_SERVICE$/, "").replace(/_/g, " ").toLowerCase()
   : "service";
@@ -78,9 +73,7 @@ const KIND_LABEL = (kind: string): string => kind
 /** The icon a node wears: its layer's, refined by what the node actually is. */
 function nodeIcon(ti: number, n: { nm: string; store?: string; gen2Db?: boolean }): React.ComponentType<SvgIconProps> {
   if (ti === 0) {
-    // "Mobile" is the measured origin; iOS and Android are the declared device
-    // families a mobile application names when no session was recorded
-    if (n.nm === "Mobile" || n.nm === "iOS" || n.nm === "Android") return MobileIcon;
+    if (n.nm === "Mobile") return MobileIcon;
     if (n.nm === "Robots") return AutomationEngineIcon;
     if (n.nm === "Synthetic") return SyntheticMonitoringSignetIcon;
     return DesktopIcon;
@@ -166,20 +159,24 @@ const problemIds = (p: { entityIds: string[] | null }) => p.entityIds ?? [];
 function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecast | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
   stores: DataStore[] | null, gen2: Gen2Service[] | null,
-  /** Device families the application declares, when no session was measured. */
-  declaredDevices: string[] | null,
 ): { layers: Layer[]; edges: Edge[] } {
   const app = d.apps.find((a) => a.appId === appId);
   // Layers 1, 2 and 4 come from RUM, which now carries the application id —
   // "exactly what refers to this application" starts with not showing another
   // application's CDN under this one's chain.
-  const devices = d.devices.filter((r) => r.appId === appId);
+  /* The Consume layer reads the ORIGIN rows, not the device-profile rows.
+   *
+   * Profiles are a top-20 over the whole environment — grouped by application
+   * and resolution and pixel ratio and orientation, twenty rows is a handful
+   * of the busiest applications. Measured on guu84124: 248 profile rows across
+   * 14 applications, the top twenty covering seven of them. easyTravel
+   * mainframe has 431 sessions and 26 profile rows, none of which survive the
+   * cut, so this layer drew "No coverage" while the Sessions app listed those
+   * sessions with their browsers. The origin rows are grouped only by origin —
+   * at most four per application, which no limit can truncate. */
+  const devices = d.origins.filter((r) => r.appId === appId);
   const domains = d.domains.filter((r) => r.appId === appId);
   const devSessions = devices.reduce((a, r) => a + r.sessions, 0);
-  const mobile = devices.filter((r) => {
-    const w = Number(r.res.split("×")[0]);
-    return Number.isFinite(w) && w < 800;
-  }).reduce((a, r) => a + r.sessions, 0);
 
   /* ── measured harm, per origin ──
    * The per-session scan counts hits as real / robot / synthetic; the device
@@ -445,24 +442,6 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           per.set(o, (per.get(o) ?? 0) + r.sessions);
         }
         const rows = [...per.entries()].sort((a, b) => b[1] - a[1]);
-        /* No sessions is not the same as no consumers.
-         *
-         * An application whose RUM never reached Grail had this layer say "No
-         * coverage", which reads as "nobody uses it". The inventory knows
-         * better: measured, easyTravel Mobile (mainframe) declares IOS and
-         * ANDROID. The card names the device and shows no count, because a
-         * declaration is not a measurement and the layer has spent this whole
-         * project refusing to print numbers it did not measure. */
-        if (!rows.length && declaredDevices?.length) {
-          return declaredDevices.map<Elo>((os) => ({
-            nm: DEVICE_LABEL(os), mt: "declared by the application",
-            v: "—", tone: "info", vol: 1,
-            det: [["Source", "the application inventory, not a session"],
-                  ["Sessions here", "none measured in this window"],
-                  ["Meaning", "the app is built for this device; whether anyone "
-                    + "used it is not recorded in Grail"]],
-          }));
-        }
         return rows.length ? rows.map<Elo>(([o, n]) => {
           // The audience layer wears the harm done to that audience. Without
           // this, an application whose every session hit an error drew a calm
@@ -485,15 +464,13 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
                  hit === null ? "…" : `${fmtN(hit)} of ${fmtN(n)} · ${vd.label}`],
                 ["Share", devSessions ? ((n / devSessions) * 100).toFixed(1) + "%" : "—"],
                 ["Device profiles",
-                 String(devices.filter((r) => originOf(r.agent, r.utype) === o).length)]],
+                 String(devices.filter((r) => originOf(r.agent, r.utype) === o)
+                   .reduce((a, r) => a + r.profiles, 0))]],
         }; }) : [noData];
       })(),
       // the layer's KPI is the sum of the cards drawn under it, never a second
       // measurement of the same thing — the two used to disagree by ~100
-      Math.max(devices.length, declaredDevices?.length ?? 0, 1),
-      devices.length ? fmtK(devSessions) : declaredDevices?.length ? "—" : fmtK(devSessions),
-      devices.length ? "sessions"
-        : declaredDevices?.length ? "declared devices" : "sessions"),
+      Math.max(devices.length, 1), fmtK(devSessions), "sessions"),
 
     L(others.length ? others.map<Elo>((x) => ({
         nm: x.domain, mt: `${x.provider ?? "—"} · ${fmtN(x.reqs)} req`, v: fmtMs(x.p50), tone: "info", vol: x.reqs,
@@ -696,14 +673,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     if (o.miss) continue;
     const sess = devices.filter((r) => originOf(r.agent, r.utype) === o.nm)
       .reduce((a, r) => a + r.sessions, 0);
-    if (sess) { edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions" }); continue; }
-    /* A declared device has no session count and still belongs to the
-     * application — drawing the card without its edge would leave exactly the
-     * unconnected component this pass exists to remove. The line carries no
-     * number because there is none to carry. */
-    if (declaredDevices?.length && !devices.length) {
-      edges.push({ s: [0, oi], t: [2, 0], v: 1, label: "declared" });
-    }
+    if (sess) edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions" });
   }
   // third-party domain ← the application's page (render order: app fetches it)
   for (const [di, dcard] of layers[1].items.slice(0, NODE_CAP).entries()) {
@@ -899,14 +869,9 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
   // same key, so an application whose two models agree pays for one query and
   // draws nothing extra
   const gen2 = useGen2Closure([...scope.services], scope.resolved);
-  // the devices the application declares, asked only where no session was seen
-  const appEntity = data.apps.find((a) => a.appId === appId)?.entity;
-  const declaredDevices = useAppDevices(appEntity,
-    !data.devices.some((r) => r.appId === appId));
   const built = useMemo(
-    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2,
-      declaredDevices),
-    [data, appId, scope, ahead, impacted, cloud, stores, gen2, declaredDevices]);
+    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2),
+    [data, appId, scope, ahead, impacted, cloud, stores, gen2]);
   const tiers = built.layers;
   const edges = built.edges;
   // the setter mirrors useState's signature so the existing toggles still read
@@ -1063,6 +1028,15 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
     return null;
   }, [selElo, selTier, appId]);
   const met = useNodeMetrics(metTarget);
+
+  // Whether the selected domain- or store-kind card has spans behind it —
+  // decides whether its investigation route can offer Distributed Tracing
+  // (Gen3) or has to fall back to a query. `store` doubles as an address
+  // here exactly as it does in the route builder: a data store has no
+  // `domain` field of its own, but it needs the identical span check.
+  const selAddress = selElo?.domain ?? selElo?.store;
+  const selDomainTraces = useDomainTraces(
+    selAddress ? [selAddress] : [], data.tf, !!selAddress);
 
   // Whether the open drawer's element carries detected signals — it decides
   // which rows the drawer offers, not whether impact gets fetched (impact is
@@ -1403,20 +1377,40 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
                 const fcRising = (!!fcObj && fcObj.slope > 0) || selElo.spark?.rising === true;
                 const nProbs = problemsFor(selElo.ids ?? []).length;
                 const nSigs = signalsFor(selElo.ids ?? []).length;
+                const scopedApp = data.apps.find((a) => a.appId === appId);
                 return <Routes list={investigationPaths({
                   ids: selElo.ids ?? [],
                   name: selElo.nm,
                   tf: data.tf,
+                  // buildTiers already knows exactly what kind of card this
+                  // is — decided once, here, not re-guessed from ids prefixes
+                  // inside investigationPaths (see kindOf's own comment).
+                  kind: kindOf(selTier ?? -1, selElo),
                   problems: nProbs,
                   problem: problemsFor(selElo.ids ?? [])[0],
                   problemHints: problemsFor(selElo.ids ?? [])
                     .map((x) => `${x.category} ${x.name}`),
-                  rumAppId: selTier === 2 ? appId : undefined,
+                  // Every element in this chain belongs to the one scoped
+                  // application, whichever layer it sits in — not only the
+                  // application card itself. A Consume-layer origin bucket
+                  // (Mobile, Robots…) used to have no way to reach "Sessions
+                  // and conversion" at all because this was gated to tier 2.
+                  rumAppId: appId,
+                  scopedAppName: scopedApp?.name,
+                  scopedEntity: scopedApp?.entity,
                   // lets the route offer Error Inspector — the Gen3 app whose
-                  // whole subject is the thing this element is failing at
-                  errors: selTier === 2
-                    ? data.apps.find((a) => a.appId === appId)?.errors : undefined,
-                  domain: selElo.domain,
+                  // whole subject is the thing this element is failing at.
+                  // Passed for every card; the kind switch decides which of
+                  // them actually offer it (the app card and the origins).
+                  errors: scopedApp?.errors,
+                  // an origin card's vol IS its session count — the sessions
+                  // hand-off is gated on it, so a segment with nothing to
+                  // list offers no list
+                  sessions: selTier === 0 ? selElo.vol : undefined,
+                  // A store card carries no `domain`, it carries `store` — the
+                  // same address shape, just named for what it is.
+                  domain: selElo.domain ?? selElo.store,
+                  domainHasSpans: !!selAddress && !!selDomainTraces?.has(selAddress),
                   impacted: selShowsImpact && impacted && impacted.hit > 0 ? impacted : undefined,
                   signals: nSigs,
                   forecastRising: fcRising,

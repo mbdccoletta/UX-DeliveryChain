@@ -410,11 +410,39 @@ export interface LinkContext {
   /** "CATEGORY name" of every active problem on this element — the evidence
    *  the route reads before offering a lens. */
   problemHints?: string[];
-  /** Short RUM id, set only for the application layer — user.events keys on it. */
+  /** Short RUM id, of the application the whole chain is scoped to — every
+   *  element belongs to it, whichever layer it sits in. */
   rumAppId?: string;
+  /** The scoped application's display name — what the Error Inspector's
+   *  filter bar matches on. An origin card's own `name` is "Mobile". */
+  scopedAppName?: string;
+  /**
+   * The scoped application's own classic entity id, when RUM resolved one —
+   * the id `dt.entity.application` hops actually need. `rumAppId` alone
+   * cannot be turned into one for a mobile app (its RUM id is a UUID, not the
+   * entity id's hex suffix), so this travels separately rather than being
+   * guessed from `rumAppId` every time.
+   */
+  scopedEntity?: string;
+  /**
+   * What kind of element this is — decided once by the caller, from what it
+   * already knows about the card (which layer it is in, whether it carries a
+   * `store`/`domain` marker), not re-guessed from `ids` prefixes inside this
+   * function. See `kindOf`.
+   */
+  kind: NodeKind;
+  /**
+   * Measured per domain (`useDomainTraces`), never assumed: a CDN or a font
+   * host has no span behind it, and Distributed Tracing would open on
+   * nothing. Only meaningful when `domain` is set.
+   */
+  domainHasSpans?: boolean;
   /** Errors measured on this element, so the route can offer the app that
    *  exists to explain them rather than only apps that summarise them. */
   errors?: number;
+  /** Sessions measured on this element — an origin card's own count, so the
+   *  sessions hand-off is offered exactly when there is something to list. */
+  sessions?: number;
   /** An active Davis problem on this element, opened directly in the Problems app. */
   problem?: {
     eventId: string; display_id: string; name: string;
@@ -423,9 +451,11 @@ export interface LinkContext {
     category?: string;
   };
   /**
-   * A contacted domain, for the layers that have no Smartscape entity: a
-   * third party or the ingress is a name in url.domain, not an entity, so the
-   * route is keyed on that instead of on an id.
+   * The address a domain- or store-kind element is reached at — a third
+   * party, the ingress, or a data store, none of which are a Smartscape
+   * entity: a name in `url.domain` or `server.address`, not an id, so the
+   * route is keyed on that instead. The caller passes `selElo.domain ??
+   * selElo.store`; both are, in the end, the address a hop needs.
    */
   domain?: string;
   /** What is measured about this element right now, for the Assist context. */
@@ -471,6 +501,94 @@ export interface Route {
 }
 
 /**
+ * What kind of thing a chain element is.
+ *
+ * This is the fix for a whole class of defect, not just one instance of it:
+ * routes used to be decided by sniffing `ids` for a recognised prefix deep
+ * inside `investigationPaths`, and a card whose ids matched nothing — an
+ * aggregate with no entity behind it, like a Consume-layer origin bucket —
+ * silently fell through to "offer only Assist," with nothing forcing anyone
+ * to notice or add a case for it. Measured: this had already happened four
+ * times (Consume origins, third-party and first-party domains, data stores)
+ * before it was caught.
+ *
+ * `kindOf` decides this ONCE, from what the caller already knows about the
+ * card — which layer it is in, and the `store`/`domain` markers `buildTiers`
+ * already attaches — and `investigationPaths` switches on it exhaustively:
+ * TypeScript refuses to compile a missing case (see the `never` assertions
+ * below), so the next new kind of card cannot repeat this silently.
+ *
+ * KNOWN GAP, left visible rather than hidden: a Cloud-layer card (an AWS/GCP/
+ * Azure instance, an availability zone) has ids that match none of the entity
+ * branches below and resolves to "element" — no worse than before this pass,
+ * but not fixed by it either.
+ */
+export type NodeKind =
+  | "service" | "host" | "pod" | "node" | "process"
+  | "webApp" | "mobileApp"
+  | "origin" | "domain3p" | "domain1p" | "store"
+  | "element";
+
+export function kindOf(
+  tier: number, e: { ids?: string[]; store?: string; domain?: string },
+): NodeKind {
+  if (e.store) return "store";
+  if (tier === 0) return "origin";
+  if (tier === 1) return "domain3p";
+  if (tier === 3) return "domain1p";
+  const ids = e.ids ?? [];
+  if (ids.some((i) => i.startsWith("MOBILE_APPLICATION-"))) return "mobileApp";
+  if (ids.some((i) => /^(?:CUSTOM_)?APPLICATION-/.test(i))) return "webApp";
+  if (ids.some((i) => i.startsWith("SERVICE-"))) return "service";
+  if (ids.some((i) => i.startsWith("HOST-"))) return "host";
+  if (ids.some((i) => i.startsWith("K8S_POD-"))) return "pod";
+  if (ids.some((i) => i.startsWith("K8S_NODE-"))) return "node";
+  if (ids.some((i) => i.startsWith("PROCESS_GROUP_INSTANCE-"))) return "process";
+  return "element";
+}
+
+/**
+ * A contacted domain's own traffic, Gen3-first.
+ *
+ * Resolved through the capability map like every entity hop — a domain WE
+ * serve is `server.address` on the spans behind it, the same field
+ * `tListLink` already sends the traces explorer for a known service, just
+ * without a service id to anchor it to.
+ *
+ * `hasSpans` decides whether this is worth offering at all: a CDN or a font
+ * host has no span behind it, and the explorer would open on nothing. Those
+ * fall to `notebookQueryLink` instead.
+ */
+function domainTracesLink(address: string, apps: AppMap | undefined, tf: Timeframe): DeepLink {
+  const clean = address.replace(/["\\]/g, "");
+  const t = apps?.traces;
+  return link("Follow these requests", `${clean} · in traces`,
+    withTf(tf, { "dt.filter": `server.address = ${clean}` }),
+    { keyProperties: ["dt.filter"],
+      proves: "the server-side traces behind this address, sortable by duration or failure",
+      app: t?.name ?? "Distributed Tracing",
+      ...(t ? { appId: t.appId, intentId: TRACES_LIST.intentId } : {}) });
+}
+
+/**
+ * An ad-hoc DQL hop into Notebooks, for a question no entity id can answer.
+ *
+ * NOT resolved through the capability map — Notebooks has no CANDIDATES entry
+ * in useApps.ts (no classic equivalent to fall back to), so this hardcodes
+ * the app the same way the domain query hand-off already did before this
+ * pass. Left explicit rather than silently duplicated at each call site.
+ */
+function notebookQueryLink(
+  label: string, proves: string, meta: string, query: string, tf: Timeframe,
+  /** The notebook's own title — without it the tab opens as "Untitled". */
+  title: string,
+): DeepLink {
+  return link(label, meta, withTf(tf, { title, "dt.query": query }),
+    { keyProperties: ["dt.query"], proves, app: "Notebooks",
+      appId: "dynatrace.notebooks", intentId: "view-query" });
+}
+
+/**
  * Three ordered routes through the platform apps, one per audience.
  *
  * They are deliberately different journeys, not the same links relabelled: the
@@ -480,9 +598,16 @@ export interface Route {
  * when every step it needs can be keyed on something this element actually has.
  */
 export function investigationPaths(
-  { ids, name, tf, rumAppId, errors, problem, problems = 0, problemHints = [], domain, facts,
+  { ids, name, tf, rumAppId, scopedAppName, scopedEntity, kind, errors, sessions,
+    problem, problems = 0,
+    problemHints = [], domain, domainHasSpans = false, facts,
     assist = false, apps = {}, impacted, signals = 0, forecastRising = false }: LinkContext,
 ): Route[] {
+  // Still extracted from `ids` where a branch needs the actual VALUE — but no
+  // longer what DECIDES which branch runs. That is `kind`, passed in already
+  // decided (see kindOf); ids only supply the id itself, which never told two
+  // different endpoints of the same process apart from one another in the
+  // first place, and should not be trusted to decide anything on its own.
   const svc = ids.find((i) => i.startsWith("SERVICE-"));
   const host = ids.find((i) => i.startsWith("HOST-"));
   // Web, mobile and custom applications all take the application steps; the
@@ -601,10 +726,16 @@ export function investigationPaths(
     && !forecastRising && !(impacted && impacted.hit > 0);
 
   const facts_ = (facts?.lines ?? []).join(" ");
-  const kind = svc ? "service" : host ? "host"
-    : app ? (isMobileApp ? "mobile application" : "web application")
-    : pgi ? "process" : domain ? "contacted domain" : "element";
-  const scope = `The element is "${name}" (${kind}), measured over the ${tf.label}.` +
+  // Assist's own words for what it is looking at — now read straight off
+  // `kind` instead of re-deriving a second, looser classification from the
+  // same ids a few lines above.
+  const KIND_WORD: Record<NodeKind, string> = {
+    service: "service", host: "host", pod: "pod", node: "node", process: "process",
+    webApp: "web application", mobileApp: "mobile application",
+    origin: "traffic segment", domain3p: "third-party domain",
+    domain1p: "first-party domain", store: "data store", element: "element",
+  };
+  const scope = `The element is "${name}" (${KIND_WORD[kind]}), measured over the ${tf.label}.` +
     (healthy ? " It is currently healthy: no active problems, no anomalies," +
       " and no rising forecast." : "") +
     (facts_ ? ` Measured right now: ${facts_}` : "") +
@@ -647,73 +778,247 @@ export function investigationPaths(
   const podClassic = ids.find((i) => i.startsWith("CLOUD_APPLICATION_INSTANCE-"));
   const nodeClassic = ids.find((i) => i.startsWith("KUBERNETES_NODE-"));
 
-  if (svc) {
-    tech.push(
-      failing
-        ? eLink("What is failing", "Its failure rate, broken down by what fails.",
-            "dt.entity.service", svc, "services")
-        : eLink("Where the time goes", "Response time split across the calls it makes to others.",
-            "dt.entity.service", svc, "services", SERVICE_RESPONSE_TIME),
-      // the tracing step needs no lookup: the filter is built from the id the
-      // node already carries, so it is always offered and always complete
-      tListLink(svc),
-      // Two keys, not one. Only 116k of 2.1M log lines here carry
-      // dt.entity.service — the rest are attributed to the container that
-      // wrote them, and the container name matches the service's short name
-      // (frontend, cartservice, checkoutservice…). Filtering on the entity id
-      // alone opens an empty screen for most services; this finds both.
-      qLink("Read what it logged", "The lines the code wrote while it was failing.",
-        "newest first",
-        `fetch logs | filter dt.entity.service == "${svc}"`
-        + ` or k8s.container.name == "${shortName(name)}"`
-        + " | sort timestamp desc", "logs"),
-    );
-  } else if (pod || node) {
-    const k = pod ?? node!;
-    tech.push(
-      eLink(pod ? "Open the pod" : "Open the node",
-        "Its workload, placement and resource pressure.",
-        // pods are addressed by their classic entity id, not the Smartscape
-        // routing key — that key matched no app at all
-        pod ? "dt.entity.cloud_application_instance" : "dt.entity.kubernetes_node",
-        (pod ? podClassic : nodeClassic) ?? k, "kubernetes",
-        !pod ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined),
-      // pods and nodes are named, not keyed, in log records
-      qLink("Read what it logged", "The container output around the failure.",
-        "newest first",
-        `fetch logs | filter ${pod ? "k8s.pod.name" : "k8s.node.name"} == "${shortName(name)}"`
-        + " | sort timestamp desc", "logs"),
-    );
-  } else if (host) {
-    tech.push(
-      eLink("Open the host", "The machine's processes, saturation and events.",
-        "dt.entity.host", host, "hosts"),
-      qLink("Read what it logged", "The host's own log stream.",
-        "newest first", `fetch logs | filter dt.entity.host == "${host}"`
-        + " | sort timestamp desc", "logs"),
-    );
-  } else if (app) {
-    tech.push(
-      // No trace step here: spans in this environment carry neither
-      // dt.entity.application nor dt.rum.application.id (measured: 0 of 1.6M),
-      // so a browser-to-trace hand-off would open on an empty result.
-      eLink("Open the application", "Its sessions, views and errors as RUM presents them.",
-        "dt.entity.application", app, isMobileApp ? "mobile" : "rum"),
-    );
-    /* The Gen3 DEM app for the question this route actually asks.
-     * "What is failing here" was being answered with Experience Vitals and an
-     * Assist prompt, while the platform ships an app whose entire subject is
-     * this: Error Inspector, grouping the errors by type and message and
-     * ranking them by users affected. It leads the route when the element is
-     * failing — the errors ARE the root cause evidence — and stays available
-     * behind the overview when it is not. */
-    if (errors && errors > 0) {
-      const insp = errorsLink(tf, name, errors);
-      if (failing) tech.unshift(insp); else tech.push(insp);
+  /* Computed once, pushed into BOTH technical and tactical below — the same
+   * pattern the Davis problem step already uses (`prob`). A traffic segment
+   * or a contacted domain has exactly one piece of evidence worth offering;
+   * asking the same evidence twice, framed once as "what happened" and once
+   * as "who else this touches", is more honest than inventing a second,
+   * weaker hop just to fill the tactical column. */
+  const originHop = (() => {
+    if (kind !== "origin" || !rumAppId) return null;
+    /* Mirrors originOf() (components/DeliveryChain.tsx) — the SAME three
+     * decisions in the SAME order, because the destination must count the
+     * sessions the card counted:
+     *
+     *  1. Mobile is decided FIRST, on the agent — so a robot driving the
+     *     Android app is Mobile there, and must be Mobile here. A plain
+     *     `user_type == "robot"` filter would have claimed it for Robots.
+     *  2. Null falls through to Browsers there — so null must fall through
+     *     here too. DQL null-compares to null, and `null != "robot"` filters
+     *     the row OUT, which would have silently dropped every session with
+     *     no user_type from Browsers. coalesce to "" first, compare after.
+     *  3. contains(), not matchesPhrase() — contains is already in use and
+     *     verified in this codebase; matchesPhrase never was. Case matters to
+     *     contains, and the measured values are lowercase ("javascript",
+     *     "android", "real_user", "robot", "synthetic" — read off this
+     *     tenant's own origin rows), so the lowercase needles are faithful.
+     */
+    const MOB = '(contains(__agent, "android") or contains(__agent, "ios")'
+      + ' or contains(__agent, "mobile"))';
+    const originFilter: Record<string, string> = {
+      Mobile: MOB,
+      Robots: `not(${MOB}) and __utype == "robot"`,
+      Synthetic: `not(${MOB}) and __utype == "synthetic"`,
+      Browsers: `not(${MOB}) and __utype != "robot" and __utype != "synthetic"`,
+    };
+    const cond = originFilter[name];
+    if (!cond) return null;
+    return notebookQueryLink("What this segment did",
+      "The views this segment actually reached, and how each one failed.",
+      `${name} · busiest views`,
+      `fetch user.events
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter characteristics.classifier == "view_summary"
+    or characteristics.classifier == "error"
+| fieldsAdd __agent = coalesce(dt.rum.agent.type, ""),
+    __utype = coalesce(dt.rum.user_type, "")
+| filter ${cond}
+| summarize sessions = countDistinct(dt.rum.session.id),
+    views = countIf(characteristics.classifier == "view_summary"),
+    errors = countIf(characteristics.classifier == "error"),
+  by: { view = view.detected_name }
+| filter isNotNull(view)
+| sort views desc
+| limit 20`, tf, `${name} — what this segment did`);
+  })();
+  const domainHop = (kind === "domain3p" || kind === "domain1p") && domain
+    ? (domainHasSpans
+        ? domainTracesLink(domain, apps, tf)
+        : notebookQueryLink("Open this domain's requests",
+            "every path this domain served, with its timings and failures",
+            `${domain} · as a query`,
+            `fetch user.events
+| filter url.domain == "${domain.replace(/["\\]/g, "")}"
+| summarize requests = countIf(characteristics.classifier == "request"),
+    failures = countIf(characteristics.classifier == "error"),
+    p50 = percentile(if(characteristics.classifier == "request", toLong(duration)), 50),
+    p90 = percentile(if(characteristics.classifier == "request", toLong(duration)), 90),
+  by: { path = url.path, code = http.response.status_code }
+| sort requests desc`, tf, `Requests to ${domain}`))
+    : null;
+  /* Gated on MEASURED spans, exactly like a domain, because a store's
+   * address is `coalesce(server.address, db.namespace, db.system)` — for a
+   * driver that reports no address (measured: mongoose) the card's name is
+   * "mongoose", and a traces explorer filtered on `server.address = mongoose`
+   * opens empty while looking like it worked. With spans behind the address
+   * the explorer is the Gen3 destination; without, a notebook query matches
+   * the same three fields the store was discovered by, so it finds exactly
+   * the spans that put the card on screen.
+   *
+   * `server.address` alone in the explorer filter — the store card also
+   * carries db.system, which would disambiguate two stores sharing a host,
+   * but whether the explorer's `dt.filter` accepts two space-joined
+   * conditions has not been checked against this tenant. Marked follow-up,
+   * not guessed. */
+  const storeHop = kind === "store" && domain
+    ? (domainHasSpans
+        ? domainTracesLink(domain, apps, tf)
+        : (() => {
+            const a = domain.replace(/["\\]/g, "");
+            return notebookQueryLink("See its queries",
+              "the database calls behind this card, operation by operation",
+              `${a} · as a query`,
+              `fetch spans
+| filter server.address == "${a}" or db.namespace == "${a}" or db.system == "${a}"
+| summarize calls = count(),
+    p50 = percentile(toLong(duration), 50),
+    p90 = percentile(toLong(duration), 90),
+  by: { operation = span.name, svc = dt.entity.service }
+| sort calls desc
+| limit 30`, tf, `Queries to ${a}`);
+          })())
+    : null;
+
+  switch (kind) {
+    case "service":
+      tech.push(
+        failing
+          ? eLink("What is failing", "Its failure rate, broken down by what fails.",
+              "dt.entity.service", svc!, "services")
+          : eLink("Where the time goes", "Response time split across the calls it makes to others.",
+              "dt.entity.service", svc!, "services", SERVICE_RESPONSE_TIME),
+        // the tracing step needs no lookup: the filter is built from the id the
+        // node already carries, so it is always offered and always complete
+        tListLink(svc!),
+        // Two keys, not one. Only 116k of 2.1M log lines here carry
+        // dt.entity.service — the rest are attributed to the container that
+        // wrote them, and the container name matches the service's short name
+        // (frontend, cartservice, checkoutservice…). Filtering on the entity id
+        // alone opens an empty screen for most services; this finds both.
+        qLink("Read what it logged", "The lines the code wrote while it was failing.",
+          "newest first",
+          `fetch logs | filter dt.entity.service == "${svc}"`
+          + ` or k8s.container.name == "${shortName(name)}"`
+          + " | sort timestamp desc", "logs"),
+      );
+      break;
+    case "pod": case "node": {
+      const k = pod ?? node!;
+      tech.push(
+        eLink(pod ? "Open the pod" : "Open the node",
+          "Its workload, placement and resource pressure.",
+          // pods are addressed by their classic entity id, not the Smartscape
+          // routing key — that key matched no app at all
+          pod ? "dt.entity.cloud_application_instance" : "dt.entity.kubernetes_node",
+          (pod ? podClassic : nodeClassic) ?? k, "kubernetes",
+          !pod ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined),
+        // pods and nodes are named, not keyed, in log records
+        qLink("Read what it logged", "The container output around the failure.",
+          "newest first",
+          `fetch logs | filter ${pod ? "k8s.pod.name" : "k8s.node.name"} == "${shortName(name)}"`
+          + " | sort timestamp desc", "logs"),
+      );
+      break;
     }
-  } else if (pgi) {
-    tech.push(eLink("Open the process", "The running process, its host and technology.",
-      "dt.entity.process_group_instance", pgi, "processes"));
+    case "host":
+      tech.push(
+        eLink("Open the host", "The machine's processes, saturation and events.",
+          "dt.entity.host", host!, "hosts"),
+        qLink("Read what it logged", "The host's own log stream.",
+          "newest first", `fetch logs | filter dt.entity.host == "${host}"`
+          + " | sort timestamp desc", "logs"),
+      );
+      break;
+    case "webApp": case "mobileApp":
+      tech.push(
+        // No trace step here: spans in this environment carry neither
+        // dt.entity.application nor dt.rum.application.id (measured: 0 of 1.6M),
+        // so a browser-to-trace hand-off would open on an empty result.
+        eLink("Open the application", "Its sessions, views and errors as RUM presents them.",
+          "dt.entity.application", app!, isMobileApp ? "mobile" : "rum"),
+      );
+      /* The Gen3 DEM app for the question this route actually asks.
+       * "What is failing here" was being answered with Experience Vitals and an
+       * Assist prompt, while the platform ships an app whose entire subject is
+       * this: Error Inspector, grouping the errors by type and message and
+       * ranking them by users affected. It leads the route when the element is
+       * failing — the errors ARE the root cause evidence — and stays available
+       * behind the overview when it is not. */
+      if (errors && errors > 0) {
+        const insp = errorsLink(tf, name, errors);
+        if (failing) tech.unshift(insp); else tech.push(insp);
+      }
+      break;
+    case "process":
+      tech.push(eLink("Open the process", "The running process, its host and technology.",
+        "dt.entity.process_group_instance", pgi!, "processes"));
+      break;
+    case "origin":
+      /* Gen3-first, and an ENTITY app before a query app. The route used to
+       * lead with a Notebook query, which hands the user homework — this
+       * codebase's own rule is that a query app makes the user run the
+       * analysis while an entity app has already run it. So the sessions
+       * explorer leads: its filter grammar is VERIFIED (`Frontends = name`,
+       * read off the app's own url), and every one of this card's sessions —
+       * synthetic and robot included, see the Keynote Agent rows in the
+       * app's own list — is in what it opens.
+       *
+       * Offered only when the card counted sessions: an origin drawn from a
+       * declaration or an empty window has nothing to list, and a filtered-
+       * looking page showing everything is the defect this project hunts.
+       *
+       * HONEST LIMIT, stated in the meta: the bar narrows to the frontend,
+       * not to one segment — its user-type facet grammar has not been read
+       * off a real url yet (the Error Inspector taught us not to guess one).
+       * Until it is, the segment-narrowed view stays the Notebook hop below. */
+      /* Gated to web-scoped chains: `Frontends = name` was read off the app's
+       * url with WEB applications only, and a mobile app's name has never
+       * been observed in that bar. A wrong chip opens the explorer unfiltered
+       * and reads as a working button — the exact failure the Error
+       * Inspector hand-off had. Mobile chains get the Vitals hop below. */
+      if (sessions && sessions > 0 && scopedAppName
+          && !scopedEntity?.startsWith("MOBILE_APPLICATION-")) {
+        tech.push(sessionsLink(tf, scopedAppName, sessions));
+      }
+      /* The mobile segment has an entity where the others have none: the
+       * scoped mobile application itself. Experience Vitals declares
+       * view-frontend and accepts MOBILE_APPLICATION- ids (verified — see
+       * useApps), so this is the one origin with a true Gen3 entity hop. */
+      if (name === "Mobile" && scopedEntity?.startsWith("MOBILE_APPLICATION-")) {
+        tech.push(eLink("Open the mobile app",
+          "Its crashes, versions and vitals as the platform presents them.",
+          "dt.entity.application", scopedEntity, "mobile"));
+      }
+      // The segment-narrowed evidence — the only view that can express
+      // "robots only" today, so it stays, one step down.
+      if (originHop) tech.push(originHop);
+      /* The Explorer cannot narrow to one segment — its filter bar speaks
+       * Frontend, not user type — so this opens the APPLICATION's errors,
+       * and says so: the meta carries the app-wide count, not the segment's.
+       * Precedent: the failure rows' drill-down already falls back to the
+       * app-wide Explorer the same way (rowDrilldown, kind "errors"). */
+      if (errors && errors > 0 && scopedAppName) {
+        tech.push(errorsLink(tf, scopedAppName, errors));
+      }
+      break;
+    case "domain3p": case "domain1p":
+      if (domainHop) tech.push(domainHop);
+      break;
+    case "store":
+      if (storeHop) tech.push(storeHop);
+      break;
+    case "element":
+      // No entity, no domain marker, no recognised id — nothing beyond
+      // Assist to offer. Reached today only by a Cloud-layer instance/zone
+      // card (see the KNOWN GAP note on NodeKind) or a genuinely unmapped
+      // element; never reached silently for a kind this file already knows.
+      break;
+    default: {
+      // this assignment is the exhaustiveness check the NodeKind comment
+      // promises: add a kind without a case here and the build fails
+      const unhandled: never = kind;
+      void unhandled;
+    }
   }
   const prob = pLink();
   if (prob) tech.push(prob);
@@ -746,33 +1051,54 @@ export function investigationPaths(
   /* ── tactical: what it takes down with it, and whether it is worth it now ── */
   const tac: DeepLink[] = [];
   if (prob) tac.push(prob);
-  if (svc) {
-    // The lens the technical route did not take — but only when the evidence
-    // backs it. Time analysis is always worth a step; a failure step with no
-    // failures behind it is an empty page wearing a promise.
-    if (failing) {
-      tac.push(eLink("Where the time goes",
-        "Response time split across the calls it makes to others.",
-        "dt.entity.service", svc, "services", SERVICE_RESPONSE_TIME));
+  switch (kind) {
+    case "service":
+      // The lens the technical route did not take — but only when the evidence
+      // backs it. Time analysis is always worth a step; a failure step with no
+      // failures behind it is an empty page wearing a promise.
+      if (failing) {
+        tac.push(eLink("Where the time goes",
+          "Response time split across the calls it makes to others.",
+          "dt.entity.service", svc!, "services", SERVICE_RESPONSE_TIME));
+      }
+      break;
+    case "pod": case "node":
+      tac.push(eLink("What shares this node",
+        "The workloads a node-level event would take down together.",
+        node ? "dt.entity.kubernetes_node" : "dt.entity.cloud_application_instance",
+        (node ? nodeClassic ?? node : podClassic ?? pod)!, "kubernetes",
+        node ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined));
+      break;
+    case "host":
+      // Topology is the question here, and only the classic Smartscape app
+      // answers it for a host — the Gen3 one declares nothing for `dt.entity.host`
+      // (its actions are about problems). So this names that app directly rather
+      // than resolving Gen3-first and landing on a view that cannot answer.
+      tac.push(link("What this host carries",
+        "The processes a host-level event would take down.",
+        withTf(tf, { "dt.entity.host": host }),
+        { keyProperties: ["dt.entity.host"],
+          proves: "The topology around this machine, as Smartscape maps it.",
+          app: "Smartscape Classic",
+          appId: "dynatrace.classic.smartscape", intentId: "view-host" }));
+      break;
+    case "origin": case "domain3p": case "domain1p": case "store":
+      // The same evidence the technical route offers, asked as a different
+      // question: not "what happened" but "who else this touches" — the
+      // Davis-problem step already reuses one link across both routes this
+      // way (`prob`, pushed above); this is the same move for a segment or
+      // an address that has no entity to ask a SEPARATE tactical question of.
+      if (originHop) tac.push(originHop);
+      if (domainHop) tac.push(domainHop);
+      if (storeHop) tac.push(storeHop);
+      break;
+    case "webApp": case "mobileApp": case "process": case "element":
+      // No extra tactical lens for these today — Assist still runs below.
+      break;
+    default: {
+      const unhandled: never = kind;
+      void unhandled;
     }
-  } else if (pod || node) {
-    tac.push(eLink("What shares this node",
-      "The workloads a node-level event would take down together.",
-      node ? "dt.entity.kubernetes_node" : "dt.entity.cloud_application_instance",
-      (node ? nodeClassic ?? node : podClassic ?? pod)!, "kubernetes",
-      node ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined));
-  } else if (host) {
-    // Topology is the question here, and only the classic Smartscape app
-    // answers it for a host — the Gen3 one declares nothing for `dt.entity.host`
-    // (its actions are about problems). So this names that app directly rather
-    // than resolving Gen3-first and landing on a view that cannot answer.
-    tac.push(link("What this host carries",
-      "The processes a host-level event would take down.",
-      withTf(tf, { "dt.entity.host": host }),
-      { keyProperties: ["dt.entity.host"],
-        proves: "The topology around this machine, as Smartscape maps it.",
-        app: "Smartscape Classic",
-        appId: "dynatrace.classic.smartscape", intentId: "view-host" }));
   }
   if (assist) {
     tac.push(healthy
@@ -802,13 +1128,25 @@ export function investigationPaths(
 
   /* ── executive: the reading, not the data ── */
   const exec: DeepLink[] = [];
-  // The hex fallback holds for web only: a web app's RUM id is the entity id's
-  // suffix, a mobile app's is a UUID that maps to nothing. With neither a real
-  // entity nor a web-hex id there is no step — a fabricated id opens an app on
-  // emptiness while looking like it worked.
-  const appEntity = app
-    ?? (rumAppId && /^[0-9a-f]{16}$/.test(rumAppId)
-      ? "APPLICATION-" + rumAppId.toUpperCase() : undefined);
+  /*
+   * Offered for the element's own application entity when IT is the app
+   * (webApp/mobileApp), and for the SCOPED application when the element is a
+   * segment or an address belonging to it (origin/domain3p/domain1p) — a
+   * Consume-layer Mobile card used to have no way to reach this step at all,
+   * because `rumAppId` was only ever threaded through for the application
+   * card itself. Left off service/host/pod/store: an owner clicking a
+   * database wants database evidence, not the whole app's session count.
+   *
+   * `scopedEntity` — resolved by the caller from the real entity, not
+   * guessed — takes priority over the hex fallback appEntityOf() still keeps
+   * for callers that have only ever had a rumAppId to work with. The hex trick
+   * holds for web only (a mobile RUM id is a UUID, not the entity's suffix),
+   * which is exactly why the real entity is worth passing when it is known.
+   */
+  const wantsAppSessions = kind === "webApp" || kind === "mobileApp"
+    || kind === "origin" || kind === "domain3p" || kind === "domain1p";
+  const appEntity = wantsAppSessions
+    ? appEntityOf(app ?? scopedEntity, rumAppId) : undefined;
   if (appEntity) {
     exec.push(eLink("Sessions and conversion",
       "The real-user picture the RUM app already maintains.",

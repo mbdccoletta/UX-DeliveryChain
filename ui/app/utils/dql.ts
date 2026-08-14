@@ -1039,25 +1039,6 @@ fetch dt.entity.application, from: now()-2h
 | limit 200`;
 
 /**
- * The device families a mobile application declares it runs on.
- *
- * The Consume layer counts sessions, so an application with no RUM in Grail
- * got "No coverage" — which reads as "nobody uses it", when what happened is
- * that nobody measured it here. The inventory does say something: measured,
- * MOBILE_APPLICATION-773D0C09E8E14B58 declares IOS and ANDROID.
- *
- * A declaration is not a measurement and the layer must not pretend it is —
- * the card carries no session count, because there is none to carry. It says
- * which devices the application is built for, which is more than silence and
- * less than a number.
- */
-export const qAppOsFamilies = (entityId: string) => `
-fetch dt.entity.mobile_application, from: now()-2h
-| filter id == "${entityId.replace(/["\\]/g, "")}"
-| fields os = mobileOsFamily
-| limit 1`;
-
-/**
  * The services one application calls, straight from the classic model.
  *
  * Used as the scope's seed when neither the trace join nor Smartscape found
@@ -1084,3 +1065,35 @@ fetch dt.entity.application, from: now()-2h
 | fields svc = seed, name = nm
 | limit 40`;
 };
+
+/**
+ * Sessions per application and per origin — the Consume layer's own query.
+ *
+ * It used to read the device-profile rows, and those are a TOP-20 over the
+ * whole environment: grouped by application AND resolution AND pixel ratio AND
+ * orientation, twenty rows is a handful of the busiest applications. Measured
+ * on guu84124 — 248 profile rows across 14 applications, and the top twenty
+ * covered seven of them. easyTravel mainframe has 26 profile rows and 431
+ * sessions, none of which reach the cut, so its Consume layer drew "No
+ * coverage" while the Sessions app listed 281 of them with their browsers.
+ *
+ * A top-N is the right shape for a table that says "the busiest profiles" and
+ * the wrong shape for "who consumes this application". So the breakdown the
+ * layer needs gets its own query, grouped only by origin: at most four rows
+ * per application, which no limit can truncate.
+ *
+ * `profiles` is carried so the cards keep what the profile rows used to
+ * give them — how many distinct screens an origin brought.
+ */
+export const qOrigins = (tf: Timeframe, session?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+| summarize agent = takeAny(dt.rum.agent.type), utype = takeAny(dt.rum.user_type),
+    res = takeAny(concat(device.screen.width, "×", device.screen.height)),
+    views = countIf(characteristics.classifier == "view_summary"),
+  by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
+| summarize sessions = count(), views = sum(views),
+    profiles = countDistinct(res),
+  by: { appId, agent, utype }
+| filter isNotNull(appId) and appId != ""
+| sort sessions desc
+| limit 200`;

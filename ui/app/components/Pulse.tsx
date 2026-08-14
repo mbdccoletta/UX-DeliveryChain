@@ -157,7 +157,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
   /* ── the measured joint distribution the river obeys ──
    * Origin totals come from the device rows; the hit side of each origin from
    * the per-session impact scan. Clean is the remainder, floored at zero. */
-  const devOrigin = data.devices.filter((d) => d.appId === appId)
+  // origin rows, not device profiles: the profile query is a top-20 over the
+  // environment and silently omits the smaller applications entirely
+  const devOrigin = data.origins.filter((d) => d.appId === appId)
     .reduce((acc, d) => {
       const o = originOf(d.agent, d.utype);
       const k = o === "Robots" ? "robot" : o === "Synthetic" ? "synth" : "real";
