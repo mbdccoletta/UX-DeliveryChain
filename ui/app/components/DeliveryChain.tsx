@@ -622,16 +622,27 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
         const byInstance = [...new Map(cloud.map((c) => [c.instanceId, c])).values()];
         const zones = [...new Set(cloud.map((c) => c.zoneName).filter(Boolean))];
         return [
-          ...byInstance.slice(0, 12).map<Elo>((c) => ({
-            nm: c.instanceName,
-            mt: `${c.instanceType.replace(/_/g, " ").toLowerCase()} · runs_on`,
-            v: c.instanceType.startsWith("AWS") ? "ec2"
-              : c.instanceType.startsWith("GCP") ? "gce" : "vm",
-            tone: "info", ids: [c.instanceId],
-            det: [["Instance", c.instanceId],
-                  ["Provider", c.instanceType.split("_")[0]],
-                  ["Zone", c.zoneName ?? "—"],
-                  ["Host", c.host]] })),
+          ...byInstance.slice(0, 12).map<Elo>((c) => (c.kind === "lambda"
+            ? {
+                nm: c.instanceName, mt: "AWS Lambda · serverless",
+                // a REGION, stated as one — a lambda has no availability zone
+                v: c.region ?? "lambda", tone: "info" as Tone, ids: [c.instanceId],
+                det: [["Provider", "AWS"],
+                      ["Region", c.region ?? "—"],
+                      ...(c.account ? [["Account", c.account] as [string, string]] : []),
+                      ["Function", c.instanceName]],
+              }
+            : {
+                nm: c.instanceName,
+                mt: `${c.instanceType.replace(/_/g, " ").toLowerCase()} · runs_on`,
+                v: c.instanceType.startsWith("AWS") ? "ec2"
+                  : c.instanceType.startsWith("GCP") ? "gce" : "vm",
+                tone: "info" as Tone, ids: [c.instanceId],
+                det: [["Instance", c.instanceId],
+                      ["Provider", c.instanceType.split("_")[0]],
+                      ["Zone", c.zoneName ?? "—"],
+                      ["Host", c.host]],
+              })),
           ...(zones.length ? [{
             nm: zones.length === 1 ? zones[0]! : `${zones.length} zones`,
             mt: "availability zone", v: "zone", tone: "info" as Tone,
@@ -769,6 +780,16 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       const zoneIdx = layers[7].items.findIndex((e) => e.mt === "availability zone");
       for (const [ci, card] of layers[7].items.slice(0, NODE_CAP).entries()) {
         if (ci === zoneIdx) continue;
+        /* A serverless provider card is entered from its own RUN card — the
+         * lambda placement — not from the hosts: a function shares no machine
+         * with anyone, and wiring it to every host would draw the exact
+         * everything-to-everything this pass exists to prevent. */
+        if (card.mt === "AWS Lambda · serverless") {
+          const fnId = card.ids?.[0];
+          const ri = fnId ? idxIn(5, (e) => (e.ids ?? []).includes(fnId)) : null;
+          if (ri !== null) edges.push({ s: [5, ri], t: [7, ci], v: 1, label: "runs on" });
+          continue;
+        }
         for (const [hi, hostCard] of layers[6].items.slice(0, NODE_CAP).entries()) {
           if (hostCard.miss) continue;
           edges.push({ s: [6, hi], t: [7, ci], v: 1, label: "runs on" });
@@ -867,9 +888,15 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // here before the first paint. Memoised per application and window, and the
   // landing page asks for the same key — arriving from the overview is free.
   const impacted = useImpacted(appId, data.tf, true);
-  // the provider behind the machines, fetched only for hosts in scope
+  // The provider behind the machines AND the serverless placements: a
+  // lambda-backed service produces no HOST, and the Provider column born
+  // only from hosts never existed for it — the chain ended at Run while the
+  // function node itself knew its provider, region and account.
   const cloud = useCloudScope(
-    [...scope.runtime].filter((i) => i.startsWith("HOST-")), scope.resolved);
+    [...scope.runtime].filter((i) => i.startsWith("HOST-")),
+    scope.placements.filter((p) => p.type === "AWS_LAMBDA_FUNCTION")
+      .map((p) => p.id),
+    scope.resolved);
   // the stores this application's services query, asked only once the scope
   // named them — no services, no question worth paying for
   const stores = useDataStores([...scope.services], scope.resolved);
