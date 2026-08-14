@@ -984,6 +984,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   box-shadow: 0 0 14px color-mix(in srgb, var(--info) 35%, transparent); }
 /* the errors hand-off wears the critical family — it is the one button that
    only exists because something is wrong */
+.tk-btn--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border-2)); }
+.tk-btn--warn:hover, .tk-btn--warn:focus-visible { color: var(--warn); border-color: var(--warn); }
 .tk-btn--sig { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--border-2)); }
 .tk-btn--sig:hover, .tk-btn--sig:focus-visible { color: var(--bad); border-color: var(--bad);
   box-shadow: 0 0 14px color-mix(in srgb, var(--bad) 30%, transparent); }
@@ -1519,21 +1521,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   border-top: 1px solid var(--border); font: 500 12px var(--mono); }
 .svcf__row--warn { background:
   linear-gradient(90deg, color-mix(in srgb, var(--warn) 9%, transparent), transparent 60%); }
-/* the anomaly rows under the failures — amber, the warning's own colour */
-.dtp-anhd { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border);
-  font: 700 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--warn); }
-.dtp-anhd em { font: 400 10px var(--mono); text-transform: none; letter-spacing: 0;
-  color: var(--ink-3); font-style: normal; }
-.dtp-an { display: grid; grid-template-columns: minmax(140px, 1.6fr) minmax(80px, 1fr) auto;
-  gap: 14px; align-items: center; padding: 6px 0;
-  border-top: 1px solid var(--border); font: 500 12px var(--mono); }
-.dtp-an__nm { color: var(--ink); overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-.dtp-an__on { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-.dtp-an__v { color: var(--warn); text-align: right; white-space: nowrap; font-size: 11px; }
-
 /* The fatal tag: a crash row names its kind before its exception message.
    Discreet by request — the filled version stretched into a full-width red
    bar on narrow rows and shouted over the list. Outline only, sized to its

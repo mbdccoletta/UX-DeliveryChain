@@ -13,7 +13,7 @@
 // green is a session that made it, red is one that did not.
 import React, { useEffect, useRef, useState } from "react";
 import { fmtK, fmtMs, fmtN } from "../utils/dql";
-import type { ChainData, SignalRow } from "../hooks/useChainData";
+import type { ChainData } from "../hooks/useChainData";
 import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
@@ -144,9 +144,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
     ...(app.entity ? [app.entity] : []),
     ...scope.services, ...scope.runtime,
   ]);
-  /* The ROWS, not just their count — the card said "9 anomalies" and nowhere
-   * on this page could the nine be seen. The number without its evidence is
-   * the defect this project keeps removing elsewhere. */
+  /* Counted by the chain's own rule (BASELINING signals on the app's
+   * delivery scope). Their one surface on this page is the header button,
+   * which opens the chain — where each is amber on its component. */
   const anomalyRows = data.signals.filter((sg) =>
     sg.provider === "BASELINING" && scopeIds.has(sg.entityId));
   const anomalies = anomalyRows.length;
@@ -257,6 +257,20 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
               Inspect {fmtK(app.errors)} errors
             </a>
           )}
+          {/* The anomalies' one surface on this page, by the reader's own
+              design: a button beside the error inspector, wearing the count.
+              It opens the delivery chain — an anomaly only means something on
+              the entity it is bound to, and the chain paints exactly those
+              entities amber. No native app is offered because no anomaly url
+              has been read off one yet. */}
+          {anomalies > 0 && (
+            <button className="tk-btn tk-btn--warn" onClick={onOpenChain}
+              title={`${fmtN(anomalies)} Davis baselining anomalies on this `
+                + "application's delivery scope — the chain shows each one amber "
+                + "on the component it affects"}>
+              {fmtN(anomalies)} anomal{anomalies === 1 ? "y" : "ies"}
+            </button>
+          )}
           <button className="tk-btn tk-btn--p" onClick={onAnalyze}>Analyze user sessions</button>
           <button className="tk-btn" onClick={onOpenChain}>Open delivery chain</button>
         </div>
@@ -269,7 +283,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
         actionsPerMin={perMin(pulse?.actions ?? 0)}
         errors={app.errors} errorsPerMin={perMin(app.errors)}
         crashes={app.crashes} anrs={app.anrs}
-        anomalies={anomalies}
+
         /* The core shows an Apdex, which is a speed reading and says nothing
            about what Davis detected. The problems belong beside it — named by
            category, in the platform's own words, so the card carries both what
@@ -312,8 +326,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
       {detail && detail !== "services" && (
         <DetailPanel metric={detail} rows={detailRows} tf={data.tf}
           appEntity={appEntityOf(app.entity, appId)} appName={app.name}
-          anomalies={detail === "errors" ? anomalyRows : undefined}
-          entityName={(id) => scope.names.get(id)}
           tracedDomains={domainTraces} onClose={() => setDetail(null)} />
       )}
     </div>
@@ -347,7 +359,6 @@ interface CardProps {
   /** The fatal subset of `errors` — crashes end the session, ANRs freeze it
    *  until Android kills it. Mobile only, by what the types can occur on. */
   crashes: number; anrs: number;
-  anomalies: number;
   requests: number; reqFail: number; loadP50: number;
   /** Apdex over this application's user actions, or null when none were rated. */
   apdex: number | null;
@@ -565,7 +576,7 @@ function CleanCard(p: CardProps) {
   const errs = p.series.map((s) => s.errors);
   const reqs = p.series.map((s) => s.requests);
   const times = p.series.map((s) => s.t);
-  const errTone: Tone = p.errors > 0 ? "bad" : p.anomalies > 0 ? "warn" : "good";
+  const errTone: Tone = p.errors > 0 ? "bad" : "good";
   // A failure RATE, not a failure count: with 927k requests a single 4xx is
   // 0.0% — turning the box red and making it knock for that is a false alarm,
   // and a card that cries wolf is worse than one that says nothing.
@@ -602,14 +613,14 @@ function CleanCard(p: CardProps) {
             );
           })()}
         </Module>
-        {/* The headline earned "anomalies" back: the stat beside it now
-            counts real BASELINING signals in this app's delivery scope — the
-            same rule that turns a chain card amber — where it used to wear
-            the problem count under the wrong name. */}
+        {/* No "anomalies" in the headline: they moved to the header button
+            (the reader's design), which carries the count and opens the chain
+            where each one is amber on its component. The card names only what
+            it shows. */}
         <Module Icon={WarningIcon}
-          title={p.isMobile ? "Crashes, errors & anomalies" : "Errors & anomalies"}
+          title={p.isMobile ? "Crashes & errors" : "Errors"}
           tone={errTone}
-          pulse={p.anomalies > 0}
+          pulse={p.problems > 0}
           metric="errors" active={p.detail === "errors"} onPick={p.onMetric}
           spark={<><Bars vals={errs} times={times} label="errors" fc={p.fcBars?.errors}
             tone={p.errors > 0 ? "bad" : "info"} />
@@ -631,10 +642,6 @@ function CleanCard(p: CardProps) {
                 many of those errors a person actually met. Red only for those. */}
             <Stat v={p.realErrors === null ? "…" : fmtK(p.realErrors)} l="reached a user"
               tone={p.realErrors ? "bad" : "good"} />
-            {/* amber, never red: an anomaly is Davis noticing a deviation,
-                not measured user harm — the chain draws it the same way */}
-            <Stat v={String(p.anomalies)} l={`anomal${p.anomalies === 1 ? "y" : "ies"}`}
-              tone={p.anomalies > 0 ? "warn" : "good"} />
             <Stat v={String(p.problems)} l={`active problem${p.problems === 1 ? "" : "s"}`}
               tone={p.problems > 0 ? "bad" : "good"} />
           </div>
@@ -786,13 +793,8 @@ function Stat({ v, l, tone, title }: {
  * components repeating the same frame.
  */
 function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
-  anomalies, entityName, onClose }: {
+  onClose }: {
   metric: DetailMetric; rows: DetailRow[] | null; tf: TimeframeT;
-  /** The anomaly signals behind the card's count — the evidence the "9" on
-   *  the card was missing. Errors panel only. */
-  anomalies?: SignalRow[];
-  /** Resolves a scoped entity id to its display name, where one is known. */
-  entityName?: (id: string) => string | undefined;
   /** The application's entity id — what the intent hand-offs are keyed on. */
   appEntity?: string;
   /** Its display name — what the Error Inspector's filter bar matches on. */
@@ -954,25 +956,6 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           </>);
         })}
       </div>
-
-      {/* The anomalies behind the card's count. "9 anomalies" with nowhere
-          to see the nine was the reader's own question — each row is one
-          BASELINING signal, named by Davis, bound to something in this
-          application's delivery scope. */}
-      {anomalies && anomalies.length > 0 && (
-        <>
-          <div className="dtp-anhd">Anomalies
-            <em> · Davis baselining, on this application&apos;s delivery scope</em></div>
-          {anomalies.map((a, i2) => (
-            <div className="dtp-an" key={`${a.entityId}-${i2}`}>
-              <span className="dtp-an__nm" title={a.entityId}>{a.name}</span>
-              <span className="dtp-an__on">{entityName?.(a.entityId) ?? a.entityId}</span>
-              <span className="dtp-an__v">{fmtN(a.events)} events
-                {a.status ? ` · ${a.status.toLowerCase()}` : ""}</span>
-            </div>
-          ))}
-        </>
-      )}
       <div className="svcf__note">
         {metric === "errors"
           ? "one row per KIND of failure — ids in the url are collapsed, so a broken "
