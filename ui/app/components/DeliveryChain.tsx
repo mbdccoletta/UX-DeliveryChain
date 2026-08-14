@@ -107,6 +107,13 @@ interface Elo {
   gen2?: string;
   /** …and whether that service is a data store, which decides its icon. */
   gen2Db?: boolean;
+  /**
+   * Which visual group of the Serve column this card sits in. The column
+   * holds three natures — services, classic-topology (mainframe) elements,
+   * data stores — and they were only tellable apart by reading each card's
+   * subtitle. A divider is drawn where the group changes.
+   */
+  grp?: "classic" | "stores";
 }
 
 /**
@@ -355,7 +362,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
         return {
           nm: store, mt: `${sys} · ${fmtN(calls)} calls`,
           v: fmtMs(wAvg((s) => s.p50)), tone: "info", vol: calls,
-          store,
+          store, grp: "stores",
           // No ids: there is no entity behind this card. Smartscape maps no
           // service-to-store edge on this tenant, so signals cannot attach and
           // the card must not pretend a drilldown exists.
@@ -388,6 +395,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     v: String(g.callers.length || "·"), tone: "info",
     vol: Math.max(g.callers.length * 40, 1),
     ids: [g.id], gen2: g.id, gen2Db: /DATABASE|DATASTORE/.test(g.kind),
+    grp: "classic",
     det: [["Found in", "classic topology — Smartscape has no node for it"],
           ["Classic type", g.kind || "—"],
           ...(g.host ? [["Runs on", g.host] as [string, string]] : []),
@@ -1231,6 +1239,14 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   <div className="gcol__nodes">
                     {shown.map((n, ni) => {
                       const id = `${ti}-${ni}`;
+                      /* The Serve column mixes three natures, and the reader
+                         asked for a visible seam: a labelled divider is drawn
+                         where the group changes — services, then classic
+                         topology (the mainframe's home), then data stores.
+                         Only drawn when the seam exists; a column of plain
+                         services keeps its clean run. */
+                      const seam = ti === 4 && n.grp
+                        && shown[ni - 1]?.grp !== n.grp ? n.grp : null;
                       /* The card wears its anomaly count. Seven signals can
                          bind to two cards — a grouped workload, a "Nodes
                          running this app" card holding several nodes — and a
@@ -1241,8 +1257,13 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                       // measured volume sets the radius — 68k requests reads
                       // bigger than 3 pods before any label is read
                       const r = 9 + (n.vol ? Math.min(13, 3.4 * Math.log10(n.vol + 1)) : 2);
-                      return (
-                        <div key={id} data-node
+                      return (<React.Fragment key={id}>
+                        {seam && (
+                          <div className="gdiv" aria-hidden="true">
+                            {seam === "classic" ? "classic topology" : "data stores"}
+                          </div>
+                        )}
+                        <div data-node
                           className={`gnode ${n.miss ? "gnode--miss" : ""} ${sel === id ? "gnode--sel" : ""}`
                             + (highlight ? (n.tone === "warn" || n.tone === "bad"
                               ? " gnode--spot" : " gnode--dimmed") : "")}
@@ -1266,7 +1287,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                             <em className="gnode__fc" title="Forecast: errors rising over the next 12h">↗ forecast</em>
                           )}</span>
                         </div>
-                      );
+                      </React.Fragment>);
                     })}
                     {hidden > 0 && (
                       <button className="gnode gnode--more" data-node
