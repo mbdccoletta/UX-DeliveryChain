@@ -597,7 +597,7 @@ export function kindOf(
  *
  * `hasSpans` decides whether this is worth offering at all: a CDN or a font
  * host has no span behind it, and the explorer would open on nothing. Those
- * fall to `notebookQueryLink` instead.
+ * offer no hop at all — Notebooks was dropped by request.
  */
 function domainTracesLink(address: string, apps: AppMap | undefined, tf: Timeframe): DeepLink {
   const clean = address.replace(/["\\]/g, "");
@@ -608,24 +608,6 @@ function domainTracesLink(address: string, apps: AppMap | undefined, tf: Timefra
       proves: "the server-side traces behind this address, sortable by duration or failure",
       app: t?.name ?? "Distributed Tracing",
       ...(t ? { appId: t.appId, intentId: TRACES_LIST.intentId } : {}) });
-}
-
-/**
- * An ad-hoc DQL hop into Notebooks, for a question no entity id can answer.
- *
- * NOT resolved through the capability map — Notebooks has no CANDIDATES entry
- * in useApps.ts (no classic equivalent to fall back to), so this hardcodes
- * the app the same way the domain query hand-off already did before this
- * pass. Left explicit rather than silently duplicated at each call site.
- */
-function notebookQueryLink(
-  label: string, proves: string, meta: string, query: string, tf: Timeframe,
-  /** The notebook's own title — without it the tab opens as "Untitled". */
-  title: string,
-): DeepLink {
-  return link(label, meta, withTf(tf, { title, "dt.query": query }),
-    { keyProperties: ["dt.query"], proves, app: "Notebooks",
-      appId: "dynatrace.notebooks", intentId: "view-query" });
 }
 
 /**
@@ -818,105 +800,22 @@ export function investigationPaths(
   const podClassic = ids.find((i) => i.startsWith("CLOUD_APPLICATION_INSTANCE-"));
   const nodeClassic = ids.find((i) => i.startsWith("KUBERNETES_NODE-"));
 
-  /* Computed once, pushed into BOTH technical and tactical below — the same
-   * pattern the Davis problem step already uses (`prob`). A traffic segment
-   * or a contacted domain has exactly one piece of evidence worth offering;
-   * asking the same evidence twice, framed once as "what happened" and once
-   * as "who else this touches", is more honest than inventing a second,
-   * weaker hop just to fill the tactical column. */
-  const originHop = (() => {
-    if (kind !== "origin" || !rumAppId) return null;
-    /* Mirrors originOf() (components/DeliveryChain.tsx) — the SAME three
-     * decisions in the SAME order, because the destination must count the
-     * sessions the card counted:
-     *
-     *  1. Mobile is decided FIRST, on the agent — so a robot driving the
-     *     Android app is Mobile there, and must be Mobile here. A plain
-     *     `user_type == "robot"` filter would have claimed it for Robots.
-     *  2. Null falls through to Browsers there — so null must fall through
-     *     here too. DQL null-compares to null, and `null != "robot"` filters
-     *     the row OUT, which would have silently dropped every session with
-     *     no user_type from Browsers. coalesce to "" first, compare after.
-     *  3. contains(), not matchesPhrase() — contains is already in use and
-     *     verified in this codebase; matchesPhrase never was. Case matters to
-     *     contains, and the measured values are lowercase ("javascript",
-     *     "android", "real_user", "robot", "synthetic" — read off this
-     *     tenant's own origin rows), so the lowercase needles are faithful.
-     */
-    const MOB = '(contains(__agent, "android") or contains(__agent, "ios")'
-      + ' or contains(__agent, "mobile"))';
-    const originFilter: Record<string, string> = {
-      Mobile: MOB,
-      Robots: `not(${MOB}) and __utype == "robot"`,
-      Synthetic: `not(${MOB}) and __utype == "synthetic"`,
-      Browsers: `not(${MOB}) and __utype != "robot" and __utype != "synthetic"`,
-    };
-    const cond = originFilter[name];
-    if (!cond) return null;
-    return notebookQueryLink("What this segment did",
-      "The views this segment actually reached, and how each one failed.",
-      `${name} · busiest views`,
-      `fetch user.events
-| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
-| filter characteristics.classifier == "view_summary"
-    or characteristics.classifier == "error"
-| fieldsAdd __agent = coalesce(dt.rum.agent.type, ""),
-    __utype = coalesce(dt.rum.user_type, "")
-| filter ${cond}
-| summarize sessions = countDistinct(dt.rum.session.id),
-    views = countIf(characteristics.classifier == "view_summary"),
-    errors = countIf(characteristics.classifier == "error"),
-  by: { view = view.detected_name }
-| filter isNotNull(view)
-| sort views desc
-| limit 20`, tf, `${name} — what this segment did`);
-  })();
+  /* Spans behind the address → the traces explorer, the Gen3 destination.
+   * No spans → NO hop: a CDN or a font host has no server-side record to
+   * open, and the Notebook query that used to fill this slot was dropped by
+   * request — a query page is homework, not a destination. Assist still
+   * reads the card's measured numbers below. */
   const domainHop = (kind === "domain3p" || kind === "domain1p") && domain
-    ? (domainHasSpans
-        ? domainTracesLink(domain, apps, tf)
-        : notebookQueryLink("Open this domain's requests",
-            "every path this domain served, with its timings and failures",
-            `${domain} · as a query`,
-            `fetch user.events
-| filter url.domain == "${domain.replace(/["\\]/g, "")}"
-| summarize requests = countIf(characteristics.classifier == "request"),
-    failures = countIf(characteristics.classifier == "error"),
-    p50 = percentile(if(characteristics.classifier == "request", toLong(duration)), 50),
-    p90 = percentile(if(characteristics.classifier == "request", toLong(duration)), 90),
-  by: { path = url.path, code = http.response.status_code }
-| sort requests desc`, tf, `Requests to ${domain}`))
+    && domainHasSpans
+    ? domainTracesLink(domain, apps, tf)
     : null;
-  /* Gated on MEASURED spans, exactly like a domain, because a store's
-   * address is `coalesce(server.address, db.namespace, db.system)` — for a
-   * driver that reports no address (measured: mongoose) the card's name is
-   * "mongoose", and a traces explorer filtered on `server.address = mongoose`
-   * opens empty while looking like it worked. With spans behind the address
-   * the explorer is the Gen3 destination; without, a notebook query matches
-   * the same three fields the store was discovered by, so it finds exactly
-   * the spans that put the card on screen.
-   *
-   * `server.address` alone in the explorer filter — the store card also
-   * carries db.system, which would disambiguate two stores sharing a host,
-   * but whether the explorer's `dt.filter` accepts two space-joined
-   * conditions has not been checked against this tenant. Marked follow-up,
-   * not guessed. */
-  const storeHop = kind === "store" && domain
-    ? (domainHasSpans
-        ? domainTracesLink(domain, apps, tf)
-        : (() => {
-            const a = domain.replace(/["\\]/g, "");
-            return notebookQueryLink("See its queries",
-              "the database calls behind this card, operation by operation",
-              `${a} · as a query`,
-              `fetch spans
-| filter server.address == "${a}" or db.namespace == "${a}" or db.system == "${a}"
-| summarize calls = count(),
-    p50 = percentile(toLong(duration), 50),
-    p90 = percentile(toLong(duration), 90),
-  by: { operation = span.name, svc = dt.entity.service }
-| sort calls desc
-| limit 30`, tf, `Queries to ${a}`);
-          })())
+  /* Spans behind the address → the traces explorer. Without them, no hop —
+   * the address is `coalesce(server.address, db.namespace, db.system)`, and
+   * for a driver that reports no address (measured: mongoose) any filtered
+   * destination opens empty while looking like it worked. The Notebook
+   * fallback that used to cover this was dropped by request. */
+  const storeHop = kind === "store" && domain && domainHasSpans
+    ? domainTracesLink(domain, apps, tf)
     : null;
 
   switch (kind) {
@@ -1029,9 +928,6 @@ export function investigationPaths(
           "Its crashes, versions and vitals as the platform presents them.",
           "dt.entity.application", scopedEntity, "mobile"));
       }
-      // The segment-narrowed evidence — the only view that can express
-      // "robots only" today, so it stays, one step down.
-      if (originHop) tech.push(originHop);
       /* The Explorer cannot narrow to one segment — its filter bar speaks
        * Frontend, not user type — so this opens the APPLICATION's errors,
        * and says so: the meta carries the app-wide count, not the segment's.
@@ -1128,7 +1024,6 @@ export function investigationPaths(
       // Davis-problem step already reuses one link across both routes this
       // way (`prob`, pushed above); this is the same move for a segment or
       // an address that has no entity to ask a SEPARATE tactical question of.
-      if (originHop) tac.push(originHop);
       if (domainHop) tac.push(domainHop);
       if (storeHop) tac.push(storeHop);
       break;
@@ -1387,8 +1282,8 @@ export function rowDrilldown(
      * spans over 7 services. So a first-party domain opens its real traffic.
      *
      * `hasSpans` is measured per panel, not assumed: a CDN or a font host has
-     * no span behind it, and the traces explorer would open empty. Those keep
-     * the query hand-off below, which always has something to show.
+     * no span behind it, and the traces explorer would open empty. Those
+     * offer no drill-down at all — Notebooks was dropped by request.
      *
      * The filter grammar is the explorer's own — single `=`, value UNQUOTED.
      * The DQL form is accepted by the url and silently ignored, which opens
@@ -1401,23 +1296,10 @@ export function rowDrilldown(
           app: "Distributed Tracing",
           proves: "the server-side traces behind what the browser asked for" });
     }
-    return link("Open this domain's requests", `${d} · as a query`,
-      withTf(tf, {
-        title: `Requests to ${d}`,
-        "dt.query": `fetch user.events
-| filter url.domain == "${d}"
-| summarize requests = countIf(characteristics.classifier == "request"),
-    failures = countIf(characteristics.classifier == "error"),
-    p50 = percentile(if(characteristics.classifier == "request", toLong(duration)), 50),
-    p90 = percentile(if(characteristics.classifier == "request", toLong(duration)), 90),
-    p95 = percentile(if(characteristics.classifier == "request", toLong(duration)), 95),
-  by: { path = url.path, code = http.response.status_code }
-| sort requests desc`,
-      }),
-      { keyProperties: ["dt.query"],
-        appId: "dynatrace.notebooks", intentId: "view-query",
-        app: "Notebooks",
-        proves: "every path this domain served, with its timings and failures" });
+    /* No spans, no destination. The Notebook query that used to fill this
+     * slot was dropped by request — the row offers no drill-down, which is
+     * what "nothing measured behind it" should look like. */
+    return null;
   }
   if (kind === "views") {
     // Measured on this tenant: /instruments, /login, /deposit, /home and
