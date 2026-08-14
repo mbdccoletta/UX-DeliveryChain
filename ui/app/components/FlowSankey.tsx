@@ -813,12 +813,8 @@ export function FlowSankey({
             {focus ? "show all flows" : "isolate this path"}
           </button>
           {selApp && onOpen && (
-            <>
-              <button className="flow-sel__b" onClick={() => onOpen("chain", selApp)}
-                title="Open this application's delivery chain">delivery chain ↗</button>
-              <button className="flow-sel__b" onClick={() => onOpen("journey", selApp)}
-                title="Open this application's journey map">journeys ↗</button>
-            </>
+            <button className="flow-sel__b" onClick={() => onOpen("chain", selApp)}
+              title="Open this application's delivery chain">delivery chain ↗</button>
           )}
           <button className="flow-sel__b"
             onClick={() => { setSel(null); setSelNode(null); setFocus(false); }}>clear ✕</button>

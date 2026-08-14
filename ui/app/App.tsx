@@ -16,7 +16,6 @@ import { FlowSankey } from "./components/FlowSankey";
 import { DeliveryChain } from "./components/DeliveryChain";
 import { Overview } from "./components/Overview";
 import { Pulse } from "./components/Pulse";
-import { JourneyMap } from "./components/JourneyMap";
 import { ReportView } from "./components/ReportView";
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
 import { useUrlState } from "./hooks/useUrlState";
@@ -42,7 +41,7 @@ const TABS: Array<[Tab, string, string]> = [
   // one page, two altitudes: Flow aggregates where users go; Journey replays
   // the steps one session class takes. A view toggle switches between them
   // without losing the application or the window.
-  ["flow", "Journeys", "Where users go and how they get there — aggregated, or step by step"],
+  ["flow", "Journeys", "Where users go and how they get there"],
   ["health", "Health", "The environment as a whole, aggregated"],
   ["report", "Report", "What is worth telling someone who will not read a chart"],
 ];
@@ -70,7 +69,8 @@ export function App() {
   // already switched to the journey view
   const tab = (state.tab === "journey" ? "flow"
     : TABS.some(([id]) => id === state.tab) ? state.tab : "home") as Tab;
-  const jview = state.tab === "journey" || state.view === "journey" ? "journey" : "flow";
+  // The step-by-step JourneyMap and its toggle were removed by request; the
+  // Flow (whose step mode now takes custom paths) is the Journeys page.
   // Any window the platform selector can express — presets and custom ranges
   // alike — travels in the URL as the two expressions the queries will use.
   const tf = React.useMemo(
@@ -163,8 +163,8 @@ export function App() {
               )}
               {!d.loading && d.apps.length > 0 && tab !== "report" && (
                 <Select
-                  value={tab === "flow" && jview === "flow" ? appId : current}
-                  clearable={tab === "flow" && jview === "flow"}
+                  value={tab === "flow" ? appId : current}
+                  clearable={tab === "flow"}
                   onChange={(v) => setAppId((v as string | null) ?? null)}>
                   <Select.Trigger placeholder="All applications" />
                   <Select.Content>
@@ -250,26 +250,10 @@ export function App() {
 
           {tab === "flow" && (
             <div className="stack">
-              <div className="seg seg--views" role="group" aria-label="Journeys view">
-                <button className={jview === "flow" ? "on" : ""}
-                  aria-pressed={jview === "flow"}
-                  onClick={() => set({ view: "flow", tab: "flow" })}>
-                  Flow · where they go</button>
-                <button className={jview === "journey" ? "on" : ""}
-                  aria-pressed={jview === "journey"}
-                  onClick={() => set({ view: "journey", tab: "flow" })}>
-                  Journey · step by step</button>
-              </div>
-              {jview === "flow" ? (
-                <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={appId}
-                  transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
-                  onPickApp={(id) => { setAppId(id); }}
-                  onOpen={(t, id) => { setAppId(id);
-                    if ((t as string) === "journey") set({ view: "journey", tab: "flow", sel: null });
-                    else setTab("chain"); }} /></Boundary>
-              ) : current ? (
-                <Boundary label="Journey"><JourneyMap data={d} appId={current} /></Boundary>
-              ) : null}
+              <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={appId}
+                transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
+                onPickApp={(id) => { setAppId(id); }}
+                onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
             </div>
           )}
 
