@@ -11,11 +11,17 @@
 // column would be one more component connected to nothing, which is the defect
 // this whole pass set out to remove.
 import { useEffect, useState } from "react";
-import { qCloudPlacement, runDql } from "../utils/dql";
+import { qCloudPlacement, qLambdaPlacement, runDql } from "../utils/dql";
 
 export interface CloudPlacement {
-  /** The HOST this describes — how the edge finds its source card. */
+  /** The placement this describes — a HOST id, or for serverless the
+   *  AWS_LAMBDA_FUNCTION id — how the edge finds its source card. */
   host: string;
+  /** Serverless placements carry a REGION, not an availability zone, and the
+   *  card must say which it is saying. */
+  kind?: "instance" | "lambda";
+  region?: string;
+  account?: string;
   instanceId: string;
   instanceType: string;
   /** The provider's own name. Not unique: three instances here are all called
@@ -28,10 +34,20 @@ export interface CloudPlacement {
 
 const memo = new Map<string, CloudPlacement[]>();
 
-/** Cloud placements for these hosts, or null while loading / none scoped. */
-export function useCloudScope(hostIds: string[], active = true): CloudPlacement[] | null {
+/** Cloud placements for these hosts and lambdas, or null while loading. */
+export function useCloudScope(
+  hostIds: string[],
+  /** AWS_LAMBDA_FUNCTION placement ids — a lambda-backed service produces no
+   *  HOST, and the Provider column born only from hosts never existed for
+   *  it. The function node itself carries provider, region and account
+   *  (measured on guu84124), so serverless earns the column too. */
+  lambdaIds: string[] = [],
+  active = true,
+): CloudPlacement[] | null {
   const ids = [...hostIds].sort();
-  const key = active && ids.length ? ids.join(",") : "";
+  const fns = [...lambdaIds].sort();
+  const key = active && (ids.length || fns.length)
+    ? `${ids.join(",")}|${fns.join(",")}` : "";
   const [out, setOut] = useState<CloudPlacement[] | null>(
     key ? memo.get(key) ?? null : null);
 
@@ -44,9 +60,10 @@ export function useCloudScope(hostIds: string[], active = true): CloudPlacement[
     let live = true;
     (async () => {
       try {
-        const rows = await runDql<Record<string, unknown>>(qCloudPlacement(ids), 60);
+        const rows = ids.length
+          ? await runDql<Record<string, unknown>>(qCloudPlacement(ids), 60) : [];
         const list: CloudPlacement[] = rows.map((r) => ({
-          host: String(r.host ?? ""),
+          host: String(r.host ?? ""), kind: "instance" as const,
           instanceId: String(r.instanceId ?? ""),
           instanceType: String(r.instanceType ?? ""),
           instanceName: String(r.instanceName ?? r.instanceId ?? ""),
@@ -54,6 +71,22 @@ export function useCloudScope(hostIds: string[], active = true): CloudPlacement[
           zoneType: r.zoneType ? String(r.zoneType) : undefined,
           zoneName: r.zoneName ? String(r.zoneName) : undefined,
         })).filter((p) => p.instanceId);
+        if (fns.length) {
+          try {
+            const lam = await runDql<Record<string, unknown>>(qLambdaPlacement(fns), 40);
+            for (const r of lam) {
+              if (!r.fn) continue;
+              list.push({
+                host: String(r.fn), kind: "lambda",
+                instanceId: String(r.fn),
+                instanceType: "AWS_LAMBDA_FUNCTION",
+                instanceName: String(r.name ?? r.fn),
+                region: r.region ? String(r.region) : undefined,
+                account: r.account ? String(r.account) : undefined,
+              });
+            }
+          } catch { /* the functions stay in Run; the column simply lacks them */ }
+        }
         memo.set(key, list);
         if (live) setOut(list);
       } catch {
@@ -64,7 +97,7 @@ export function useCloudScope(hostIds: string[], active = true): CloudPlacement[
     })();
 
     return () => { live = false; };
-  }, [key, ids.join(",")]);
+  }, [key]);
 
   return out;
 }

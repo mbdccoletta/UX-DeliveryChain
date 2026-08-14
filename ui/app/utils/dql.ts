@@ -884,6 +884,23 @@ smartscapeEdges "runs_on"
 | limit 60`;
 
 /**
+ * The provider behind a serverless placement.
+ *
+ * A lambda-backed service produces no HOST, so the Cloud layer — born only
+ * from hosts — never existed for it, and the chain ended at Run while the
+ * platform knew better. Measured on guu84124: the AWS_LAMBDA_FUNCTION node
+ * itself carries cloud.provider "aws", aws.region "us-east-1" and
+ * aws.account.id — the whole Provider card, as node properties, no edge
+ * needed. A region is not an availability zone, and the card says region.
+ */
+export const qLambdaPlacement = (fnIds: string[]) => `
+smartscapeNodes "AWS_LAMBDA_FUNCTION"
+| filter in(id, {${fnIds.slice(0, 40)
+  .map((f) => `"${f.replace(/["\\]/g, "")}"`).join(",")}})
+| fields fn = id, name, region = aws.region, account = aws.account.id
+| limit 40`;
+
+/**
  * The data stores this application's services talk to.
  *
  * NOT from Smartscape, and that was measured rather than assumed. On this
