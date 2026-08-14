@@ -431,8 +431,21 @@ export function intentsAvailable(): boolean {
  * fall back to `keyProperties` when no app is known for the step.
  */
 export function open(
-  step: Pick<DeepLink, "payload" | "keyProperties" | "appId" | "intentId">,
+  step: Pick<DeepLink, "payload" | "keyProperties" | "appId" | "intentId" | "href">,
 ) {
+  /* Every drill-down opens a NEW browser tab — the reader's rule: leaving
+   * the chain to inspect a destination must not lose the chain being read.
+   * The href IS the intent url (safeLink builds it from the same payload),
+   * so the new tab lands on the same screen the bus would have navigated to.
+   *
+   * Assist is the one deliberate exception: it is a panel OVER the current
+   * screen, not a departure — sent to the bus, it opens beside the chain;
+   * sent to a tab, it would open as a full page with the chain gone, which
+   * is the opposite of what a side-panel is for. */
+  if (step.appId !== ASSIST.appId && step.href && step.href !== "#") {
+    window.open(step.href, "_blank", "noopener");
+    return;
+  }
   try {
     if (step.appId && step.intentId) {
       sendIntent(step.payload as never,
