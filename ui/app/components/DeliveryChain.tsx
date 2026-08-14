@@ -3,11 +3,12 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { fmtK, fmtMs, fmtN, perfScore } from "../utils/dql";
 import { insightsFor, type Insight } from "../utils/insights";
-import { intentsAvailable, investigationPaths, kindOf, open, type Persona, type Route } from "../utils/links";
+import { appHomeHref, intentsAvailable, investigationPaths, kindOf, open,
+  type Persona, type Route } from "../utils/links";
 import type { ChainData } from "../hooks/useChainData";
 import { usePanZoom } from "../hooks/usePanZoom";
 import { useAssist } from "../hooks/useAssist";
-import { useApps } from "../hooks/useApps";
+import { type AppMap, useApps } from "../hooks/useApps";
 import { useAppScope, type AppScope } from "../hooks/useAppScope";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
@@ -917,7 +918,25 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2),
     [data, appId, scope, ahead, impacted, cloud, stores, gen2]);
   const tiers = built.layers;
-  const edges = built.edges;
+  /* THE PIVOT: mapping every backend relation stopped being this app's job.
+   * Smartscape and the problem path already own that picture; what only this
+   * app sees is the RUM side (Consume→Route) and the BRIDGE — which backend
+   * this application's sessions actually reach. So the chain draws its four
+   * RUM layers and hands the rest to one summarised Backend block, keyed on
+   * everything the scope still measures. The deep edges keep being computed
+   * (their tones and counts feed the block); they are no longer drawn. */
+  const edges = useMemo(() => {
+    const kept = built.edges.filter((e) => e.s[0] < 4 && e.t[0] < 4);
+    // the seam: everything past the edge/ingress funnels into one block
+    const from: [number, number] =
+      built.layers[3]?.items[0]?.miss ? [2, 0] : [3, 0];
+    const vol = [...scope.traces.values()].reduce((a, v) => a + v, 0);
+    if (!built.layers[4]?.items[0]?.miss || scope.resolved) {
+      kept.push({ s: from, t: [4, 0], v: Math.max(vol, 1),
+        label: vol > 0 ? "traces" : "reaches the backend" });
+    }
+    return kept;
+  }, [built, scope]);
   // the setter mirrors useState's signature so the existing toggles still read
   // naturally, but the value it writes lands in the query string
   const setSel = (v: string | null | ((cur: string | null) => string | null)) => {
@@ -1193,7 +1212,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                ? undefined
                : { transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
           <svg className="dcf-svg" ref={svgRef} aria-hidden="true" />
-          <div className={`graph${highlight ? " graph--hl" : ""}`} role="list">
+          <div className={`graph graph--sum${highlight ? " graph--hl" : ""}`} role="list">
             {highlight && (
               <button className="hlbar" onClick={() => onHighlightClear?.()}
                 title="Clear the spotlight">
@@ -1205,7 +1224,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 each lit card wears its count · click anywhere to dismiss ✕
               </button>
             )}
-            {tiers.map((layer, ti) => {
+            {tiers.slice(0, 4).map((layer, ti) => {
               // A layer with nothing in it is not drawn. Only the last one can
               // be empty — Cloud, where the machines have no provider behind
               // them — and an empty eighth column would be the very thing this
@@ -1313,6 +1332,87 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 </div>
               );
             })}
+
+            {/* ── THE BACKEND, summarised ──
+                Everything the four RUM layers hand off to, as one block: the
+                counts the scope still measures, the worst verdict among them,
+                and one row per subject pointing at the platform app that
+                already manages it. The deep per-node mapping this replaced is
+                Smartscape's job — and the problem path draws it on demand. */}
+            {(() => {
+              const beIds = [4, 5, 6, 7].flatMap((ti) => [...(idsOfTier[ti] ?? [])]);
+              const beProbs = problemsFor(beIds).length;
+              const beAnoms = signalsFor(beIds)
+                .filter((sg) => sg.provider === "BASELINING").length;
+              const beTone: Tone = [4, 5, 6, 7].reduce<Tone>(
+                (acc, ti) => worseOf(acc, tiers[ti]?.tone ?? "good"), "good");
+              const storeCount = new Set((stores ?? []).map((st) => st.store)).size;
+              const isK8s = scope.placements.some((pl) => pl.type === "K8S_POD")
+                || data.runtime.length > 0;
+              const lam = (cloud ?? []).filter((c) => c.kind === "lambda");
+              const inst = (cloud ?? []).filter((c) => c.kind !== "lambda");
+              const region = [...new Set([
+                ...lam.map((c) => c.region).filter(Boolean),
+                ...inst.map((c) => c.zoneName).filter(Boolean)])].join(" · ");
+              const row = (
+                label: string, value: string, target: keyof AppMap | null,
+                sub?: string,
+              ) => {
+                const t = target ? apps[target] : undefined;
+                const inner = (<>
+                  <span className="bsum__l">{label}</span>
+                  <b className="bsum__v">{value}</b>
+                  {sub && <em className="bsum__s">{sub}</em>}
+                  {t && <em className="bsum__go">{t.name} →</em>}
+                </>);
+                return t ? (
+                  <a key={label} className="bsum__row bsum__row--go"
+                    href={appHomeHref(t.appId)} target="_blank" rel="noreferrer"
+                    title={`Open ${t.name} — the app that manages this`}>{inner}</a>
+                ) : <div key={label} className="bsum__row">{inner}</div>;
+              };
+              return (
+                <div className={`gcol gcol--bsum ${beTone === "bad" ? "gcol--bad"
+                    : beTone === "warn" ? "gcol--warn" : ""}`
+                    + (highlight ? (beAnoms > 0 || beProbs > 0
+                      ? " bsum--spot" : " bsum--dim") : "")}
+                  role="listitem">
+                  <div className="gcol__hd" style={{ cursor: "default" }}>
+                    <span className="gcol__ic" aria-hidden="true">
+                      {React.createElement(ServicesIcon, { size: 16 })}
+                    </span>
+                    <b>BACKEND</b>
+                    {beProbs > 0 && <span className="pb">⚠ {beProbs}</span>}
+                    {beAnoms > 0 && <span className="pb pb--warn">⚠ {beAnoms}</span>}
+                  </div>
+                  <span className="gcol__name">Serve · Run · Host · Cloud</span>
+                  <span className="gcol__sub">managed by the platform&apos;s own apps</span>
+                  <div className="bsum" >
+                    {/* the seam's landing point — the mesh draws into this */}
+                    <i id="nd-4-0" className={`gnode__c gnode__c--${beTone} bsum__c`}
+                      aria-hidden="true">
+                      {React.createElement(ServicesIcon, { size: 15 })}
+                    </i>
+                    {scope.loading
+                      ? <div className="bsum__row"><em className="bsum__s">resolving the scope…</em></div>
+                      : (<>
+                        {row("Services", fmtN(tiers[4]?.total ?? 0), "services",
+                          (gen2?.length ?? 0) > 0
+                            ? `${gen2!.length} topology-mapped` : undefined)}
+                        {storeCount > 0 && row("Data stores", fmtN(storeCount), "databases")}
+                        {row("Runtime", fmtN(tiers[5]?.total ?? 0),
+                          isK8s ? "kubernetes" : "hosts",
+                          tiers[5]?.kpiLabel)}
+                        {row("Infrastructure", fmtN(tiers[6]?.total ?? 0), "hosts",
+                          tiers[6]?.kpiLabel)}
+                        {(lam.length > 0 || inst.length > 0) && row("Cloud",
+                          lam.length ? `${lam.length} lambda` : `${inst.length} instances`,
+                          null, region || undefined)}
+                      </>)}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
         <div className="zoomctl">

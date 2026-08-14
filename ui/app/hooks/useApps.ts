@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 
 export type Capability =
   | "services" | "hosts" | "processes" | "kubernetes"
-  | "logs" | "traces" | "problems" | "rum" | "mobile";
+  | "logs" | "traces" | "problems" | "rum" | "mobile" | "databases";
 
 export interface AppTarget {
   appId: string;
@@ -49,6 +49,9 @@ const CANDIDATES: Record<Capability, Array<[string, string, boolean]>> = {
                ["dynatrace.classic.web", "Web Classic", true]],
   mobile:     [["dynatrace.experience.vitals", "Experience Vitals", false],
                ["dynatrace.classic.mobile", "Mobile Classic", true]],
+  // both ids read off this tenant's registry (see the store route)
+  databases:  [["dynatrace.database.overview", "Databases", false],
+               ["dynatrace.classic.databases", "Database Services Classic", true]],
 };
 
 export type AppMap = Partial<Record<Capability, AppTarget>>;
