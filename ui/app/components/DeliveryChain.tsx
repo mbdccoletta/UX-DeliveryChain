@@ -1151,6 +1151,17 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                : { transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
           <svg className="dcf-svg" ref={svgRef} aria-hidden="true" />
           <div className={`graph${highlight ? " graph--hl" : ""}`} role="list">
+            {highlight && (
+              <button className="hlbar" onClick={() => onHighlightClear?.()}
+                title="Clear the spotlight">
+                ⚠ {fmtN(data.signals.filter((sg) => sg.provider === "BASELINING"
+                    && [...(scope.services ?? new Set()), ...(scope.runtime ?? new Set()),
+                      ...(data.apps.find((a) => a.appId === appId)?.entity
+                        ? [data.apps.find((a) => a.appId === appId)!.entity!] : [])]
+                      .includes(sg.entityId)).length)} anomalies spotlighted —
+                each lit card wears its count · click anywhere to dismiss ✕
+              </button>
+            )}
             {tiers.map((layer, ti) => {
               // A layer with nothing in it is not drawn. Only the last one can
               // be empty — Cloud, where the machines have no provider behind
@@ -1177,12 +1188,29 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     {probs > 0 && (
                       <span className="pb" title={` active problem(s)`}>⚠ {probs}</span>
                     )}
+                    {(() => {
+                      const nSig = tierIds.length ? signalsFor(tierIds)
+                        .filter((sg) => sg.provider === "BASELINING").length : 0;
+                      return nSig > 0 ? (
+                        <span className="pb pb--warn"
+                          title={`${nSig} baselining anomal${nSig === 1 ? "y" : "ies"} in this layer`}>
+                          ⚠ {nSig}
+                        </span>
+                      ) : null;
+                    })()}
                   </button>
                   <span className="gcol__name">{TIERS[ti][0]}</span>
                   <span className="gcol__sub">{layer.kpi} {layer.kpiLabel}</span>
                   <div className="gcol__nodes">
                     {shown.map((n, ni) => {
                       const id = `${ti}-${ni}`;
+                      /* The card wears its anomaly count. Seven signals can
+                         bind to two cards — a grouped workload, a "Nodes
+                         running this app" card holding several nodes — and a
+                         count that only exists on the Overview button cannot
+                         be reconciled with what the eye finds here. */
+                      const nSig = n.miss ? 0 : signalsFor(n.ids ?? [])
+                        .filter((sg) => sg.provider === "BASELINING").length;
                       // measured volume sets the radius — 68k requests reads
                       // bigger than 3 pods before any label is read
                       const r = 9 + (n.vol ? Math.min(13, 3.4 * Math.log10(n.vol + 1)) : 2);
@@ -1200,6 +1228,12 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                             {!n.miss && React.createElement(nodeIcon(ti, n),
                               { size: Math.max(12, Math.round(r * 1.15)) })}
                           </i>
+                          {nSig > 0 && (
+                            <i className="gnode__sig"
+                              title={`${nSig} Davis baselining anomal${nSig === 1 ? "y" : "ies"} on this component`}>
+                              {nSig}
+                            </i>
+                          )}
                           <span className="gnode__nm">{n.nm}</span>
                           <span className="gnode__v">{n.v} {n.spark?.rising && (
                             <em className="gnode__fc" title="Forecast: errors rising over the next 12h">↗ forecast</em>
