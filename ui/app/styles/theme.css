@@ -171,6 +171,16 @@ svg { shape-rendering: geometricPrecision; }
 .flow-sel { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
             padding: 8px 14px; border-bottom: 1px solid var(--border);
             border-left: 2px solid var(--accent); background: var(--panel-2); }
+
+/* the custom path's own band: each waypoint a removable chip */
+.flow-sel--path { border-left: 3px solid var(--accent); }
+.flow-pick { font: 600 10px var(--mono); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 999px; padding: 2px 9px; cursor: pointer;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.flow-pick:hover { border-color: var(--accent); }
 .flow-sel__nm { font: 600 12px var(--mono); color: var(--ink); }
 .flow-sel__num { font: 500 12px var(--mono); color: var(--ink-3); }
 .flow-sel__b { font: 600 12px var(--mono); color: var(--accent); background: none;
