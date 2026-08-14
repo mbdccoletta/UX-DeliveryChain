@@ -856,6 +856,17 @@ export function FlowSankey({
             : "Ribbon width is the number of sessions. Click a node to follow its route through the flow."}
         </div>
       )}
+      {/* An application with nothing to mine SAYS so. Measured on guu84124:
+          easyTravel Mobile had zero navigation events in the 2h window and 89
+          in 24h — "0 paths discovered" beside a blank canvas read as broken,
+          when the honest answer was "not in this window". */}
+      {appId && !seqs.some((q) => q.appId === appId && q.journey.length > 0) && (
+        <div className="flow-empty">
+          No navigation recorded for this application in this window.
+          <em>The app may simply be quiet — try a wider timeframe above.</em>
+        </div>
+      )}
+
       {/* role="img" plus a summary: the drawing is one image, and its detail
           lives in the list below rather than in an unreadable label. */}
       <canvas ref={ref} onClick={onClick} onMouseMove={onMove}

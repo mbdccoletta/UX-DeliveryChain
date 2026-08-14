@@ -172,6 +172,12 @@ svg { shape-rendering: geometricPrecision; }
             padding: 8px 14px; border-bottom: 1px solid var(--border);
             border-left: 2px solid var(--accent); background: var(--panel-2); }
 
+/* the empty flow states its reason instead of a blank canvas */
+.flow-empty { padding: 26px 18px; text-align: center;
+  font: 600 12px var(--mono); color: var(--ink-2); }
+.flow-empty em { display: block; margin-top: 6px; font-style: normal;
+  font: 400 11px var(--mono); color: var(--ink-3); }
+
 /* the custom path's own band: each waypoint a removable chip */
 .flow-sel--path { border-left: 3px solid var(--accent); }
 .flow-pick { font: 600 10px var(--mono); color: var(--accent);
