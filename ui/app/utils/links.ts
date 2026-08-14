@@ -82,7 +82,9 @@ const SUPP_MAX = 100_000;
 const aLink = (
   label: string, meta: string, proves: string, prompt: string, supplementary: string,
   instruction = "Answer in short bullet points, lead with the business consequence, " +
-    "and say plainly when the data does not support a conclusion.",
+    "and say plainly when the data does not support a conclusion. Never give " +
+    "generic runbook advice: name the specific error types, views, operations or " +
+    "entities from the context or from data you retrieve.",
 ): DeepLink => link(label, meta, {
   prompt: prompt.slice(0, PROMPT_MAX),
   // the user reads and can edit the question before it runs
@@ -757,7 +759,53 @@ export function investigationPaths(
     origin: "traffic segment", domain3p: "third-party domain",
     domain1p: "first-party domain", store: "data store", element: "element",
   };
+  /* Where this drill-down CAME FROM travels with the question.
+   *
+   * Measured failure, screenshotted: asked about the "Mobile" segment,
+   * Assist answered with a generic runbook ("check your backend health…")
+   * and closed with "without seeing error types or which operations are
+   * failing" — because the context never said WHICH application the card
+   * belongs to, what the segment IS, or where in Grail its records live.
+   * The three blocks below close exactly those gaps. */
+  const appIdent = scopedAppName && scopedAppName !== name
+    ? ` It belongs to the application "${scopedAppName}"` +
+      (rumAppId ? ` (dt.rum.application.id "${rumAppId}"` +
+        (scopedEntity ? `, entity ${scopedEntity})` : ")") : "") + "."
+    : rumAppId ? ` Its RUM id is dt.rum.application.id "${rumAppId}"` +
+        (scopedEntity ? `, entity ${scopedEntity}.` : ".") : "";
+  /* The Grail address of this element's records — so Assist can go and
+   * look instead of asking the reader to. Each clause was verified on the
+   * tenant before it became a hint (the same measurements the queries in
+   * dql.ts are built on). */
+  const ORIGIN_DEF: Record<string, string> = {
+    Mobile: 'dt.rum.agent.type is "android", "ios" or "mobile"',
+    Robots: 'dt.rum.user_type is "robot" (and the agent is not mobile)',
+    Synthetic: 'dt.rum.user_type is "synthetic" (and the agent is not mobile)',
+    Browsers: 'dt.rum.user_type is neither "robot" nor "synthetic"',
+  };
+  const ground =
+    kind === "origin" && rumAppId
+      ? ` In Grail this segment is the user.events rows of that application where ${
+          ORIGIN_DEF[name] ?? "the agent matches the segment"}; its errors are` +
+        ' characteristics.classifier "error", and the fatal mobile ones carry' +
+        ' error.type "crash" or "anr".'
+    : kind === "service"
+      ? ` In Grail its server-side records are spans rows with dt.entity.service` +
+        ` "${ids.find((i) => i.startsWith("SERVICE-")) ?? name}"; failed ones carry` +
+        " request.is_failed true."
+    : kind === "store" && domain
+      ? ` In Grail its calls are spans rows where server.address, db.namespace or` +
+        ` db.system equals "${domain}".`
+    : (kind === "domain3p" || kind === "domain1p") && domain
+      ? ` In Grail its traffic is user.events rows with url.domain "${domain}" —` +
+        ' classifier "request" for the calls, "error" for the failures.'
+    : (kind === "webApp" || kind === "mobileApp") && rumAppId
+      ? ` In Grail its records are user.events rows with that dt.rum.application.id;` +
+        ' errors are classifier "error"' +
+        (kind === "mobileApp" ? ', crashes error.type "crash", ANRs "anr".' : ".")
+    : "";
   const scope = `The element is "${name}" (${KIND_WORD[kind]}), measured over the ${tf.label}.` +
+    appIdent + ground +
     (healthy ? " It is currently healthy: no active problems, no anomalies," +
       " and no rising forecast." : "") +
     (facts_ ? ` Measured right now: ${facts_}` : "") +
@@ -768,6 +816,17 @@ export function investigationPaths(
         ` in this window (${impacted.hitReal} real users, ${impacted.hitRobot} robots,` +
         ` ${impacted.hitSynth} synthetic).`
       : "");
+  /* The prompt names the whole subject, not just the card — "Mobile" alone
+   * asked Assist about a word. */
+  const subject = scopedAppName && scopedAppName !== name
+    ? `the ${KIND_WORD[kind]} "${name}" of application "${scopedAppName}"`
+    : `"${name}"`;
+  /* Bolted onto every instruction: the measured failure mode of the generic
+   * ones was runbook advice, so the ban is stated rather than hoped for. */
+  const GROUNDED = " Never give generic runbook advice (no 'check your logs'," +
+    " 'review backend health'): name the specific error types, views, operations" +
+    " or entities from the context or from data you retrieve, or say plainly" +
+    " that the data is not there.";
 
   /*
    * The sequence of apps to open, in order. A node carries the Smartscape id
@@ -962,19 +1021,23 @@ export function investigationPaths(
     tech.push(healthy
       ? aLink("Ask Assist", "where is the easy win",
           "Reads the measured numbers as tuning opportunities, in words.",
-          `"${name}" is healthy right now. Looking at its measurements, where is the ` +
-          "easiest performance win, and what would confirm it is worth taking?",
+          `${subject[0].toUpperCase()}${subject.slice(1)} is healthy right now. ` +
+          "Looking at its measurements, where is the easiest performance win, " +
+          "and what would confirm it is worth taking?",
           scope,
           "Answer in short bullet points. Name the single most promising optimisation " +
           "first, with the number that motivates it. Say plainly when the data shows " +
-          "nothing worth tuning.")
+          "nothing worth tuning." + GROUNDED)
       : aLink("Ask Assist", "why it is failing",
           "Reads the evidence back as a cause, in words.",
-          `Looking at "${name}", what is the most likely technical cause of its current ` +
-          "behaviour, and what would confirm or rule it out?",
+          `Looking at ${subject}: which specific error types, views or operations ` +
+          "are behind the affected sessions in this window, what is the most " +
+          "likely technical cause, and what single check would confirm it?",
           scope,
-          "Answer in short bullet points. Name the most likely cause first, then the " +
-          "single check that would confirm it. Say plainly when the data is not enough."));
+          "Answer in short bullet points. Name the failing thing by its measured " +
+          "name — an error type, a view, an operation — before any hypothesis, " +
+          "then the single check that would confirm it. Say plainly when the data " +
+          "is not enough." + GROUNDED));
   }
   if (tech.length) {
     out.push(healthy
@@ -1039,19 +1102,22 @@ export function investigationPaths(
     tac.push(healthy
       ? aLink("Ask Assist", "will it hold growth",
           "Weighs today's headroom against tomorrow's load.",
-          `"${name}" is healthy right now. If its load doubled, what would saturate ` +
-          "first, and what should be prepared before that day?",
+          `${subject[0].toUpperCase()}${subject.slice(1)} is healthy right now. ` +
+          "If its load doubled, what would saturate first, and what should be " +
+          "prepared before that day?",
           scope,
           "Answer in short bullet points: the first bottleneck, the number that says " +
           "so, and the one preparation worth doing now. Say plainly when the data " +
-          "does not support a conclusion.")
+          "does not support a conclusion." + GROUNDED)
       : aLink("Ask Assist", "is it worth fixing first",
           "Weighs blast radius against effort, with the platform's own guidance.",
-          `Given the state of "${name}", how urgent is this compared with other work, ` +
-          "and what is its blast radius?",
+          `Given the state of ${subject}, how urgent is this compared with other ` +
+          "work, and what is its blast radius — which other views, segments or " +
+          "services do the same errors touch?",
           scope,
-          "Answer in short bullet points: urgency, who else is affected, and what to do " +
-          "in the next hour. Say plainly when the data does not support a conclusion."));
+          "Answer in short bullet points: urgency, who else is affected (named), and " +
+          "what to do in the next hour. Say plainly when the data does not support " +
+          "a conclusion." + GROUNDED));
   }
   if (tac.length) {
     out.push(healthy
@@ -1119,17 +1185,18 @@ export function investigationPaths(
       healthy
         ? aLink("Ask Assist", "where improvement pays most",
             "Turns healthy numbers into the investment worth making.",
-            `"${name}" is healthy right now. Which improvement to it would users ` +
-            "notice most, and what makes it worth doing before anything else?",
-            scope)
+            `${subject[0].toUpperCase()}${subject.slice(1)} is healthy right now. ` +
+            "Which improvement to it would users notice most, and what makes it " +
+            "worth doing before anything else?",
+            scope, undefined)
         // One Assist per route, not two. "what does this cost us" and "what
         // should we do first" were adjacent nodes asking the same person the
         // same thing twice; merged into the question an owner actually has.
         : aLink("Ask Assist", "what this costs and what to do first",
             "Turns the measured numbers into the consequence an owner acts on, "
             + "and the first move worth making.",
-            `What is the business impact of the current state of "${name}", which of ` +
-            "these numbers should worry me most, and what would you fix first?",
+            `What is the business impact of the current state of ${subject}, which ` +
+            "of these numbers should worry me most, and what would you fix first?",
             scope + " Consider effort, blast radius and how many sessions each option " +
             "would recover."),
     );
