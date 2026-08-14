@@ -1520,12 +1520,14 @@ function Routes({ list, mode = "incident" }: {
                     : "\n\nAsks which view to open: this environment's app has not "
                       + "published one. The filter travels either way.")}
                   style={{ ["--app" as string]: st.hue }}
-                  {...(s.viaHref ? { target: "_blank", rel: "noreferrer" } : {})}
-                  /* A url-only step is the anchor it looks like: intercepting
-                     it would hand the click to a bus that cannot carry its
-                     filter, and the Explorer would open showing everything. */
-                  onClick={s.viaHref ? undefined
-                    : (e) => { e.preventDefault(); open(s); }}>
+                  // Every step leaves in a NEW TAB (the anchor's own default);
+                  // only Assist and the rare url-less step go through the bus —
+                  // Assist because it is a panel over this screen, not a departure.
+                  {...(s.app !== "Assist" && s.href && s.href !== "#"
+                    ? { target: "_blank", rel: "noreferrer" } : {})}
+                  onClick={s.app === "Assist" || !s.href || s.href === "#"
+                    ? (e) => { e.preventDefault(); open(s); }
+                    : undefined}>
                   <i className="path__node" aria-hidden="true">{st.icon}</i>
                   <em className="path__app">{s.app}</em>
                   {/CLASSIC/i.test(s.app) && <em className="path__gen">gen2</em>}

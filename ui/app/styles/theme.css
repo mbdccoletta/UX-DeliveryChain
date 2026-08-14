@@ -403,23 +403,14 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .path__origin > em { font: 600 11px var(--mono); color: var(--ink); line-height: 1.25;
                      overflow-wrap: anywhere; }
 
-/* arrow from each node to the next */
-/* The connector spans only the gap between two circles, not a whole node
-   width. With the row wrapping, a full-width connector left a long line
-   hanging off the first node of the second line, pointing at nothing; a short
-   one reads as a tick between neighbours and all but disappears when it wraps. */
-.path__step::before { content: ""; position: absolute; left: -35px; top: 19px;
-    width: 27px; height: 1px; background: color-mix(in srgb, var(--hue) 55%, transparent); }
-.path__step::after { content: ""; position: absolute; left: -12px;
-    top: 19px; width: 6px; height: 6px; transform: translateY(-50%) rotate(45deg);
-    border-top: 1.5px solid var(--hue); border-right: 1.5px solid var(--hue); }
-/* The FIRST step draws no incoming connector. It used to point from the
-   origin node; when that node was dropped the arrow stayed, aimed at the
-   first circle from empty space — an arrow carrying no relation, which this
-   project's own rule forbids. The reader asked what it meant; the honest
-   answer was "nothing". */
-.path__row--noorigin .path__step:first-child::before,
-.path__row--noorigin .path__step:first-child::after { display: none; }
+/* NO connector arrows between steps, by request — twice.
+   The between-step ticks were unlabelled decoration, and the row WRAPS:
+   whenever it folded, the first node of the second line grew an arrow from
+   empty space again, because CSS cannot see where flex broke the line. An
+   arrow that sometimes points from nothing cannot be fixed case by case —
+   the sequence is already carried by reading order, so the arrows went
+   entirely. The project rule stands: an arrow exists only when it carries a
+   measured relation, and these carried none. */
 .path__step:hover .path__node, .path__step:focus-visible .path__node {
     background: color-mix(in srgb, var(--app) 18%, var(--panel));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--app) 22%, transparent); }
