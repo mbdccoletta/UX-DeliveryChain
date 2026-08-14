@@ -177,19 +177,59 @@ const filterChip = (label: string, value: string) =>
  * lands on the same view the app opens itself rather than on whichever one the
  * intent happens to default to.
  */
-export const sessionsLink = (tf: Timeframe, appName: string, sessions: number): DeepLink =>
-  link("Analyze user sessions",
+export const sessionsLink = (
+  tf: Timeframe, appName: string, sessions: number,
+  /**
+   * A second, PRE-FORMED filter chip, appended after the Frontends one.
+   *
+   * Space-separated composition is the grammar this filter-bar family was
+   * OBSERVED to use — the Error Inspector's own url carries
+   * `"View Name" = "/" Frontend = Astroshop-Snow` — and the sessions bar
+   * writes single chips in the identical wire format, so the two share one
+   * encoder. Pre-formed because the caller quotes exactly what was read off
+   * a real url; re-deriving the quoting here is how filters go silently
+   * wrong.
+   */
+  segmentChip?: string,
+  /** What to call the narrowed hand-off, when a segment chip travels. */
+  segmentLabel?: string,
+): DeepLink =>
+  link(segmentLabel ?? "Analyze user sessions",
     `Users & Sessions · ${sessions.toLocaleString()} sessions · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
       "explorer.properties": {
-        filters: filterChip("Frontends", appName),
+        filters: filterChip("Frontends", appName)
+          + (segmentChip ? ` ${segmentChip}` : ""),
         perspective: "general",
       },
     }),
     { appId: SESSIONS_LIST.appId, intentId: SESSIONS_LIST.intentId,
       app: "Users & Sessions", keyProperties: ["explorer.type"],
-      proves: "the sessions behind the number, one row each" });
+      proves: segmentChip
+        ? "this segment's sessions, one row each"
+        : "the sessions behind the number, one row each" });
+
+/**
+ * The sessions bar's user-type facet, segment by segment — only what was READ
+ * OFF A REAL URL enters this map, because a wrong chip opens the explorer
+ * unfiltered and reads as a working button.
+ *
+ * Observed (decoded):
+ *   …/sessions/finished-sessions?tf=now-2h;now&perspective=general
+ *     #filtering="User Type" = Bots
+ *
+ * So: label `User Type` — QUOTED, it carries a space — and the value `Bots`,
+ * bare. Note the vocabulary shift: the chain's card says "Robots" (RUM's
+ * user_type is "robot"), the bar says "Bots". This map absorbs it.
+ *
+ * Synthetic and real users are ABSENT deliberately: their facet values have
+ * not been observed yet. Add them here from a url, never from a guess — those
+ * segments open the frontend-wide list until then.
+ */
+const SESSION_SEGMENT_CHIP: Record<string, [chip: string, label: string]> = {
+  Robots: ['"User Type" = Bots', "See these bot sessions"],
+};
 
 /**
  * Our window in the grammar the explorer pages put in their own url: a single
@@ -967,10 +1007,9 @@ export function investigationPaths(
        * declaration or an empty window has nothing to list, and a filtered-
        * looking page showing everything is the defect this project hunts.
        *
-       * HONEST LIMIT, stated in the meta: the bar narrows to the frontend,
-       * not to one segment — its user-type facet grammar has not been read
-       * off a real url yet (the Error Inspector taught us not to guess one).
-       * Until it is, the segment-narrowed view stays the Notebook hop below. */
+       * Narrowed to the segment where the facet grammar was observed
+       * (SESSION_SEGMENT_CHIP, one entry per url actually read); the others
+       * open the frontend-wide list until theirs is read too. */
       /* Gated to web-scoped chains: `Frontends = name` was read off the app's
        * url with WEB applications only, and a mobile app's name has never
        * been observed in that bar. A wrong chip opens the explorer unfiltered
@@ -978,7 +1017,8 @@ export function investigationPaths(
        * Inspector hand-off had. Mobile chains get the Vitals hop below. */
       if (sessions && sessions > 0 && scopedAppName
           && !scopedEntity?.startsWith("MOBILE_APPLICATION-")) {
-        tech.push(sessionsLink(tf, scopedAppName, sessions));
+        const seg = SESSION_SEGMENT_CHIP[name];
+        tech.push(sessionsLink(tf, scopedAppName, sessions, seg?.[0], seg?.[1]));
       }
       /* The mobile segment has an entity where the others have none: the
        * scoped mobile application itself. Experience Vitals declares
