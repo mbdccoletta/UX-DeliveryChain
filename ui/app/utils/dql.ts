@@ -669,6 +669,11 @@ fetch dt.davis.events, from: now()-24h
  *  alerts and extension events show up only under the related element. */
 export const qSignalsByEntity = () => `
 fetch dt.davis.events, from: now()-24h
+/* OPEN signals only — the same event.status filter qProblems already uses.
+ * Without it a baselining anomaly that closed twenty hours ago kept painting
+ * its component amber, wearing a badge and counting on the Overview button:
+ * the chain describes the CURRENT state, and a closed signal is history. */
+| filter event.status == "ACTIVE"
 | filter isNotNull(affected_entity_ids)
 | expand entityId = affected_entity_ids
 | summarize events = count(),
