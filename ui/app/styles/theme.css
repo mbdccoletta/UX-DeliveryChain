@@ -1005,23 +1005,42 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    app that manages it. It is a DESTINATION LIST, not a graph — that is the
    point of the pivot. */
 .gcol--bsum { justify-content: flex-start; }
-.bsum { display: flex; flex-direction: column; gap: 4px; padding: 10px 10px 14px;
-  align-items: stretch; position: relative; }
+/* above the mesh: the reader's screenshot had the trace line running OVER
+   the rows' lettering — the block is a landing, not a road */
+.bsum { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 14px;
+  align-items: stretch; position: relative; z-index: 4; }
 .bsum__c { width: 34px; height: 34px; margin: 6px auto 10px; }
-.bsum__row { display: grid; grid-template-columns: 1fr auto; column-gap: 10px;
-  align-items: baseline; padding: 7px 9px; border-radius: 8px;
+/* Each row wears the ENTITY layout the rest of the chain speaks: the circled
+   icon, the tone on its ring, the anomaly count on its shoulder — the same
+   grammar as a gnode, laid horizontally. Clicking opens the layer's entity
+   list, where each entity carries its own routes (Problems and Smartscape
+   among them). */
+.bsum__row { display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "ic l v" "ic s go";
+  column-gap: 10px; row-gap: 1px; align-items: center;
+  padding: 7px 9px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--panel-2);
-  text-decoration: none; }
-.bsum__row--go { cursor: pointer; }
-.bsum__row--go:hover, .bsum__row--go:focus-visible {
+  text-decoration: none; cursor: pointer; }
+.bsum__row:hover, .bsum__row:focus-visible { outline: none;
   border-color: color-mix(in srgb, var(--accent) 70%, transparent); }
-.bsum__l { font: 600 10px var(--mono); letter-spacing: 0.08em;
+.bsum__row--bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
+.bsum__row--warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.bsum__ic { grid-area: ic; width: 28px; height: 28px; position: relative; }
+.bsum__sig { position: absolute; top: -6px; right: -8px; }
+.bsum__pb { font: 700 10px var(--mono); color: var(--bad); }
+.bsum__l { grid-area: l; font: 600 10px var(--mono); letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-2); }
-.bsum__v { font: 700 15px var(--mono); color: var(--ink); text-align: right; }
-.bsum__s { grid-column: 1; font: 400 9px var(--mono); color: var(--ink-3);
-  font-style: normal; }
-.bsum__go { grid-column: 2; font: 600 9px var(--mono); color: var(--accent);
-  font-style: normal; text-align: right; }
+.bsum__v { grid-area: v; font: 700 15px var(--mono); color: var(--ink);
+  text-align: right; }
+.bsum__s { grid-area: s; font: 400 9px var(--mono); color: var(--ink-3);
+  font-style: normal; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+/* the aching entity, named in the harm's own colour */
+.bsum__s--hurt { color: var(--bad); font-weight: 600; }
+.bsum__go { grid-area: go; font: 600 9px var(--mono); color: var(--accent);
+  font-style: normal; text-align: right; text-decoration: none; }
+.bsum__go:hover { text-decoration: underline; }
 /* the spotlight treats the block as one component */
 .graph--hl .bsum--dim { opacity: 0.22; filter: saturate(0.3); }
 .graph--hl .bsum--spot .bsum__c {
