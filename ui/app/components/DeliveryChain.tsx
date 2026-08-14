@@ -1355,21 +1355,53 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 ...lam.map((c) => c.region).filter(Boolean),
                 ...inst.map((c) => c.zoneName).filter(Boolean)])].join(" · ");
               const row = (
-                label: string, value: string, target: keyof AppMap | null,
-                sub?: string,
+                ti: number, label: string, value: string,
+                target: keyof AppMap | null, sub?: string,
               ) => {
                 const t = target ? apps[target] : undefined;
-                const inner = (<>
-                  <span className="bsum__l">{label}</span>
-                  <b className="bsum__v">{value}</b>
-                  {sub && <em className="bsum__s">{sub}</em>}
-                  {t && <em className="bsum__go">{t.name} →</em>}
-                </>);
-                return t ? (
-                  <a key={label} className="bsum__row bsum__row--go"
-                    href={appHomeHref(t.appId)} target="_blank" rel="noreferrer"
-                    title={`Open ${t.name} — the app that manages this`}>{inner}</a>
-                ) : <div key={label} className="bsum__row">{inner}</div>;
+                const tone = tiers[ti]?.tone ?? "info";
+                const ids = [...(idsOfTier[ti] ?? [])];
+                const rProbs = ids.length ? problemsFor(ids).length : 0;
+                const rAnoms = ids.length ? signalsFor(ids)
+                  .filter((sg) => sg.provider === "BASELINING").length : 0;
+                /* "If the layer has a problem, I need to know WHICH entity" —
+                   the aching ones are named on the row itself, worst first. */
+                const aching = (tiers[ti]?.items ?? [])
+                  .filter((n) => !n.miss && (n.tone === "bad" || n.tone === "warn"))
+                  .sort((a, b) => (a.tone === "bad" ? 0 : 1) - (b.tone === "bad" ? 0 : 1))
+                  .map((n) => n.nm).slice(0, 2);
+                return (
+                  <div key={label}
+                    className={`bsum__row bsum__row--ent bsum__row--${tone}`}
+                    role="button" tabIndex={0}
+                    title="See this layer's entities — each opens its own investigation routes"
+                    onClick={() => setSel((x) => (x === `${ti}-all` ? null : `${ti}-all`))}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSel((x) => (x === `${ti}-all` ? null : `${ti}-all`)); } }}>
+                    <i className={`gnode__c gnode__c--${tone} bsum__ic`} aria-hidden="true">
+                      {React.createElement(LAYER_ICON[ti], { size: 13 })}
+                      {rAnoms > 0 && <em className="gnode__sig bsum__sig">{rAnoms}</em>}
+                    </i>
+                    <span className="bsum__l">{label}
+                      {rProbs > 0 && <b className="bsum__pb"> ⚠ {rProbs}</b>}
+                    </span>
+                    <b className="bsum__v">{value}</b>
+                    {(aching.length > 0 || sub) && (
+                      <em className={`bsum__s${aching.length ? " bsum__s--hurt" : ""}`}>
+                        {aching.length ? aching.join(" · ") : sub}
+                      </em>
+                    )}
+                    {t && (
+                      <a className="bsum__go" href={appHomeHref(t.appId)}
+                        target="_blank" rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title={`Open ${t.name} — the app that manages this`}>
+                        {t.name} →
+                      </a>
+                    )}
+                  </div>
+                );
               };
               return (
                 <div className={`gcol gcol--bsum ${beTone === "bad" ? "gcol--bad"
@@ -1396,16 +1428,16 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     {scope.loading
                       ? <div className="bsum__row"><em className="bsum__s">resolving the scope…</em></div>
                       : (<>
-                        {row("Services", fmtN(tiers[4]?.total ?? 0), "services",
+                        {row(4, "Services", fmtN(tiers[4]?.total ?? 0), "services",
                           (gen2?.length ?? 0) > 0
                             ? `${gen2!.length} topology-mapped` : undefined)}
-                        {storeCount > 0 && row("Data stores", fmtN(storeCount), "databases")}
-                        {row("Runtime", fmtN(tiers[5]?.total ?? 0),
+                        {storeCount > 0 && row(4, "Data stores", fmtN(storeCount), "databases")}
+                        {row(5, "Runtime", fmtN(tiers[5]?.total ?? 0),
                           isK8s ? "kubernetes" : "hosts",
                           tiers[5]?.kpiLabel)}
-                        {row("Infrastructure", fmtN(tiers[6]?.total ?? 0), "hosts",
+                        {row(6, "Infrastructure", fmtN(tiers[6]?.total ?? 0), "hosts",
                           tiers[6]?.kpiLabel)}
-                        {(lam.length > 0 || inst.length > 0) && row("Cloud",
+                        {(lam.length > 0 || inst.length > 0) && row(7, "Cloud",
                           lam.length ? `${lam.length} lambda` : `${inst.length} instances`,
                           null, region || undefined)}
                       </>)}

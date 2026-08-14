@@ -1121,6 +1121,20 @@ export function investigationPaths(
       void unhandled;
     }
   }
+  /* Smartscape, per entity — read off this tenant's registry: the Gen3 app
+   * dynatrace.smartscape declares view_topology_in_context requiring exactly
+   * one property, `id`, and our ids ARE smartscape ids. This is the deep
+   * link the backend summary hands its subjects to: the full relation map
+   * is Smartscape's job now, so every entity-backed route ends with the door
+   * into it. */
+  const ssId = svc ?? pod ?? node ?? host ?? pgi;
+  if (ssId && (kind === "service" || kind === "pod" || kind === "node"
+      || kind === "host" || kind === "process")) {
+    tech.push(link("See its relations", name, { id: ssId },
+      { keyProperties: ["id"], appId: "dynatrace.smartscape",
+        intentId: "view_topology_in_context", app: "Smartscape",
+        proves: "the full topology around this entity — the map this chain no longer draws" }));
+  }
   const prob = pLink();
   if (prob) tech.push(prob);
   if (assist) {
