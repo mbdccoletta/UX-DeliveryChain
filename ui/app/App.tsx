@@ -62,7 +62,9 @@ export function App() {
     /** Validation: pin every RUM query to one session. */
     session: string | null;
     view: string;
-  }>({ ...URL_DEFAULTS });
+    /** "anomalies" spotlights the chain's anomalous components on arrival. */
+    hl: string | null;
+  }>({ ...URL_DEFAULTS, hl: null });
 
   // old ?tab=journey links keep working: they land on the merged page,
   // already switched to the journey view
@@ -274,7 +276,9 @@ export function App() {
           {tab === "chain" && current && (
             <Boundary label="Delivery chain">
               <DeliveryChain data={d} appId={current}
-                sel={state.sel} onSel={(v) => set({ sel: v })} />
+                sel={state.sel} onSel={(v) => set({ sel: v })}
+                highlight={state.hl === "anomalies" ? "anomalies" : null}
+                onHighlightClear={() => set({ hl: null }, false)} />
             </Boundary>
           )}
           {tab === "report" && <Boundary label="Report"><ReportView data={d} /></Boundary>}
