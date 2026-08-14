@@ -294,6 +294,17 @@ const tfParam = (tf: Timeframe): string | null => {
  */
 export const errorsExplorerHref = (
   tf: Timeframe, appName: string, viewName?: string,
+  /**
+   * The bar's "Error Type" facet value, PRE-FORMED — observed (decoded):
+   *
+   *   #filtering=Frontend = "Astroshop Android" "Error Type" = Crash
+   *
+   * Two facts that url settled: a MOBILE application's name works in this
+   * bar (quoted, it carries a space), and the crash facet value is `Crash` —
+   * capitalised, bare. Only observed values may be passed here; ANR's has
+   * not been read off a url yet, so ANR rows open frontend-wide until it is.
+   */
+  errorType?: string,
 ): string => {
   const q = new URLSearchParams({
     perspective: "impact", sort: "affected_users:descending",
@@ -311,6 +322,7 @@ export const errorsExplorerHref = (
   const filter = [
     ...(viewName ? [`"View Name" = ${val(viewName)}`] : []),
     `"Frontend" = ${val(appName)}`,
+    ...(errorType ? [`"Error Type" = ${val(errorType)}`] : []),
   ].join(" ");
   /* Spaces as `+`, not `%20`: that is what the Error Inspector writes into its
    * own address bar, so it is the encoding known to survive its fragment
@@ -877,6 +889,20 @@ export function investigationPaths(
     ? domainTracesLink(domain, apps, tf)
     : null;
 
+  /* The chain has a beginning, and a machinery card's route was starting in
+   * the middle — "Open the node" first, with nothing saying what all of it
+   * serves. The reader pointed at it. The first step is now the scoped
+   * application, where the harm surfaces, so the walk down the stack starts
+   * at the top of it. Only for the layers below the application: the app and
+   * origin cards ARE the beginning. */
+  const appStart = scopedEntity && (kind === "pod" || kind === "node"
+      || kind === "host" || kind === "process")
+    ? eLink("Start where it surfaces",
+        "The application this machinery ultimately serves — its sessions and errors.",
+        "dt.entity.application", scopedEntity,
+        scopedEntity.startsWith("MOBILE_APPLICATION-") ? "mobile" : "rum")
+    : null;
+
   switch (kind) {
     case "service":
       tech.push(
@@ -902,6 +928,7 @@ export function investigationPaths(
       break;
     case "pod": case "node": {
       const k = pod ?? node!;
+      if (appStart) tech.unshift(appStart);
       tech.push(
         eLink(pod ? "Open the pod" : "Open the node",
           "Its workload, placement and resource pressure.",
@@ -919,6 +946,7 @@ export function investigationPaths(
       break;
     }
     case "host":
+      if (appStart) tech.push(appStart);
       tech.push(
         eLink("Open the host", "The machine's processes, saturation and events.",
           "dt.entity.host", host!, "hosts"),
@@ -948,6 +976,7 @@ export function investigationPaths(
       }
       break;
     case "process":
+      if (appStart) tech.push(appStart);
       tech.push(eLink("Open the process", "The running process, its host and technology.",
         "dt.entity.process_group_instance", pgi!, "processes"));
       break;
@@ -1388,9 +1417,17 @@ export function rowDrilldown(
      * name itself (from a status code) leads nowhere. */
     if (row.named === 0) return null;
     if (!appName) return null;
-    return link("Inspect this failure", row.name, {},
-      { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
-        proves: "every occurrence of this failure" });
+    /* The card's list already tags the row CRASH; the destination now keeps
+     * the distinction — the reader asked for the filter at the far end.
+     * Only the observed facet value travels: crash → "Crash" (read off the
+     * url above). An ANR row opens frontend-wide until its value is read
+     * off a url too — a guessed chip opens the explorer unfiltered while
+     * looking filtered, which is worse than the honest wide list. */
+    const et = row.type === "crash" ? "Crash" : undefined;
+    return link(et ? "Inspect these crashes" : "Inspect this failure", row.name, {},
+      { app: "Error Inspector", href: errorsExplorerHref(tf, appName, undefined, et),
+        proves: et ? "every crash of this application, ranked by users affected"
+          : "every occurrence of this failure" });
   }
   return null;
 }

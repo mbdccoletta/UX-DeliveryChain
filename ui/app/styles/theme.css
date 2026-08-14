@@ -1521,11 +1521,15 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   border-top: 1px solid var(--border); font: 500 12px var(--mono); }
 .svcf__row--warn { background:
   linear-gradient(90deg, color-mix(in srgb, var(--warn) 9%, transparent), transparent 60%); }
-/* the fatal tag: a crash row names its kind before its exception message */
-.svcf__fatal { flex: none; font: 700 9px var(--mono); letter-spacing: 0.08em;
-  color: #fff; background: color-mix(in srgb, var(--bad) 55%, transparent);
-  border: 1px solid var(--bad); border-radius: 4px; padding: 1px 6px;
-  margin-right: 8px; align-self: center; }
+/* The fatal tag: a crash row names its kind before its exception message.
+   Discreet by request — the filled version stretched into a full-width red
+   bar on narrow rows and shouted over the list. Outline only, sized to its
+   own text, never grown by the flex row it sits in. */
+.svcf__fatal { flex: none; align-self: center; width: fit-content;
+  font: 700 8px var(--mono); letter-spacing: 0.07em; line-height: 1.5;
+  color: var(--bad); background: none;
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  border-radius: 3px; padding: 0 5px; margin-right: 7px; }
 .svcf__nm { color: var(--ink); overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .svcf__bar { height: 6px; background: var(--panel-2); border-radius: 3px;
