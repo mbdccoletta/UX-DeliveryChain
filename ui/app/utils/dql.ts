@@ -181,13 +181,13 @@ fetch dt.entity.application
 /** Detected views per application (journeys). */
 export const qViews = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
-| filter characteristics.classifier == "view_summary" and isNotNull(view.detected_name)
+| filter characteristics.classifier == "view_summary" and isNotNull(${VIEW_NAME})
 // Normalised before the aggregation, for the same reason the journeys are: the
 // limit is applied after grouping, so one uncollapsed id splits a real view
 // into hundreds of rows of one and pushes the real ones off the end. Measured
 // on this tenant: 1,042 raw names collapse to 9. A "limit 120" over 1,042
 // fragments was returning mostly noise.
-${norm("view.detected_name", "v")}
+${norm(VIEW_NAME, "v")}
 | summarize views = count(), sessions = countDistinct(dt.rum.session.id),
     p50 = percentile(toLong(duration), 50),
   by: { appId = dt.rum.application.id, view = v }
@@ -204,16 +204,14 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // summary closes the very view its navigation opened).
 | filter (characteristics.classifier == "navigation"
     or characteristics.classifier == "view_summary")
-  and isNotNull(view.detected_name)
+  and isNotNull(${VIEW_NAME})
 // Identifiers are collapsed HERE, before the aggregation, because the limit
 // below is applied after it: leaving one order UUID uncollapsed fragments a
 // 900-session journey into 900 rows of one, and the biggest journeys fall off
 // the end. Each pattern is anchored on structure a real word cannot have — the
 // hyphen groups of a UUID, or an upper-case run containing a digit — so
 // "/cart/checkout" and "/api/v2/orders" pass through untouched.
-// view.detected_name is the screen name on mobile (rum_view_summary is emitted
-// by RUM JavaScript and OneAgent for Mobile alike), so this works for both.
-| fieldsAdd v = replacePattern(view.detected_name,
+| fieldsAdd v = replacePattern(${VIEW_NAME},
     "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
 | fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
 | fieldsAdd v = replacePattern(v, "'/' INT", "/*")
@@ -263,6 +261,23 @@ export function normalizeView(name: string): string {
 }
 
 /** The id-collapsing passes, shared by every query that groups by view name. */
+/**
+ * The view's display name, wherever the agent put it.
+ *
+ * Measured on guu84124, Astroshop Android, 2h: `view.detected_name` is null
+ * on ALL 332 mobile navigation events — the real names ("Home", "Product
+ * detail", "Cart", "Checkout") live in `view.name` — while the few mobile
+ * rows that DO carry detected_name carry the Activity class
+ * (com.opentelemetry.astroshop.MainActivity), which is the junk this app was
+ * showing as the only mobile journey. Web carries both, equal on ~96% of
+ * rows, and where they differ `view.name` is the platform's own display
+ * name — the same value the Users & Sessions viewer prints and the Error
+ * Inspector's "View Name" facet matches, so name-first also keeps the
+ * drill-downs aligned. Every journey query keyed on detected_name alone was
+ * silently dropping the mobile estate into "No page telemetry".
+ */
+const VIEW_NAME = "coalesce(view.name, view.detected_name)";
+
 const norm = (src: string, out = "v") => `
 | fieldsAdd ${out} = replacePattern(${src},
     "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
@@ -282,7 +297,7 @@ export const qTransitions = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | filter characteristics.classifier == "user_action" and isNotNull(view.source.detected_name)
 ${norm("view.source.detected_name", "s")}
-${norm("view.detected_name", "d")}
+${norm(VIEW_NAME, "d")}
 | filter s != d
 | summarize sessions = countDistinct(dt.rum.session.id), actions = count(),
     p50 = percentile(toLong(duration), 50), p90 = percentile(toLong(duration), 90),
@@ -305,7 +320,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | filter characteristics.classifier == "user_action"
 | filter user_action.complete_reason == "page_hide"
      or user_action.complete_reason == "timeout" or cls.value > 0.1
-${norm("view.detected_name")}
+${norm(VIEW_NAME)}
 | summarize actions = count(),
     abandoned = countIf(user_action.complete_reason == "page_hide"),
     timeouts = countIf(user_action.complete_reason == "timeout"),
@@ -736,7 +751,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
       and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
     fru = countIf(characteristics.classifier == "user_action"
       and toLong(duration) > ${APDEX_4T_NS}),
-  by: { name = view.detected_name }
+  by: { name = ${VIEW_NAME} }
 | filter isNotNull(name) and name != "" and vol > 0
 | sort vol desc | limit 8`;
 
