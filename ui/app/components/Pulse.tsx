@@ -68,7 +68,7 @@ function useCountUp(target: number, ms = 1100): number {
 export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
   data: ChainData;
   appId: string;
-  onOpenChain: () => void;
+  onOpenChain: (hl?: "anomalies") => void;
   /** "Analyze user sessions", answered inside this app: the Journey tab. */
   onAnalyze: () => void;
   onSeeEstate: () => void;
@@ -264,7 +264,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
               entities amber. No native app is offered because no anomaly url
               has been read off one yet. */}
           {anomalies > 0 && (
-            <button className="tk-btn tk-btn--warn" onClick={onOpenChain}
+            <button className="tk-btn tk-btn--warn"
+              onClick={() => onOpenChain("anomalies")}
               title={`${fmtN(anomalies)} Davis baselining anomalies on this `
                 + "application's delivery scope — the chain shows each one amber "
                 + "on the component it affects"}>
@@ -272,7 +273,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
             </button>
           )}
           <button className="tk-btn tk-btn--p" onClick={onAnalyze}>Analyze user sessions</button>
-          <button className="tk-btn" onClick={onOpenChain}>Open delivery chain</button>
+          <button className="tk-btn" onClick={() => onOpenChain()}>Open delivery chain</button>
         </div>
       </div>
 
@@ -298,7 +299,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
         services={scopeCount} svcNames={svcNames} domNames={domNames}
-        fc={fc} onOpen={onOpenChain}
+        fc={fc} onOpen={() => onOpenChain()}
         /* Always open. Clicking the open box used to collapse it, which left
            the page with no chart at all and the default box looking broken.
            A box can now only hand the chart to another box, never remove it. */

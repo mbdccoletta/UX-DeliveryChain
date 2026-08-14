@@ -985,6 +985,22 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the errors hand-off wears the critical family — it is the one button that
    only exists because something is wrong */
 .tk-btn--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border-2)); }
+
+/* ── the anomaly spotlight ──
+   Arriving from the "N anomalies" button, the question is "where are they?"
+   and amber alone could not answer it inside a highlighted trail. Everything
+   uninvolved steps back; the signalled components pulse the warning's own
+   colour. Cleared on the first selection — from there the reader navigates. */
+.graph--hl .gnode--dimmed { opacity: 0.22; filter: saturate(0.3); }
+.graph--hl .gnode--spot .gnode__c {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--warn) 45%, transparent);
+  animation: hlspot 1.6s ease-in-out infinite; }
+@keyframes hlspot {
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn) 30%, transparent),
+    0 0 34px color-mix(in srgb, var(--warn) 65%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .graph--hl .gnode--spot .gnode__c { animation: none; } }
 .tk-btn--warn:hover, .tk-btn--warn:focus-visible { color: var(--warn); border-color: var(--warn); }
 .tk-btn--sig { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--border-2)); }
 .tk-btn--sig:hover, .tk-btn--sig:focus-visible { color: var(--bad); border-color: var(--bad);

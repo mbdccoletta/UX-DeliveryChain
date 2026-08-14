@@ -845,11 +845,19 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   return { layers, edges };
 }
 
-export function DeliveryChain({ data, appId, sel, onSel }: {
+export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightClear }: {
   data: ChainData; appId: string;
   /** The selected element, held in the URL so the view can be shared. */
   sel: string | null;
   onSel: (sel: string | null) => void;
+  /**
+   * "anomalies" spotlights the anomalous components on arrival — the header
+   * button's answer to "where are the seven?": amber cards were not findable
+   * at a glance inside a highlighted trail. Everything else dims; the first
+   * selection clears it, because from there the reader is navigating.
+   */
+  highlight?: "anomalies" | null;
+  onHighlightClear?: () => void;
 }) {
   // narrows the lower layers to what this application's traces actually reach
   const scope = useAppScope(appId,
@@ -876,8 +884,11 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
   const edges = built.edges;
   // the setter mirrors useState's signature so the existing toggles still read
   // naturally, but the value it writes lands in the query string
-  const setSel = (v: string | null | ((cur: string | null) => string | null)) =>
+  const setSel = (v: string | null | ((cur: string | null) => string | null)) => {
+    // selecting anything ends the spotlight — the reader is navigating now
+    if (highlight) onHighlightClear?.();
     onSel(typeof v === "function" ? v(sel) : v);
+  };
   const shellRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1139,7 +1150,7 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
                ? undefined
                : { transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
           <svg className="dcf-svg" ref={svgRef} aria-hidden="true" />
-          <div className="graph" role="list">
+          <div className={`graph${highlight ? " graph--hl" : ""}`} role="list">
             {tiers.map((layer, ti) => {
               // A layer with nothing in it is not drawn. Only the last one can
               // be empty — Cloud, where the machines have no provider behind
@@ -1177,7 +1188,9 @@ export function DeliveryChain({ data, appId, sel, onSel }: {
                       const r = 9 + (n.vol ? Math.min(13, 3.4 * Math.log10(n.vol + 1)) : 2);
                       return (
                         <div key={id} data-node
-                          className={`gnode ${n.miss ? "gnode--miss" : ""} ${sel === id ? "gnode--sel" : ""}`}
+                          className={`gnode ${n.miss ? "gnode--miss" : ""} ${sel === id ? "gnode--sel" : ""}`
+                            + (highlight ? (n.tone === "warn" || n.tone === "bad"
+                              ? " gnode--spot" : " gnode--dimmed") : "")}
                           role="button" tabIndex={0} title={n.nm}
                           onClick={() => setSel((x) => (x === id ? null : id))}
                           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") {
