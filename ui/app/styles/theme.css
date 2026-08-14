@@ -986,6 +986,33 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    only exists because something is wrong */
 .tk-btn--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border-2)); }
 
+/* the badge a signalled card wears: its own anomaly count, always on.
+   Amber and numeric, so seven signals on two grouped cards still add up to
+   seven before anything is clicked. Red problems keep the tone; this is the
+   count the tone could not carry. */
+.gnode__sig { position: absolute; top: -4px; right: 14px; min-width: 15px;
+  height: 15px; padding: 0 3px; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center;
+  font: 700 9px var(--mono); color: #1a1a2e; background: var(--warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 60%, transparent);
+  z-index: 3; }
+
+/* the layer caption's amber twin of the red problem count */
+.gcol__hd .pb { color: var(--bad); font: 700 11px var(--mono);
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  border-radius: 4px; padding: 0 4px; }
+.gcol__hd .pb--warn { color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+
+/* the spotlight's own caption: the total, and the way out */
+.hlbar { position: sticky; top: 6px; left: 50%; transform: translateX(-50%);
+  z-index: 6; width: max-content; max-width: 90%;
+  font: 600 11px var(--mono); color: var(--warn); cursor: pointer;
+  background: color-mix(in srgb, var(--warn) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  border-radius: 999px; padding: 5px 14px; }
+.hlbar:hover { border-color: var(--warn); }
+
 /* ── the anomaly spotlight ──
    Arriving from the "N anomalies" button, the question is "where are they?"
    and amber alone could not answer it inside a highlighted trail. Everything
