@@ -97,6 +97,12 @@ export function App() {
     : d.apps.reduce((a, x) => a + x.sessions, 0);
   const totalErrors = d.apps.reduce((a, x) => a + x.errors, 0);
   const activeProblems = d.problems.length;
+  // The classic model and RUM both key a mobile app's entity as
+  // MOBILE_APPLICATION-…, whichever of the two named it — verified against
+  // every mobile app currently listed. A web app's entity never starts this
+  // way, so absence defaults an app into "Web" rather than hiding it.
+  const mobileApps = d.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-"));
+  const webApps = d.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-"));
 
   const view = TABS.find(([id]) => id === tab);
 
@@ -160,11 +166,33 @@ export function App() {
                   onChange={(v) => setAppId((v as string | null) ?? null)}>
                   <Select.Trigger placeholder="All applications" />
                   <Select.Content>
-                    {d.apps.map((a) => (
-                      <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
-                        {a.name}
-                      </Select.Option>
-                    ))}
+                    {/* Web and mobile read differently in the rest of this app —
+                        mobile carries no ingress, no third-party requests, and
+                        (where RUM never reported) no measured sessions at all —
+                        so the picker separates them instead of interleaving by
+                        session count. `entity` is the reliable signal: RUM and
+                        the classic-model fallback both key a mobile app's
+                        entity as MOBILE_APPLICATION-…, web apps never do. */}
+                    {webApps.length > 0 && (
+                      <Select.Group>
+                        <Select.GroupLabel>Web</Select.GroupLabel>
+                        {webApps.map((a) => (
+                          <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
+                            {a.name}
+                          </Select.Option>
+                        ))}
+                      </Select.Group>
+                    )}
+                    {mobileApps.length > 0 && (
+                      <Select.Group>
+                        <Select.GroupLabel>Mobile</Select.GroupLabel>
+                        {mobileApps.map((a) => (
+                          <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
+                            {a.name}
+                          </Select.Option>
+                        ))}
+                      </Select.Group>
+                    )}
                   </Select.Content>
                 </Select>
               )}
