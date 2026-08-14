@@ -584,7 +584,11 @@ function CleanCard(p: CardProps) {
             );
           })()}
         </Module>
-        <Module Icon={WarningIcon} title="Errors & anomalies" tone={errTone}
+        {/* The mobile card's headline names the thing it leads with — the
+            reader asked for the word itself, not only the number under it. */}
+        <Module Icon={WarningIcon}
+          title={p.isMobile ? "Crashes, errors & anomalies" : "Errors & anomalies"}
+          tone={errTone}
           pulse={p.anomalies > 0}
           metric="errors" active={p.detail === "errors"} onPick={p.onMetric}
           spark={<><Bars vals={errs} times={times} label="errors" fc={p.fcBars?.errors}
