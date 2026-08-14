@@ -390,10 +390,36 @@ export function FlowSankey({
   const [selNode, setSelNode] = useState<Node | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [focus, setFocus] = useState(false);
+  /* THE CUSTOM PATH: node ids picked across arbitrary columns of step mode.
+   * Each id already encodes its meaning — `n<step>-<view>` is "this view at
+   * this position", `done-<n>` / `exit-<n>` an ending — so the picks ARE a
+   * sequence predicate: a session matches when its journey satisfies every
+   * pick. The model is then REBUILT from only the matching sessions, so
+   * every number on screen is the isolated cohort's own, not a lit subset
+   * of the old ones. */
+  const [picks, setPicks] = useState<string[]>([]);
   const [mode, setMode] = useState<"steps" | "paths">("steps");
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
   stepModeRef.current = !!appId && mode === "steps";
+
+  /** Does this journey pass through every picked point? */
+  const matchesPicks = (journey: string[], pk: string[]): boolean => {
+    const j = journey.slice(0, MAX_STEP);
+    for (const id of pk) {
+      const end = /^(done|exit)-(\d+)$/.exec(id);
+      if (end) {
+        if (j.length !== Number(end[2])) return false;
+        const done = DONE.test(j[j.length - 1] ?? "");
+        if ((end[1] === "done") !== done) return false;
+        continue;
+      }
+      const m = /^n(\d+)-([\s\S]*)$/.exec(id);
+      if (!m) return false;             // a folded "N other views" is not a point
+      if (j[Number(m[1])] !== m[2]) return false;
+    }
+    return true;
+  };
 
   useEffect(() => {
     const c = ref.current;
@@ -401,9 +427,12 @@ export function FlowSankey({
     const app = appId ? apps.find((a) => a.appId === appId) : undefined;
     const fragmentsOf = (id: string) => ux?.get(id)?.fragments ?? 0;
   const stepMode = !!app && mode === "steps";
+    const seqsIn = stepMode && picks.length
+      ? seqs.filter((q) => q.appId !== app!.appId || matchesPicks(q.journey, picks))
+      : seqs;
     const built = !app ? { ...buildModel(apps, seqs),
                            cols: ["Application", "Furthest stage reached", "Session outcome"] }
-      : stepMode ? buildStepModel(app, seqs, transitions)
+      : stepMode ? buildStepModel(app, seqsIn, transitions)
       : { ...buildAppModel(app, seqs, app ? fragmentsOf(app.appId) : 0),
           cols: ["Application", "Navigation path", "Furthest stage reached"] };
     const { nodes, links, cols } = built;
@@ -504,7 +533,11 @@ export function FlowSankey({
         ctx.globalAlpha = dim ? 0.25 : 1;
         ctx.fillStyle = col(n.tone);
         ctx.fillRect(n.x - 5, n.y, 10, n.h);
-        if (n.id === sel || (n.id === hover && !dim)) {
+        if (picks.includes(n.id)) {
+          // a picked waypoint of the custom path — ringed until unpicked
+          ctx.strokeStyle = cssVar("--accent"); ctx.lineWidth = 2.5;
+          ctx.strokeRect(n.x - 7.5, n.y - 2.5, 15, n.h + 5);
+        } else if (n.id === sel || (n.id === hover && !dim)) {
           ctx.strokeStyle = cssVar("--accent"); ctx.lineWidth = n.id === sel ? 2 : 1;
           ctx.strokeRect(n.x - 6.5, n.y - 1.5, 13, n.h + 3);
         }
@@ -607,7 +640,11 @@ export function FlowSankey({
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux]);
+  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks]);
+
+  // a custom path belongs to one application's step view — changing either
+  // dissolves it, because the picked positions mean nothing elsewhere
+  useEffect(() => { setPicks([]); }, [appId, mode]);
 
   /* the lit-path ids belong to one model; changing mode invalidates them */
   useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId]);
@@ -625,6 +662,16 @@ export function FlowSankey({
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const hit = hitAt(e);
     if (!hit) { setSel(null); setSelNode(null); setFocus(false); return; }
+    /* Step mode: a click ADDS the view to the custom path (or removes it) —
+     * the reader's ask: pick arbitrary views across columns and isolate the
+     * journeys passing through all of them. The folded "N other views" node
+     * is not a point on any path, so it only opens its panel. */
+    if (stepModeRef.current && !hit.id.startsWith("more-")) {
+      setPicks((cur) => cur.includes(hit.id)
+        ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
+      setSelNode(hit); setSel(hit.id);
+      return;
+    }
     const same = sel === hit.id;
     setSel(same ? null : hit.id);
     setSelNode(same ? null : hit);
@@ -710,6 +757,48 @@ export function FlowSankey({
           <i style={{ background: "var(--info)" }} />other
         </span>
       </div>
+
+      {/* The custom path, stated: each waypoint in order, the isolated
+          cohort's size, and the way out. Numbers on the canvas are already
+          the cohort's own — the model was rebuilt from matching journeys. */}
+      {picks.length > 0 && (() => {
+        const app = appId ? apps.find((a) => a.appId === appId) : undefined;
+        if (!app) return null;
+        const mine = seqs.filter((q) => q.appId === app.appId && q.journey.length > 0);
+        const all = mine.reduce((a, q) => a + q.sessions, 0);
+        const iso = mine.filter((q) => matchesPicks(q.journey, picks))
+          .reduce((a, q) => a + q.sessions, 0);
+        const word = (id: string) => {
+          const end = /^(done|exit)-(\d+)$/.exec(id);
+          if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
+          const m = /^n(\d+)-([\s\S]*)$/.exec(id);
+          return m ? `${Number(m[1]) + 1}º ${m[2]}` : id;
+        };
+        const orderly = [...picks].sort((a, b) => {
+          const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);
+          return st(a) - st(b);
+        });
+        return (
+          <div className="flow-sel flow-sel--path">
+            <span className="flow-sel__nm">custom path</span>
+            {orderly.map((id) => (
+              <button key={id} className="flow-pick"
+                title="Remove this waypoint"
+                onClick={() => setPicks((cur) => cur.filter((x) => x !== id))}>
+                {word(id)} ✕
+              </button>
+            ))}
+            <span className="flow-sel__num">
+              {fmtN(iso)} of {fmtN(all)} sessions
+              {all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}
+            </span>
+            <div className="spacer" />
+            <button className="flow-sel__b" onClick={() => setPicks([])}>
+              clear path ✕
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Second band: only when something is selected — what it is and where to go. */}
       {selNode ? (
