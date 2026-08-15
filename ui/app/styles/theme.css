@@ -178,53 +178,77 @@ svg { shape-rendering: geometricPrecision; }
 .flow-empty em { display: block; margin-top: 6px; font-style: normal;
   font: 400 11px var(--mono); color: var(--ink-3); }
 
-/* who takes this path — the cohort's over-represented traits vs everyone else */
-.flow-prof { padding: 10px 14px 6px; border-top: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 6px; }
-.flow-prof__hd { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-  font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--ink); }
-.flow-prof__hd em { font: 400 10px var(--mono); text-transform: none;
-  letter-spacing: 0; color: var(--ink-3); font-style: normal; }
-.flow-prof__oc { display: flex; gap: 18px; font: 500 11px var(--mono); color: var(--ink-2); }
-.flow-prof__oc b { color: var(--ink); }
-.flow-prof__oc em { color: var(--ink-3); font-style: normal; }
-.flow-prof__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font: 500 11px var(--mono); }
-.flow-prof__dim { min-width: 96px; color: var(--ink-3); text-transform: uppercase;
-  letter-spacing: 0.06em; font-size: 10px; }
-.flow-prof__b { display: inline-flex; align-items: baseline; gap: 6px;
-  padding: 2px 9px; border-radius: 999px; color: var(--ink);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
-.flow-prof__b b { color: var(--accent); }
-.flow-prof__b em { color: var(--ink-3); font-style: normal; font-size: 10px; }
+/* ── the route infographic: a poster over the veil ──
+   The app's approved card language — filled blocks, few big numbers, one
+   identity hue, colour reserved for verdicts — as a single centred sheet. */
+.rinfo { position: absolute; inset: 0; margin: auto; width: min(1040px, 94vw);
+  max-height: 92vh; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 18px; padding: 26px 30px 20px; border-radius: 18px;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 14%, #12122b),
+    color-mix(in srgb, var(--accent) 5%, #0d0d1f));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-2));
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08);
+  animation: rinfoin 260ms var(--ease); }
+@keyframes rinfoin { from { transform: translateY(14px) scale(0.985); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rinfo { animation: none; } }
+.rinfo__hd { display: grid; grid-template-columns: 1fr auto; grid-template-areas:
+  "eye x" "path x" "cohort x"; column-gap: 16px; row-gap: 6px; align-items: start; }
+.rinfo__hd .drawer__x { grid-area: x; }
+.rinfo__eyebrow { grid-area: eye; font: 700 10px var(--mono); letter-spacing: 0.16em;
+  color: var(--accent); }
+.rinfo__path { grid-area: path; margin: 0; font: 700 22px var(--sans); color: #fff;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.rinfo__arrow { font-style: normal; color: color-mix(in srgb, var(--accent) 80%, #fff); }
+.rinfo__cohort { grid-area: cohort; display: flex; align-items: baseline; gap: 10px;
+  font: 500 12px var(--mono); color: var(--ink-2); }
+.rinfo__cohort .num { font-size: 34px; color: #fff; line-height: 1;
+  text-shadow: 0 0 14px rgba(255,255,255,0.25); }
+.rinfo__loading { padding: 40px; text-align: center; font: 600 12px var(--mono);
+  color: var(--ink-2); }
 
-/* the pivot's controls and table */
-.flow-prof__ctl { display: inline-flex; align-items: center; gap: 6px;
-  font: 500 10px var(--mono); text-transform: none; letter-spacing: 0;
-  color: var(--ink-3); }
-.flow-prof__ctl select { font: 600 11px var(--mono); color: var(--ink);
-  background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px;
-  padding: 2px 6px; }
-.flow-pv { width: 100%; border-collapse: collapse; font: 500 11px var(--mono); }
-.flow-pv th { text-align: left; font: 600 9px var(--mono); letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--ink-3); padding: 4px 8px 6px;
-  border-bottom: 1px solid var(--border); }
-.flow-pv td { padding: 5px 8px; border-bottom: 1px solid var(--border);
-  color: var(--ink-2); white-space: nowrap; }
-.flow-pv td b { color: var(--ink); }
-.flow-pv td em { color: var(--ink-3); font-style: normal; font-size: 10px; }
-.flow-pv__b { color: var(--ink) !important; max-width: 260px; overflow: hidden;
-  text-overflow: ellipsis; }
-.flow-pv--up { color: var(--accent) !important; font-weight: 700; }
-.flow-pv--down { color: var(--ink-3) !important; }
+/* the outcome strip: four filled tiles */
+.rinfo__strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.rinfo__kpi { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px;
+  border-radius: 12px; background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08); }
+.rinfo__kpi .num { font-size: 30px; color: #fff; line-height: 1.1; }
+.rinfo__kpi-l { font: 600 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(255,255,255,0.7); }
+.rinfo__kpi em { font: 500 11px var(--mono); color: var(--ink-3); font-style: normal; }
+.rinfo__kpi--bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+  background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.rinfo__kpi--bad .num, .rinfo__kpi--bad em { color: var(--bad); }
+.rinfo__kpi--good { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.rinfo__kpi--good .num { color: var(--good); }
 
-/* the sessions matching a custom path — chips that open the platform viewer */
-.flow-sess { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  padding: 8px 14px; border-top: 1px solid var(--border); }
-.flow-sess__none { font: 400 11px var(--mono); color: var(--ink-3);
-  font-style: normal; }
+/* the portrait blocks: solid bar = cohort, ghost = everyone else */
+.rinfo__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px; }
+.rinfo__blk { padding: 14px 16px; border-radius: 12px;
+  background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; gap: 8px; }
+.rinfo__blk h3 { margin: 0 0 4px; font: 700 10px var(--mono); letter-spacing: 0.14em;
+  text-transform: uppercase; color: rgba(255,255,255,0.75); }
+.rinfo__bar { display: grid; grid-template-columns: minmax(70px, 130px) 1fr 44px auto;
+  align-items: center; column-gap: 10px; font: 500 11px var(--mono); }
+.rinfo__bar-l { color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__bar-t { position: relative; height: 12px; border-radius: 6px;
+  background: rgba(255,255,255,0.05); overflow: hidden; }
+.rinfo__bar-ghost, .rinfo__bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 6px; }
+.rinfo__bar-ghost { background: rgba(255,255,255,0.14); }
+.rinfo__bar-fill { background: color-mix(in srgb, var(--accent) 80%, #fff);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); }
+.rinfo__bar-fill--up { background: var(--warn);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 60%, transparent); }
+.rinfo__bar-v { color: #fff; text-align: right; }
+.rinfo__bar-d { color: var(--ink-3); font-style: normal; font-size: 10px; white-space: nowrap; }
+.rinfo__ft { font: 400 10px var(--mono); color: var(--ink-3); text-align: center;
+  padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.08); }
+@media (max-width: 760px) {
+  .rinfo__strip { grid-template-columns: repeat(2, 1fr); }
+  .rinfo__path { font-size: 17px; }
+}
 
 /* the custom path's own band: each waypoint a removable chip */
 .flow-sel--path { border-left: 3px solid var(--accent); }
