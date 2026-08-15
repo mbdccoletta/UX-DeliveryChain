@@ -2,8 +2,8 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INTENT, fmtMs, fmtN, normalizeView, qPathSessions, qRouteInfographic,
-  reachesOutcome, runDql, type Timeframe } from "../utils/dql";
+import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, qPathSessions,
+  qCohortSessions, reachesOutcome, runDql, type Timeframe } from "../utils/dql";
 import { RouteInfographic, type InfoRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor, priorities } from "../utils/friction";
@@ -375,11 +375,15 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 
 export function FlowSankey({
   apps, seqs, appId, transitions = [], friction = [], views = [], ux, tf,
-  onPickApp, onOpen,
+  cohort, onCohortConsumed, onPickApp, onOpen,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
   tf?: Timeframe;
+  /** A cohort intent from Business Control: "unconverted" opens the
+   *  infographic on the journeys that reached no goal, no picks required. */
+  cohort?: "unconverted" | null;
+  onCohortConsumed?: () => void;
   transitions?: TransitionRow[]; friction?: FrictionRow[];
   /** Per-app UX aggregate — the funnel reads window-fragment counts from it. */
   ux?: Map<string, { fragments: number }> | null;
@@ -655,37 +659,86 @@ export function FlowSankey({
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
   useEffect(() => { setPicks([]); }, [appId, mode]);
+  // Business Control sends "unconverted": land in step mode and open the
+  // portrait of who left without converting, then drop the intent so a manual
+  // mode switch does not reopen it.
+  const cohortRef = useRef<string | null>(null);
+  useEffect(() => {
+    // fire once per (intent, app) arrival — not cleared from the url here, so a
+    // dev-server hiccup or a re-render cannot lose it; a manual mode switch
+    // already closes the poster, and re-firing is blocked by the key match
+    const kk = cohort && appId ? `${cohort}|${appId}` : null;
+    if (!kk || !tf || cohortRef.current === kk) return;
+    cohortRef.current = kk;
+    setMode("steps"); setPicks([]);
+    void openInfographic("unconverted");
+    onCohortConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohort, appId, tf]);
   // the fetched list describes ONE set of picks over one window
   // the poster describes one path over one window — a change closes it
   useEffect(() => { setInfo(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
 
-  const openInfographic = async () => {
+  const openInfographic = async (mode?: "unconverted") => {
     if (!appId || !tf) return;
     setInfo("loading");
     try {
-      // 1. the cohort — WHATEVER IS ON SCREEN. With waypoints picked, the
-      //    journeys passing through them; with none, every journey the flow
-      //    draws (matchesPicks against an empty list is true for all). Same
-      //    mining the diagram used, so membership is provably the ribbon's.
-      const rows = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
-      const ids: string[] = [];
+      // ONE per-session scan: attributes, whether it reached a goal, outcomes.
+      const rows = await runDql<Record<string, unknown>>(qCohortSessions(tf, appId), 5000);
+      // membership. "unconverted" is a predicate on the row (reached no goal);
+      // otherwise the picked path, matched through the same mining the diagram
+      // used, so the cohort is provably the ribbon's.
+      const pickIds = mode === "unconverted" ? null : await (async () => {
+        const pr = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
+        const set = new Set<string>();
+        for (const r of pr) {
+          const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
+            .map(normalizeView).filter((v, k, a) => k === 0 || v !== a[k - 1]);
+          if (journey.length && matchesPicks(journey, picks)) set.add(String(r.sid));
+        }
+        return set;
+      })();
+      const inCohortOf = (r: Record<string, unknown>) =>
+        mode === "unconverted" ? Number(r.reached) === 0
+        : pickIds ? pickIds.has(String(r.sid)) : true;
+      const cohortN = rows.filter(inCohortOf).length;
+      setInfoCohort(cohortN);
+      if (!cohortN) { setInfo([]); return; }
+
+      // pivot to the long form RouteInfographic reads: one row per
+      // (dimension, bucket, in/out) with the measures aggregated. Entry view
+      // is a dimension too, keyed on the first view.
+      type Acc = { sessions: number; hit: number; fatal: number; durs: number[]; views: number[] };
+      const key = (d: string, b: string, inC: boolean) => `${d}\u0000${b}\u0000${inC ? 1 : 0}`;
+      const acc = new Map<string, Acc>();
+      const dimDefs = [...INFO_DIMS.filter((d) => d.expr).map((d) => ({ id: d.id, label: d.label })),
+        { id: "entry", label: "entry view" }];
       for (const r of rows) {
-        const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
-          .map(normalizeView)
-          .filter((v, i2, arr) => i2 === 0 || v !== arr[i2 - 1]);
-        if (journey.length && matchesPicks(journey, picks)) ids.push(String(r.sid));
+        if (!(Number(r.isReal) === 1 || r.isReal === true || r.isReal === "true")) { /* keep all: real flag optional */ }
+        const inC = inCohortOf(r);
+        const hit = Number(r.errs) > 0 ? 1 : 0;
+        const fatal = Number(r.crash) > 0 ? 1 : 0;
+        const dur = Number(r.dur) || 0, vw = Number(r.views) || 0;
+        for (const d of dimDefs) {
+          const raw = r[d.id];
+          if (raw === null || raw === undefined || raw === "") continue;
+          const b = String(raw);
+          const kk = key(d.label, b, inC);
+          const a = acc.get(kk) ?? { sessions: 0, hit: 0, fatal: 0, durs: [], views: [] };
+          a.sessions++; a.hit += hit; a.fatal += fatal; a.durs.push(dur); a.views.push(vw);
+          acc.set(kk, a);
+        }
       }
-      setInfoCohort(ids.length);
-      if (!ids.length) { setInfo([]); return; }
-      // 2. its portrait — every characteristic the platform records, one scan
-      const out = await runDql<Record<string, unknown>>(
-        qRouteInfographic(tf, appId, ids), 1200);
-      setInfo(out.map((r) => ({
-        dim: String(r.dim), bucket: String(r.bucket),
-        inCohort: r.inCohort === true || r.inCohort === "true",
-        sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
-        fatal: Number(r.fatal) || 0, p50dur: Number(r.p50dur) || 0,
-        p50views: Number(r.p50views) || 0 })));
+      const med = (xs: number[]) => { if (!xs.length) return 0;
+        const t = [...xs].sort((x, y) => x - y); const m = Math.floor(t.length / 2);
+        return t.length % 2 ? t[m] : (t[m - 1] + t[m]) / 2; };
+      const info = [...acc.entries()].map(([kk, a]) => {
+        const [dim, bucket, inC] = kk.split("\u0000");
+        return { dim, bucket, inCohort: inC === "1",
+          sessions: a.sessions, hit: a.hit, fatal: a.fatal,
+          p50dur: med(a.durs), p50views: med(a.views) };
+      });
+      setInfo(info);
     } catch { setInfo([]); }
   };
 
@@ -842,7 +895,7 @@ export function FlowSankey({
                 narrowed one; the reader's rule: characteristics refer to
                 everything the screen currently shows */}
             <button className="flow-sel__b flow-sel__b--on"
-              onClick={openInfographic}
+              onClick={() => openInfographic()}
               disabled={info === "loading"}
               title="Draw the portrait of everything on screen — who these users are, on what, from where, with what outcome">
               {info === "loading" ? "drawing…" : "infographic ↗"}
@@ -873,9 +926,12 @@ export function FlowSankey({
         });
         return (
           <RouteInfographic rows={info}
-            path={orderly.length ? orderly.map(word) : ["every journey on screen"]}
+            path={orderly.length ? orderly.map(word)
+              : cohortRef.current ? ["customers who left unconverted"]
+              : ["every journey on screen"]}
+            key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
-            onClose={() => setInfo(null)} />
+            onClose={() => { setInfo(null); }} />
         );
       })()}
 

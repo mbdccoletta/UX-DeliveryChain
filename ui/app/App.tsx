@@ -63,7 +63,10 @@ export function App() {
     view: string;
     /** "anomalies" spotlights the chain's anomalous components on arrival. */
     hl: string | null;
-  }>({ ...URL_DEFAULTS, hl: null });
+    /** A cohort intent the Flow opens straight into an infographic:
+     *  "unconverted" = the journeys that reached no goal. */
+    coh: string | null;
+  }>({ ...URL_DEFAULTS, hl: null, coh: null });
 
   // old ?tab=journey links keep working: they land on the merged page,
   // already switched to the journey view
@@ -253,6 +256,8 @@ export function App() {
               <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={appId}
                 transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
                 tf={tf}
+                cohort={state.coh === "unconverted" ? "unconverted" : null}
+                onCohortConsumed={() => set({ coh: null }, false)}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
             </div>
@@ -269,7 +274,9 @@ export function App() {
           {tab === "report" && (
             <Boundary label="Report">
               <ReportView data={d}
-                onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null, hl: hl ?? null })} />
+                onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null,
+                  hl: t === "chain" ? (hl ?? null) : null,
+                  coh: t === "flow" ? (hl ?? null) : null })} />
             </Boundary>
           )}
 

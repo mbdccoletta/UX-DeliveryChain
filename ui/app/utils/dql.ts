@@ -367,41 +367,41 @@ export const INFO_DIMS: Array<{ id: string; label: string; expr: string }> = [
 ];
 
 /**
- * The route's INFOGRAPHIC, in one query: every characteristic above, cohort
- * beside everyone else, plus the outcome measures — the append-of-summaries
- * shape verified on guu84124. Twenty-one dimensions plus the entry view is
- * twenty-two scans of the window; the poster is opened by a click and only
- * by a click, so the cost is paid once per question.
+ * The infographic's data in ONE per-session scan.
+ *
+ * The append-of-summaries approach hit the platform's expression limit at ~22
+ * dimensions; this reads every session once — its attributes, whether it
+ * reached an outcome, its outcome measures — and the browser buckets each
+ * dimension and both cohorts itself. One fetch, a dozen expressions, no id
+ * list, and switching dimension or measure in the poster costs nothing.
  */
-export const qRouteInfographic = (
-  tf: Timeframe, rumAppId: string, cohortIds: string[],
-) => {
+export const qCohortSessions = (tf: Timeframe, rumAppId: string) => {
   const app = rumAppId.replace(/["\\]/g, "");
-  const ids = cohortIds.slice(0, 500).map((i) => `"${i.replace(/["\\]/g, "")}"`).join(",");
-  const per = `
-  | filter dt.rum.application.id == "${app}"
-  | summarize DIM, inCohort = takeAny(in(dt.rum.session.id, {${ids}})),
+  const DONE = ["checkout", "payment", "purchase", "confirm", "success",
+    "complete", "booked", "receipt", "thank"].map((w) => `contains(_vn, "${w}")`).join(" or ");
+  const field = (id: string, expr: string) => `${id} = takeAny(${expr})`;
+  const cols = INFO_DIMS.filter((d) => d.expr).map((d) => field(d.id, d.expr)).join(",\n      ");
+  return `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${app}"
+| fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+| fieldsAdd _done = if(${DONE}, 1, else: 0)
+| summarize
+      ${cols},
+      entry = takeFirst(if(characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary", coalesce(view.name, view.detected_name), else: null)),
+      reached = max(_done),
       errs = countIf(characteristics.classifier == "error"),
       crash = countIf(error.type == "crash" or error.type == "anr"),
       views = countIf(characteristics.classifier == "view_summary"),
       dur = max(toLong(duration)),
+      isReal = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
     by: { sid = dt.rum.session.id }
-  | filter isNotNull(v)
-  | summarize sessions = count(), hit = countIf(errs > 0), fatal = countIf(crash > 0),
-      p50dur = percentile(dur, 50), p50views = percentile(views, 50),
-    by: { dim = "NAME", bucket = toString(v), inCohort }
-  | sort sessions desc | limit 24 ]`;
-  const dim = (name: string, expr: string) =>
-    "\n| append [ fetch user.events, from: " + tf.from + ", to: " + tf.to
-    + per.replace("DIM", `v = takeAny(${expr})`).replace("NAME", name);
-  const entry = "\n| append [ fetch user.events, from: " + tf.from + ", to: " + tf.to
-    + `\n  | filter characteristics.classifier == "navigation" or characteristics.classifier == "view_summary"\n  | sort start_time asc`
-    + per.replace("DIM", "v = takeFirst(coalesce(view.name, view.detected_name))").replace("NAME", "entry view");
-  return `
-data record(dim = "", bucket = "", inCohort = false, sessions = 0, hit = 0, fatal = 0, p50dur = 0, p50views = 0)
-| filter false${INFO_DIMS.map((d) => dim(d.label, d.expr)).join("")}${entry}
-| limit 1200`;
+| fields sid, reached, errs, crash, views, dur, isReal, entry,
+    ${INFO_DIMS.filter((d) => d.expr).map((d) => d.id).join(", ")}
+| limit 5000`;
 };
+
 
 /**
  * Business Control — the KPIs of both fronts, this window beside the one

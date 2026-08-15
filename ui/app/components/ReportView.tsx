@@ -92,9 +92,11 @@ export function ReportView({ data, onGo }: {
     );
   };
 
-  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, mover }: {
+  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, mover, coh }: {
     label: string; cur: number; prev: number; fmt: (v: number) => string;
     riseIsGood: boolean; tab: "home" | "flow" | "chain"; mover?: (p: BizPeriod) => number;
+    /** A cohort intent passed to the Flow — opens its infographic directly. */
+    coh?: string;
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
     const t = trend(cv, pv, riseIsGood);
@@ -109,8 +111,9 @@ export function ReportView({ data, onGo }: {
           {ARROW[t.dir]} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
         </span>
         {top && (
-          <button className="bc__stat-mv" onClick={() => onGo?.(tab, top.id)}
-            title={`${nameOf(top.id)} — open`}>{nameOf(top.id)}</button>
+          <button className="bc__stat-mv" onClick={() => onGo?.(tab, top.id, coh)}
+            title={coh ? `${nameOf(top.id)} — portrait of who left`
+              : `${nameOf(top.id)} — open`}>{nameOf(top.id)}{coh ? " ↗ who they are" : ""}</button>
         )}
       </div>
     );
@@ -167,7 +170,7 @@ export function ReportView({ data, onGo }: {
             <Stat label="customers who left unconverted"
               cur={c.customers - c.converted} prev={p.customers - p.converted}
               fmt={(v) => fmtN(Math.round(v))} riseIsGood={false} tab="flow"
-              mover={(pp) => pp.realSessions - pp.convertedReal} />
+              mover={(pp) => pp.realSessions - pp.convertedReal} coh="unconverted" />
             {tv ? (
               <Stat label="opportunity on the table"
                 cur={(c.customers - c.converted) * c.conversion * tv}
