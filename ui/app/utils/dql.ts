@@ -261,51 +261,68 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | limit 2000`;
 
 /**
- * WHO takes a path — the cohort profiled against everyone else.
+ * The cohort analytics: ONE dimension × the per-session measures, cohort
+ * beside everyone else — recomputed for whatever the reader picks.
  *
- * The reader's actual question behind "show me the sessions": what do the
- * users who walk this exact route have in common, and how do they differ
- * from the rest? A list of session ids cannot answer that; a comparison of
- * distributions can. So: every session of the application, tagged in/out
- * of the cohort by id (the ids come from the same mining the diagram used,
- * so membership is provably the diagram's), then per dimension the SHARE of
- * sessions in each bucket, cohort beside baseline. The over-representation
- * between the two columns is the pattern.
+ * The earlier version chose eight dimensions and a 1.3× lift threshold on
+ * the reader's behalf; the reader wants to choose. So the query takes the
+ * dimension as a parameter, and returns for every bucket both sides of the
+ * comparison plus the measures an analyst pivots on: sessions, error-hit
+ * rate, crash rate, median duration, median views per session. The panel
+ * does the arithmetic (share, lift, delta) live in the browser, so a change
+ * of dimension is one query and a change of measure is none.
  *
- * Dimensions are the ones RUM stamps on every event and this app has seen
- * populated on this tenant: country, OS, OS version, device model, app
- * version, connection type, user type, new-vs-returning. Each is a separate
- * grouping so a null in one does not drop the row from the others. The
- * per-session outcome columns (errors, crashes, duration) ride along as
- * medians / rates, because "these users hit errors 3× more" is a
- * characteristic too.
- *
- * Bounded: the id list is chunked by the caller (in-list of ~500) and the
- * result is one row per (dimension, bucket) — hundreds, not thousands.
+ * Dimensions on offer are the ones measured POPULATED on this tenant (24h,
+ * two applications, session-level coverage): country 98–100%, OS, browser,
+ * device type/manufacturer, screen width, app version, connection type, ISP,
+ * user type, agent version, orientation, navigation type. Coverage is
+ * measured again per query — a null bucket is simply absent.
  */
-export const qCohortProfile = (
-  tf: Timeframe, rumAppId: string, cohortIds: string[],
+export const COHORT_DIMS: Array<{ id: string; label: string; expr: string }> = [
+  { id: "country",   label: "Country",         expr: "geo.country.iso_code" },
+  { id: "os",        label: "OS",              expr: "os.name" },
+  { id: "osv",       label: "OS version",      expr: "os.version" },
+  { id: "browser",   label: "Browser",         expr: "browser.name" },
+  { id: "browserv",  label: "Browser version", expr: "browser.version" },
+  { id: "devtype",   label: "Device type",     expr: "device.type" },
+  { id: "manuf",     label: "Manufacturer",    expr: "device.manufacturer" },
+  { id: "screen",    label: "Screen width",    expr: "toString(device.screen.width)" },
+  { id: "appv",      label: "App version",     expr: "app.short_version" },
+  { id: "conn",      label: "Connection",      expr: "network.connection.type" },
+  { id: "isp",       label: "ISP",             expr: "client.isp" },
+  { id: "utype",     label: "User type",       expr: "dt.rum.user_type" },
+  { id: "agentv",    label: "Agent version",   expr: "dt.rum.agent.version" },
+  { id: "orient",    label: "Orientation",     expr: "device.orientation" },
+  { id: "navtype",   label: "Navigation type", expr: "navigation.type" },
+  { id: "entry",     label: "Entry view",      expr: "" },   // first view, special-cased
+];
+
+export const qCohortPivot = (
+  tf: Timeframe, rumAppId: string, cohortIds: string[], dimExpr: string,
 ) => {
   const app = rumAppId.replace(/["\\]/g, "");
   const ids = cohortIds.slice(0, 500).map((i) => `"${i.replace(/["\\]/g, "")}"`).join(",");
-  const dim = (name: string, expr: string) => `
-| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
-  | filter dt.rum.application.id == "${app}"
-  | summarize v = takeAny(${expr}), inCohort = takeAny(in(dt.rum.session.id, {${ids}})),
-      errs = countIf(characteristics.classifier == "error"),
-      crash = countIf(error.type == "crash" or error.type == "anr"),
-    by: { sid = dt.rum.session.id }
-  | filter isNotNull(v)
-  | summarize sessions = count(), hit = countIf(errs > 0), fatal = countIf(crash > 0),
-    by: { dim = "${name}", bucket = toString(v), inCohort } ]`;
+  // "entry view" is the first view of the session — the sort/takeFirst pair
+  const dimAgg = dimExpr
+    ? `v = takeAny(${dimExpr})`
+    : `v = takeFirst(coalesce(view.name, view.detected_name))`;
   return `
-data record(dim = "", bucket = "", inCohort = false, sessions = 0, hit = 0, fatal = 0)
-| filter false${dim("country", "geo.country.iso_code")}${dim("os", "os.name")}${
-    dim("os version", "os.version")}${dim("device", "device.model")}${
-    dim("app version", "app.short_version")}${dim("connection", "network.connection.type")}${
-    dim("user type", "dt.rum.user_type")}${dim("new user", "session.is_new_user")}
-| sort dim asc, sessions desc
-| limit 400`;
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${app}"${dimExpr ? "" : `
+| filter characteristics.classifier == "navigation" or characteristics.classifier == "view_summary"
+| sort start_time asc`}
+| summarize ${dimAgg}, inCohort = takeAny(in(dt.rum.session.id, {${ids}})),
+    errs = countIf(characteristics.classifier == "error"),
+    crash = countIf(error.type == "crash" or error.type == "anr"),
+    views = countIf(characteristics.classifier == "view_summary"),
+    dur = max(toLong(duration)),
+  by: { sid = dt.rum.session.id }
+| filter isNotNull(v)
+| summarize sessions = count(), hit = countIf(errs > 0), fatal = countIf(crash > 0),
+    p50dur = percentile(dur, 50), p50views = percentile(views, 50),
+  by: { bucket = toString(v), inCohort }
+| sort sessions desc
+| limit 300`;
 };
 
 /**

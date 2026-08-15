@@ -2,8 +2,8 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INTENT, fmtMs, fmtN, normalizeView, qCohortProfile, qPathSessions,
-  reachesOutcome, runDql, type Timeframe } from "../utils/dql";
+import { COHORT_DIMS, DONE, INTENT, fmtMs, fmtN, normalizeView, qCohortPivot,
+  qPathSessions, reachesOutcome, runDql, type Timeframe } from "../utils/dql";
 import { open as openLink, sessionViewerLink } from "../utils/links";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor, priorities } from "../utils/friction";
@@ -408,13 +408,31 @@ export function FlowSankey({
    * normalisation and pick rules the diagram used. null = not asked. */
   const [pathSessions, setPathSessions] =
     useState<null | "loading" | Array<{ sid: string; start: string }>>(null);
-  /* The cohort's PROFILE — the reader's real question behind "show me the
-   * sessions": what do the users on this exact path have in common, against
-   * everyone else. One row per (dimension, bucket, in/out); the panel keeps
-   * what is over-represented. null = not asked. */
-  type ProfileRow = { dim: string; bucket: string; inCohort: boolean;
-    sessions: number; hit: number; fatal: number };
-  const [profile, setProfile] = useState<null | "loading" | ProfileRow[]>(null);
+  /* The cohort ANALYTICS — a pivot the reader drives: pick a dimension, pick
+   * a measure, read cohort vs everyone else recomputed live. The dimension
+   * costs one query; the measure costs none (all measures come back at once
+   * and the arithmetic — share, lift, delta — happens here). */
+  type PivotRow = { bucket: string; inCohort: boolean; sessions: number; hit: number;
+    fatal: number; p50dur: number; p50views: number };
+  const [dim, setDim] = useState<string>("country");
+  const [measure, setMeasure] = useState<"share" | "hit" | "fatal" | "dur" | "views">("share");
+  const [pivot, setPivot] = useState<null | "loading" | PivotRow[]>(null);
+  const cohortIdsRef = useRef<string[]>([]);
+
+  const runPivot = async (ids: string[], d: string) => {
+    if (!appId || !tf || !ids.length) return;
+    setPivot("loading");
+    try {
+      const def = COHORT_DIMS.find((x) => x.id === d) ?? COHORT_DIMS[0];
+      const rows = await runDql<Record<string, unknown>>(
+        qCohortPivot(tf, appId, ids, def.expr), 300);
+      setPivot(rows.map((r) => ({
+        bucket: String(r.bucket), inCohort: r.inCohort === true || r.inCohort === "true",
+        sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
+        fatal: Number(r.fatal) || 0, p50dur: Number(r.p50dur) || 0,
+        p50views: Number(r.p50views) || 0 })));
+    } catch { setPivot([]); }
+  };
   const [mode, setMode] = useState<"steps" | "paths">("steps");
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
@@ -663,8 +681,12 @@ export function FlowSankey({
   // dissolves it, because the picked positions mean nothing elsewhere
   useEffect(() => { setPicks([]); }, [appId, mode]);
   // the fetched list describes ONE set of picks over one window
-  useEffect(() => { setPathSessions(null); setProfile(null); },
+  useEffect(() => { setPathSessions(null); setPivot(null); cohortIdsRef.current = []; },
     [picks.join("|"), appId, tf?.from, tf?.to]);
+  // a new dimension re-asks the one query the pivot needs; the measure never does
+  useEffect(() => { if (cohortIdsRef.current.length) void runPivot(cohortIdsRef.current, dim); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dim]);
 
   const fetchPathSessions = async () => {
     if (!appId || !tf) return;
@@ -684,19 +706,9 @@ export function FlowSankey({
       }
       hits.sort((a, b) => b.start.localeCompare(a.start));
       setPathSessions(hits);
-      // then WHO they are — the comparison that answers the actual question
-      if (hits.length) {
-        setProfile("loading");
-        try {
-          const rows = await runDql<Record<string, unknown>>(
-            qCohortProfile(tf, appId, hits.map((h) => h.sid)), 400);
-          setProfile(rows.map((r) => ({
-            dim: String(r.dim), bucket: String(r.bucket),
-            inCohort: r.inCohort === true || r.inCohort === "true",
-            sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
-            fatal: Number(r.fatal) || 0 })));
-        } catch { setProfile([]); }
-      }
+      // then the analytics over exactly these ids, on the dimension picked
+      cohortIdsRef.current = hits.map((h) => h.sid);
+      if (hits.length) await runPivot(cohortIdsRef.current, dim);
     } catch { setPathSessions([]); }
   };
 
@@ -862,66 +874,97 @@ export function FlowSankey({
         );
       })()}
 
-      {/* WHO takes this path. Per dimension, the buckets over-represented in
-          the cohort against the rest of the application — share beside share,
-          the lift between them stated. Only lifts worth reading (≥1.3× and
-          ≥5 cohort sessions) survive; a dimension where nothing stands out
-          says so in one line rather than printing an even table. */}
-      {profile === "loading" && (
-        <div className="flow-prof"><em className="flow-sess__none">profiling the cohort…</em></div>
+      {/* THE ANALYTICS. The reader drives it: a dimension (one query each) and
+          a measure (no query — every measure comes back at once), and the
+          table recomputes cohort vs everyone else live: share of each side,
+          the lift between them, and for the outcome measures the delta.
+          Sorted by whatever separates the two populations most, so the
+          pattern is at the top before the reader scrolls. */}
+      {pivot === "loading" && (
+        <div className="flow-prof"><em className="flow-sess__none">computing…</em></div>
       )}
-      {Array.isArray(profile) && (() => {
-        const dims = [...new Set(profile.map((r) => r.dim))];
-        const cohortN = Math.max(1, ...dims.map((d) => profile
-          .filter((r) => r.dim === d && r.inCohort).reduce((a, r) => a + r.sessions, 0)));
-        const restN = Math.max(1, ...dims.map((d) => profile
-          .filter((r) => r.dim === d && !r.inCohort).reduce((a, r) => a + r.sessions, 0)));
-        // outcome characteristics — errors and fatal, cohort vs rest — from any one dimension
-        const d0 = dims[0];
-        const oc = profile.filter((r) => r.dim === d0);
-        const rate = (inC: boolean, k: "hit" | "fatal") => {
-          const rows = oc.filter((r) => r.inCohort === inC);
-          const n = rows.reduce((a, r) => a + r.sessions, 0);
-          return n ? rows.reduce((a, r) => a + r[k], 0) / n : 0;
+      {Array.isArray(pivot) && (() => {
+        const inTot = pivot.filter((r) => r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
+        const outTot = pivot.filter((r) => !r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
+        type Cell = { v: number; n: number };
+        const val = (r: PivotRow | undefined, side: "in" | "out"): Cell => {
+          if (!r) return { v: 0, n: 0 };
+          const tot = side === "in" ? inTot : outTot;
+          switch (measure) {
+            case "share": return { v: r.sessions / tot, n: r.sessions };
+            case "hit":   return { v: r.sessions ? r.hit / r.sessions : 0, n: r.sessions };
+            case "fatal": return { v: r.sessions ? r.fatal / r.sessions : 0, n: r.sessions };
+            case "dur":   return { v: r.p50dur, n: r.sessions };
+            case "views": return { v: r.p50views, n: r.sessions };
+          }
         };
-        const lifts = dims.map((d) => {
-          const rows = profile.filter((r) => r.dim === d);
-          const inTot = rows.filter((r) => r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
-          const outTot = rows.filter((r) => !r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
-          const buckets = [...new Set(rows.map((r) => r.bucket))].map((b) => {
-            const i = rows.find((r) => r.bucket === b && r.inCohort)?.sessions ?? 0;
-            const o = rows.find((r) => r.bucket === b && !r.inCohort)?.sessions ?? 0;
-            const si = i / inTot, so = o / outTot;
-            return { b, i, si, so, lift: so > 0 ? si / so : (si > 0 ? Infinity : 1) };
-          }).filter((x) => x.i >= 5 && x.lift >= 1.3)
-            .sort((a, b) => b.lift - a.lift).slice(0, 3);
-          return { d, buckets };
-        });
+        const fmtV = (v: number) => measure === "dur" ? fmtMs(v)
+          : measure === "views" ? v.toFixed(1)
+          : fmtPct(v * 100);
+        const buckets = [...new Set(pivot.map((r) => r.bucket))].map((b) => {
+          const i = val(pivot.find((r) => r.bucket === b && r.inCohort), "in");
+          const o = val(pivot.find((r) => r.bucket === b && !r.inCohort), "out");
+          // what separates the populations: a ratio for shares and rates,
+          // a signed difference for durations and counts
+          const sep = measure === "dur" || measure === "views"
+            ? Math.abs(i.v - o.v)
+            : Math.abs(Math.log((i.v || 1e-9) / (o.v || 1e-9)));
+          return { b, i, o, sep };
+        }).filter((x) => x.i.n > 0 || x.o.n > 0)
+          .sort((a, b) => b.sep - a.sep).slice(0, 14);
+        const MEASURES: Array<[typeof measure, string]> = [
+          ["share", "share of sessions"], ["hit", "hit by errors"],
+          ["fatal", "crash / ANR"], ["dur", "median duration"], ["views", "median views"]];
         return (
           <div className="flow-prof">
             <div className="flow-prof__hd">
               <b>who takes this path</b>
-              <em>{fmtN(cohortN)} in the cohort · {fmtN(restN)} everyone else ·
-                lift = the cohort&apos;s share ÷ everyone else&apos;s</em>
+              <em>{fmtN(inTot)} in the cohort · {fmtN(outTot)} everyone else</em>
+              <div className="spacer" />
+              <label className="flow-prof__ctl">by
+                <select value={dim} onChange={(e) => setDim(e.target.value)}>
+                  {COHORT_DIMS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+                </select>
+              </label>
+              <label className="flow-prof__ctl">measure
+                <select value={measure} onChange={(e) => setMeasure(e.target.value as typeof measure)}>
+                  {MEASURES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+                </select>
+              </label>
             </div>
-            <div className="flow-prof__oc">
-              <span>hit by errors <b>{fmtPct(rate(true, "hit") * 100)}</b>
-                <em> vs {fmtPct(rate(false, "hit") * 100)}</em></span>
-              <span>crash / ANR <b>{fmtPct(rate(true, "fatal") * 100)}</b>
-                <em> vs {fmtPct(rate(false, "fatal") * 100)}</em></span>
-            </div>
-            {lifts.map(({ d, buckets }) => (
-              <div className="flow-prof__row" key={d}>
-                <span className="flow-prof__dim">{d}</span>
-                {buckets.length ? buckets.map((x) => (
-                  <span className="flow-prof__b" key={x.b}
-                    title={`${fmtN(x.i)} cohort sessions · ${fmtPct(x.si * 100)} of the cohort vs ${fmtPct(x.so * 100)} of everyone else`}>
-                    {x.b} <b>{x.lift === Infinity ? "only here" : `${x.lift.toFixed(1)}×`}</b>
-                    <em>{fmtPct(x.si * 100)} vs {fmtPct(x.so * 100)}</em>
-                  </span>
-                )) : <em className="flow-sess__none">nothing stands out</em>}
-              </div>
-            ))}
+            {buckets.length === 0 && (
+              <em className="flow-sess__none">this dimension is not recorded for this application</em>
+            )}
+            {buckets.length > 0 && (
+              <table className="flow-pv">
+                <thead><tr>
+                  <th>{COHORT_DIMS.find((d) => d.id === dim)?.label}</th>
+                  <th>cohort</th><th>everyone else</th>
+                  <th>{measure === "dur" || measure === "views" ? "delta" : "lift"}</th>
+                </tr></thead>
+                <tbody>
+                  {buckets.map(({ b, i, o }) => {
+                    const ratio = measure === "dur" || measure === "views"
+                      ? null : (o.v > 0 ? i.v / o.v : (i.v > 0 ? Infinity : 1));
+                    const delta = measure === "dur" || measure === "views" ? i.v - o.v : null;
+                    const up = ratio !== null ? ratio > 1.15 : (delta ?? 0) > 0;
+                    const down = ratio !== null ? ratio < 0.87 : (delta ?? 0) < 0;
+                    return (
+                      <tr key={b}>
+                        <td className="flow-pv__b" title={b}>{b}</td>
+                        <td><b>{fmtV(i.v)}</b> <em>· {fmtN(i.n)}</em></td>
+                        <td>{fmtV(o.v)} <em>· {fmtN(o.n)}</em></td>
+                        <td className={up ? "flow-pv--up" : down ? "flow-pv--down" : ""}>
+                          {ratio !== null
+                            ? (ratio === Infinity ? "only cohort" : `${ratio.toFixed(2)}×`)
+                            : (delta! >= 0 ? "+" : "") + (measure === "dur" ? fmtMs(delta!) : delta!.toFixed(1))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         );
       })()}
