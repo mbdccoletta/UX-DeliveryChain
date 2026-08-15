@@ -675,11 +675,9 @@ export function FlowSankey({
       }
       setInfoCohort(ids.length);
       if (!ids.length) { setInfo([]); return; }
-      // 2. its portrait — every panel of the poster in one scan
-      const app = apps.find((a) => a.appId === appId);
-      const isMobile = !!app?.entity?.startsWith("MOBILE_APPLICATION-");
+      // 2. its portrait — every characteristic the platform records, one scan
       const out = await runDql<Record<string, unknown>>(
-        qRouteInfographic(tf, appId, ids, isMobile), 400);
+        qRouteInfographic(tf, appId, ids), 1200);
       setInfo(out.map((r) => ({
         dim: String(r.dim), bucket: String(r.bucket),
         inCohort: r.inCohort === true || r.inCohort === "true",

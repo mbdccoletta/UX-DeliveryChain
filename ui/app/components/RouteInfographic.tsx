@@ -20,7 +20,7 @@ export interface InfoRow {
 const fmtPct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
 
 /** The most-over-represented buckets of one dimension, cohort share vs rest. */
-function topBuckets(rows: InfoRow[], dim: string, n = 4) {
+function topBuckets(rows: InfoRow[], dim: string, n = 5) {
   const r = rows.filter((x) => x.dim === dim);
   const inTot = r.filter((x) => x.inCohort).reduce((a, x) => a + x.sessions, 0) || 1;
   const outTot = r.filter((x) => !x.inCohort).reduce((a, x) => a + x.sessions, 0) || 1;
@@ -119,14 +119,27 @@ export function RouteInfographic({ rows, path, appName, cohort, total, onClose }
                 solid, everyone else as a ghost behind it, so the eye reads the
                 over-representation as the solid bar outrunning its shadow */}
             <section className="rinfo__grid">
-              {dims.filter((d) => d !== "entry").concat(dims.includes("entry") ? ["entry"] : [])
+              {/* every characteristic the application records, in the platform's
+                  own order; one it does not record has no rows and is not drawn.
+                  A dimension with a single bucket on both sides says nothing
+                  about THIS route — it is stated once, compactly, not as a bar. */}
+              {dims.filter((d) => d !== "entry view").concat(dims.includes("entry view") ? ["entry view"] : [])
                 .map((d) => {
                   const { buckets } = topBuckets(rows, d);
                   if (!buckets.length) return null;
                   const max = Math.max(...buckets.map((x) => Math.max(x.si, x.so)), 0.01);
+                  const uniform = buckets.length === 1 && buckets[0].si >= 0.99 && buckets[0].so >= 0.99;
+                  if (uniform) {
+                    return (
+                      <div className="rinfo__blk rinfo__blk--flat" key={d}>
+                        <h3>{d}</h3>
+                        <span className="rinfo__flat">{buckets[0].b}<em> · everyone</em></span>
+                      </div>
+                    );
+                  }
                   return (
                     <div className="rinfo__blk" key={d}>
-                      <h3>{d === "entry" ? "where they enter" : d}</h3>
+                      <h3>{d === "entry view" ? "where they enter" : d}</h3>
                       {buckets.map((x) => {
                         const l = lift(x.si, x.so);
                         return (
