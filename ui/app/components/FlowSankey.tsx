@@ -412,7 +412,10 @@ export function FlowSankey({
    * "loading" while the two scans run (the cohort's ids, then its portrait). */
   const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
   const [infoCohort, setInfoCohort] = useState(0);
-  const [mode, setMode] = useState<"steps" | "paths">("steps");
+  // "paths" (Which routes they take) is the default view by request — the
+  // step drop-off is one click away; a custom path or a cohort intent still
+  // forces "steps" when it needs the positional columns.
+  const [mode, setMode] = useState<"steps" | "paths">("paths");
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
   stepModeRef.current = !!appId && mode === "steps";
