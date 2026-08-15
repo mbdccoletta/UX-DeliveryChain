@@ -375,6 +375,79 @@ export const INFO_DIMS: Array<{ id: string; label: string; expr: string }> = [
  * dimension and both cohorts itself. One fetch, a dozen expressions, no id
  * list, and switching dimension or measure in the poster costs nothing.
  */
+/** The outcome-keyword match, per event, over _vn (the lowercased view name). */
+const DONE_DQL = ["checkout", "payment", "purchase", "confirm", "success",
+  "complete", "booked", "receipt", "thank"].map((w) => `contains(_vn, "${w}")`).join(" or ");
+
+/**
+ * The series Davis forecasts for Business Control — sessions or conversions
+ * per interval, over a history six times the window, so the projection of the
+ * NEXT window rests on enough past. Returned as a string because the Davis
+ * analyzer takes the query itself (verified: records are rejected, the query
+ * string returns OK/VALID with lower/point/upper bands).
+ */
+export const qBizSeries = (
+  tf: Timeframe, metric: "sessions" | "conversions", rumAppId?: string | null,
+) => {
+  const span = Math.max(tf.minutes, 30);
+  const history = `now()-${span * 6}m`;
+  const interval = Math.max(5, Math.round(span / 8));
+  const appFilter = rumAppId
+    ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
+  const agg = metric === "sessions" ? "sessions = count()" : "conversions = sum(reached)";
+  return `fetch user.events, from: ${history}${appFilter}
+| fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+| fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
+| summarize reached = max(_done), t = takeMin(start_time), by: { sid = dt.rum.session.id }
+| makeTimeseries ${agg}, time: t, interval: ${interval}m`;
+};
+
+/**
+ * Business Control's breakdown, one query: per-app conversion split by
+ * error-touch (what failure costs), and conversion per segment bucket for the
+ * dimensions a business reader acts on. Every leg lands in the same shape
+ * { d, bucket, appId, sessions, conv, realN, realConv }, per application so
+ * the board's scope filter cuts it client-side.
+ */
+export const qBizBreakdown = (tf: Timeframe) => {
+  const dims: Array<[string, string]> = [
+    ["country", "geo.country.iso_code"],
+    ["os", "os.name"],
+    ["browser", "browser.name"],
+    ["device type", "device.type"],
+    ["user type", "dt.rum.user_type"],
+  ];
+  const leg = (name: string, expr: string) => `
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+  | fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
+  | summarize v = takeAny(${expr}), reached = max(_done),
+      errs = countIf(characteristics.classifier == "error"),
+      real = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
+    by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
+  | filter isNotNull(v)
+  | summarize sessions = count(), conv = countIf(reached == 1),
+      realN = countIf(real), realConv = countIf(real and reached == 1),
+    by: { d = "${name}", bucket = toString(v), appId }
+  | sort sessions desc | limit 40 ]`;
+  // the error-cost leg: bucket = whether the session met an error
+  const errLeg = `
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+  | fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
+  | summarize reached = max(_done),
+      errs = countIf(characteristics.classifier == "error"),
+      real = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
+    by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
+  | summarize sessions = count(), conv = countIf(reached == 1),
+      realN = countIf(real), realConv = countIf(real and reached == 1),
+    by: { d = "__err", bucket = if(errs > 0, "hit", else: "clean"), appId } ]`;
+  return `
+data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, realConv = 0)
+| filter false${errLeg}${dims.map(([n, e]) => leg(n, e)).join("")}
+| limit 500`;
+};
+
 export const qCohortSessions = (tf: Timeframe, rumAppId: string) => {
   const app = rumAppId.replace(/["\\]/g, "");
   const DONE = ["checkout", "payment", "purchase", "confirm", "success",
