@@ -2,9 +2,9 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { COHORT_DIMS, DONE, INTENT, fmtMs, fmtN, normalizeView, qCohortPivot,
-  qPathSessions, reachesOutcome, runDql, type Timeframe } from "../utils/dql";
-import { open as openLink, sessionViewerLink } from "../utils/links";
+import { DONE, INTENT, fmtMs, fmtN, normalizeView, qPathSessions, qRouteInfographic,
+  reachesOutcome, runDql, type Timeframe } from "../utils/dql";
+import { RouteInfographic, type InfoRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor, priorities } from "../utils/friction";
 
@@ -403,36 +403,11 @@ export function FlowSankey({
    * every number on screen is the isolated cohort's own, not a lit subset
    * of the old ones. */
   const [picks, setPicks] = useState<string[]>([]);
-  /* The sessions behind the picked path, fetched only when asked: one scan
-   * per click of the drill-down button, matched client-side with the SAME
-   * normalisation and pick rules the diagram used. null = not asked. */
-  const [pathSessions, setPathSessions] =
-    useState<null | "loading" | Array<{ sid: string; start: string }>>(null);
-  /* The cohort ANALYTICS — a pivot the reader drives: pick a dimension, pick
-   * a measure, read cohort vs everyone else recomputed live. The dimension
-   * costs one query; the measure costs none (all measures come back at once
-   * and the arithmetic — share, lift, delta — happens here). */
-  type PivotRow = { bucket: string; inCohort: boolean; sessions: number; hit: number;
-    fatal: number; p50dur: number; p50views: number };
-  const [dim, setDim] = useState<string>("country");
-  const [measure, setMeasure] = useState<"share" | "hit" | "fatal" | "dur" | "views">("share");
-  const [pivot, setPivot] = useState<null | "loading" | PivotRow[]>(null);
-  const cohortIdsRef = useRef<string[]>([]);
-
-  const runPivot = async (ids: string[], d: string) => {
-    if (!appId || !tf || !ids.length) return;
-    setPivot("loading");
-    try {
-      const def = COHORT_DIMS.find((x) => x.id === d) ?? COHORT_DIMS[0];
-      const rows = await runDql<Record<string, unknown>>(
-        qCohortPivot(tf, appId, ids, def.expr), 300);
-      setPivot(rows.map((r) => ({
-        bucket: String(r.bucket), inCohort: r.inCohort === true || r.inCohort === "true",
-        sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
-        fatal: Number(r.fatal) || 0, p50dur: Number(r.p50dur) || 0,
-        p50views: Number(r.p50views) || 0 })));
-    } catch { setPivot([]); }
-  };
+  /* The route's INFOGRAPHIC — the poster the reader asked for, opened by the
+   * button on the path band and laid over the screen. null = closed;
+   * "loading" while the two scans run (the cohort's ids, then its portrait). */
+  const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
+  const [infoCohort, setInfoCohort] = useState(0);
   const [mode, setMode] = useState<"steps" | "paths">("steps");
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
@@ -681,35 +656,37 @@ export function FlowSankey({
   // dissolves it, because the picked positions mean nothing elsewhere
   useEffect(() => { setPicks([]); }, [appId, mode]);
   // the fetched list describes ONE set of picks over one window
-  useEffect(() => { setPathSessions(null); setPivot(null); cohortIdsRef.current = []; },
-    [picks.join("|"), appId, tf?.from, tf?.to]);
-  // a new dimension re-asks the one query the pivot needs; the measure never does
-  useEffect(() => { if (cohortIdsRef.current.length) void runPivot(cohortIdsRef.current, dim); },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dim]);
+  // the poster describes one path over one window — a change closes it
+  useEffect(() => { setInfo(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
 
-  const fetchPathSessions = async () => {
+  const openInfographic = async () => {
     if (!appId || !tf) return;
-    setPathSessions("loading");
+    setInfo("loading");
     try {
+      // 1. the cohort — the same mining the diagram used, so membership is
+      //    provably the ribbon's
       const rows = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
-      const hits: Array<{ sid: string; start: string }> = [];
+      const ids: string[] = [];
       for (const r of rows) {
         const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
           .map(normalizeView)
-          // the same adjacent-duplicate collapse mergeJourneys applies — a
-          // summary closes the very view its navigation opened
-          .filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
-        if (journey.length && matchesPicks(journey, picks)) {
-          hits.push({ sid: String(r.sid), start: String(r.start) });
-        }
+          .filter((v, i2, arr) => i2 === 0 || v !== arr[i2 - 1]);
+        if (journey.length && matchesPicks(journey, picks)) ids.push(String(r.sid));
       }
-      hits.sort((a, b) => b.start.localeCompare(a.start));
-      setPathSessions(hits);
-      // then the analytics over exactly these ids, on the dimension picked
-      cohortIdsRef.current = hits.map((h) => h.sid);
-      if (hits.length) await runPivot(cohortIdsRef.current, dim);
-    } catch { setPathSessions([]); }
+      setInfoCohort(ids.length);
+      if (!ids.length) { setInfo([]); return; }
+      // 2. its portrait — every panel of the poster in one scan
+      const app = apps.find((a) => a.appId === appId);
+      const isMobile = !!app?.entity?.startsWith("MOBILE_APPLICATION-");
+      const out = await runDql<Record<string, unknown>>(
+        qRouteInfographic(tf, appId, ids, isMobile), 400);
+      setInfo(out.map((r) => ({
+        dim: String(r.dim), bucket: String(r.bucket),
+        inCohort: r.inCohort === true || r.inCohort === "true",
+        sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
+        fatal: Number(r.fatal) || 0, p50dur: Number(r.p50dur) || 0,
+        p50views: Number(r.p50views) || 0 })));
+    } catch { setInfo([]); }
   };
 
   /* the lit-path ids belong to one model; changing mode invalidates them */
@@ -859,13 +836,12 @@ export function FlowSankey({
               {all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}
             </span>
             <div className="spacer" />
-            {/* the drill-down the reader asked for: the SESSIONS matching the
-                picked path, each opening the platform's own session viewer */}
-            <button className="flow-sel__b"
-              onClick={fetchPathSessions}
-              disabled={pathSessions === "loading"}
-              title="Profile the users on this path against everyone else — and open a matching session">
-              {pathSessions === "loading" ? "matching…" : "who takes this path"}
+            {/* the poster: who walks this route, laid over the screen */}
+            <button className="flow-sel__b flow-sel__b--on"
+              onClick={openInfographic}
+              disabled={info === "loading"}
+              title="Draw the route's portrait over the screen — who takes it, on what, from where, with what outcome">
+              {info === "loading" ? "drawing…" : "infographic ↗"}
             </button>
             <button className="flow-sel__b" onClick={() => setPicks([])}>
               clear path ✕
@@ -874,190 +850,27 @@ export function FlowSankey({
         );
       })()}
 
-      {/* THE ANALYTICS. The reader drives it: a dimension (one query each) and
-          a measure (no query — every measure comes back at once), and the
-          table recomputes cohort vs everyone else live: share of each side,
-          the lift between them, and for the outcome measures the delta.
-          Sorted by whatever separates the two populations most, so the
-          pattern is at the top before the reader scrolls. */}
-      {pivot === "loading" && (
-        <div className="flow-prof"><em className="flow-sess__none">computing…</em></div>
-      )}
-      {Array.isArray(pivot) && (() => {
-        const inTot = pivot.filter((r) => r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
-        const outTot = pivot.filter((r) => !r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
-        type Cell = { v: number; n: number };
-        const val = (r: PivotRow | undefined, side: "in" | "out"): Cell => {
-          if (!r) return { v: 0, n: 0 };
-          const tot = side === "in" ? inTot : outTot;
-          switch (measure) {
-            case "share": return { v: r.sessions / tot, n: r.sessions };
-            case "hit":   return { v: r.sessions ? r.hit / r.sessions : 0, n: r.sessions };
-            case "fatal": return { v: r.sessions ? r.fatal / r.sessions : 0, n: r.sessions };
-            case "dur":   return { v: r.p50dur, n: r.sessions };
-            case "views": return { v: r.p50views, n: r.sessions };
-          }
+      {/* the route's portrait, over everything — closes on Esc or outside */}
+      {info !== null && (() => {
+        const app = appId ? apps.find((a) => a.appId === appId) : undefined;
+        const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0);
+        const all = mine.reduce((a, q) => a + q.sessions, 0);
+        const word = (id: string) => {
+          const end = /^(done|exit)-(\d+)$/.exec(id);
+          if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
+          const m = /^n(\d+)-([\s\S]*)$/.exec(id);
+          return m ? m[2] : id;
         };
-        const fmtV = (v: number) => measure === "dur" ? fmtMs(v)
-          : measure === "views" ? v.toFixed(1)
-          : fmtPct(v * 100);
-        const buckets = [...new Set(pivot.map((r) => r.bucket))].map((b) => {
-          const i = val(pivot.find((r) => r.bucket === b && r.inCohort), "in");
-          const o = val(pivot.find((r) => r.bucket === b && !r.inCohort), "out");
-          // what separates the populations: a ratio for shares and rates,
-          // a signed difference for durations and counts
-          const sep = measure === "dur" || measure === "views"
-            ? Math.abs(i.v - o.v)
-            : Math.abs(Math.log((i.v || 1e-9) / (o.v || 1e-9)));
-          return { b, i, o, sep };
-        }).filter((x) => x.i.n > 0 || x.o.n > 0)
-          .sort((a, b) => b.sep - a.sep).slice(0, 14);
-        const MEASURES: Array<[typeof measure, string]> = [
-          ["share", "share of sessions"], ["hit", "hit by errors"],
-          ["fatal", "crash / ANR"], ["dur", "median duration"], ["views", "median views"]];
+        const orderly = [...picks].sort((a, b) => {
+          const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);
+          return st(a) - st(b);
+        });
         return (
-          <div className="flow-prof">
-            <div className="flow-prof__hd">
-              <b>who takes this path</b>
-              <em>{fmtN(inTot)} in the cohort · {fmtN(outTot)} everyone else</em>
-              <div className="spacer" />
-              <label className="flow-prof__ctl">by
-                <select value={dim} onChange={(e) => setDim(e.target.value)}>
-                  {COHORT_DIMS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-                </select>
-              </label>
-              <label className="flow-prof__ctl">measure
-                <select value={measure} onChange={(e) => setMeasure(e.target.value as typeof measure)}>
-                  {MEASURES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
-                </select>
-              </label>
-            </div>
-            {buckets.length === 0 && (
-              <em className="flow-sess__none">this dimension is not recorded for this application</em>
-            )}
-            {buckets.length > 0 && (
-              <table className="flow-pv">
-                <thead><tr>
-                  <th>{COHORT_DIMS.find((d) => d.id === dim)?.label}</th>
-                  <th>cohort</th><th>everyone else</th>
-                  <th>{measure === "dur" || measure === "views" ? "delta" : "lift"}</th>
-                </tr></thead>
-                <tbody>
-                  {buckets.map(({ b, i, o }) => {
-                    const ratio = measure === "dur" || measure === "views"
-                      ? null : (o.v > 0 ? i.v / o.v : (i.v > 0 ? Infinity : 1));
-                    const delta = measure === "dur" || measure === "views" ? i.v - o.v : null;
-                    const up = ratio !== null ? ratio > 1.15 : (delta ?? 0) > 0;
-                    const down = ratio !== null ? ratio < 0.87 : (delta ?? 0) < 0;
-                    return (
-                      <tr key={b}>
-                        <td className="flow-pv__b" title={b}>{b}</td>
-                        <td><b>{fmtV(i.v)}</b> <em>· {fmtN(i.n)}</em></td>
-                        <td>{fmtV(o.v)} <em>· {fmtN(o.n)}</em></td>
-                        <td className={up ? "flow-pv--up" : down ? "flow-pv--down" : ""}>
-                          {ratio !== null
-                            ? (ratio === Infinity ? "only cohort" : `${ratio.toFixed(2)}×`)
-                            : (delta! >= 0 ? "+" : "") + (measure === "dur" ? fmtMs(delta!) : delta!.toFixed(1))}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
+          <RouteInfographic rows={info} path={orderly.map(word)}
+            appName={app?.name ?? ""} cohort={infoCohort} total={all}
+            onClose={() => setInfo(null)} />
         );
       })()}
-
-      {/* The matching sessions, newest first — capped and saying so. Each row
-          is the verified session-details-from-event hand-off, so it opens the
-          exact viewer the reader compared us against. */}
-      {Array.isArray(pathSessions) && (
-        <div className="flow-sess">
-          {pathSessions.length === 0 && (
-            <em className="flow-sess__none">no session in this window matches the whole path</em>
-          )}
-          {pathSessions.slice(0, 12).map((x) => (
-            <button key={x.sid} className="flow-pick"
-              title={`Open session ${x.sid} in Users & Sessions`}
-              onClick={() => openLink(sessionViewerLink(x.sid, x.start))}>
-              {x.start.slice(11, 19)} · …{x.sid.slice(-8)}
-            </button>
-          ))}
-          {pathSessions.length > 12 && (
-            <em className="flow-sess__none">
-              showing 12 of {fmtN(pathSessions.length)} — narrow the path or the window for the rest
-            </em>
-          )}
-        </div>
-      )}
-
-      {/* Second band: only when something is selected — what it is and where to go. */}
-      {selNode ? (
-        <div className="flow-sel">
-          <i className="sig" style={{ background: `var(--${selNode.tone})` }} />
-          <span className="flow-sel__nm">{selNode.full ?? selNode.nm}</span>
-          <span className="flow-sel__num">{fmtN(selNode.v)} · {selNode.sub}</span>
-          <div className="spacer" />
-          <button className={`flow-sel__b ${focus ? "flow-sel__b--on" : ""}`} aria-pressed={focus}
-            onClick={() => setFocus((f) => !f)}
-            title="Hide every flow not connected to the selection">
-            {focus ? "show all flows" : "isolate this path"}
-          </button>
-          {selApp && onOpen && (
-            <button className="flow-sel__b" onClick={() => onOpen("chain", selApp)}
-              title="Open this application's delivery chain">delivery chain ↗</button>
-          )}
-          <button className="flow-sel__b"
-            onClick={() => { setSel(null); setSelNode(null); setFocus(false); }}>clear ✕</button>
-          {(() => {
-            // The third source. Paths come from navigation and friction from
-            // user_action; neither knows how long a view took, because a view
-            // is only measurable once it ends — which is exactly what
-            // view_summary reports. Names match because both sides are
-            // normalised by the same patterns before aggregation.
-            const nm = selNode.full ?? selNode.nm;
-            const vr = views.filter((r) => r.view === nm && (!appId || r.appId === appId));
-            if (!vr.length) return null;
-            const sessions = vr.reduce((a, r) => a + r.sessions, 0);
-            const p50 = Math.max(...vr.map((r) => r.p50));
-            return (
-              <span className="flow-why">
-                <b>on screen:</b> {fmtMs(p50)} median over {fmtN(sessions)} session(s)
-              </span>
-            );
-          })()}
-          {(() => {
-            const view = selNode.full ?? selNode.nm;
-            const fr = frictionFor(friction, view, appId)[0];
-            if (!fr || !(fr.tag || fr.xpath)) return null;
-            return (
-              <span className="flow-why">
-                <b>why:</b> {fmtN(fr.abandoned + fr.timeouts)}{" "}
-                {fr.abandoned >= fr.timeouts ? "closed the tab" : "timed out"} on{" "}
-                <code>&lt;{fr.tag ?? "?"}&gt;</code>
-                {fr.cls > 0.1 && <> — it shifts the layout by <b>{fr.cls.toFixed(2)}</b></>}
-              </span>
-            );
-          })()}
-        </div>
-      ) : (
-        <div className="flow-hint">
-          {appId && mode === "steps"
-            ? "Each column is one view position in the session. The flow narrows where sessions leave — click a node to follow its route, hover a thin ribbon to name it."
-            : "Ribbon width is the number of sessions. Click a node to follow its route through the flow."}
-        </div>
-      )}
-      {/* An application with nothing to mine SAYS so. Measured on guu84124:
-          easyTravel Mobile had zero navigation events in the 2h window and 89
-          in 24h — "0 paths discovered" beside a blank canvas read as broken,
-          when the honest answer was "not in this window". */}
-      {appId && !seqs.some((q) => q.appId === appId && q.journey.length > 0) && (
-        <div className="flow-empty">
-          No navigation recorded for this application in this window.
-          <em>The app may simply be quiet — try a wider timeframe above.</em>
-        </div>
-      )}
 
       {/* role="img" plus a summary: the drawing is one image, and its detail
           lives in the list below rather than in an unreadable label. */}

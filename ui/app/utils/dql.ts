@@ -326,6 +326,50 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 };
 
 /**
+ * The route's INFOGRAPHIC, in one query: who walks it, on what, from where,
+ * with what outcome — cohort beside everyone else, every panel at once.
+ *
+ * The pivot answers one dimension per query for an analyst; the infographic
+ * is a poster, and a poster cannot wait for six round trips. So this brings
+ * back the top buckets of every dimension the poster draws (country, OS,
+ * device/browser, app version, connection, user type, entry view) plus the
+ * outcome rates and durations, for both sides, in a single scan — the same
+ * append-of-summaries shape verified for qCohortProfile on guu84124.
+ */
+export const qRouteInfographic = (
+  tf: Timeframe, rumAppId: string, cohortIds: string[], isMobile: boolean,
+) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const ids = cohortIds.slice(0, 500).map((i) => `"${i.replace(/["\\]/g, "")}"`).join(",");
+  const per = `
+  | filter dt.rum.application.id == "${app}"
+  | summarize DIM, inCohort = takeAny(in(dt.rum.session.id, {${ids}})),
+      errs = countIf(characteristics.classifier == "error"),
+      crash = countIf(error.type == "crash" or error.type == "anr"),
+      views = countIf(characteristics.classifier == "view_summary"),
+      dur = max(toLong(duration)),
+    by: { sid = dt.rum.session.id }
+  | filter isNotNull(v)
+  | summarize sessions = count(), hit = countIf(errs > 0), fatal = countIf(crash > 0),
+      p50dur = percentile(dur, 50), p50views = percentile(views, 50),
+    by: { dim = "NAME", bucket = toString(v), inCohort }
+  | sort sessions desc | limit 24 ]`;
+  const dim = (name: string, expr: string) =>
+    "\n| append [ fetch user.events, from: " + tf.from + ", to: " + tf.to
+    + per.replace("DIM", `v = takeAny(${expr})`).replace("NAME", name);
+  const entry = "\n| append [ fetch user.events, from: " + tf.from + ", to: " + tf.to
+    + `\n  | filter characteristics.classifier == "navigation" or characteristics.classifier == "view_summary"\n  | sort start_time asc`
+    + per.replace("DIM", "v = takeFirst(coalesce(view.name, view.detected_name))").replace("NAME", "entry");
+  return `
+data record(dim = "", bucket = "", inCohort = false, sessions = 0, hit = 0, fatal = 0, p50dur = 0, p50views = 0)
+| filter false${dim("country", "geo.country.iso_code")}${dim("os", "os.name")}${
+    isMobile ? dim("device", "device.manufacturer") : dim("browser", "browser.name")}${
+    isMobile ? dim("app version", "app.short_version") : dim("device type", "device.type")}${
+    dim("connection", isMobile ? "network.connection.type" : "dt.rum.user_type")}${entry}
+| limit 400`;
+};
+
+/**
  * Collapses the identifier-looking parts of a view name, so two sessions that
  * differ only by a product id or an order UUID count as the same journey.
  *
