@@ -2,7 +2,7 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INTENT, fmtMs, fmtN, normalizeView, qPathSessions,
+import { DONE, INTENT, fmtMs, fmtN, normalizeView, qCohortProfile, qPathSessions,
   reachesOutcome, runDql, type Timeframe } from "../utils/dql";
 import { open as openLink, sessionViewerLink } from "../utils/links";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
@@ -408,6 +408,13 @@ export function FlowSankey({
    * normalisation and pick rules the diagram used. null = not asked. */
   const [pathSessions, setPathSessions] =
     useState<null | "loading" | Array<{ sid: string; start: string }>>(null);
+  /* The cohort's PROFILE — the reader's real question behind "show me the
+   * sessions": what do the users on this exact path have in common, against
+   * everyone else. One row per (dimension, bucket, in/out); the panel keeps
+   * what is over-represented. null = not asked. */
+  type ProfileRow = { dim: string; bucket: string; inCohort: boolean;
+    sessions: number; hit: number; fatal: number };
+  const [profile, setProfile] = useState<null | "loading" | ProfileRow[]>(null);
   const [mode, setMode] = useState<"steps" | "paths">("steps");
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
@@ -656,7 +663,8 @@ export function FlowSankey({
   // dissolves it, because the picked positions mean nothing elsewhere
   useEffect(() => { setPicks([]); }, [appId, mode]);
   // the fetched list describes ONE set of picks over one window
-  useEffect(() => { setPathSessions(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
+  useEffect(() => { setPathSessions(null); setProfile(null); },
+    [picks.join("|"), appId, tf?.from, tf?.to]);
 
   const fetchPathSessions = async () => {
     if (!appId || !tf) return;
@@ -676,6 +684,19 @@ export function FlowSankey({
       }
       hits.sort((a, b) => b.start.localeCompare(a.start));
       setPathSessions(hits);
+      // then WHO they are — the comparison that answers the actual question
+      if (hits.length) {
+        setProfile("loading");
+        try {
+          const rows = await runDql<Record<string, unknown>>(
+            qCohortProfile(tf, appId, hits.map((h) => h.sid)), 400);
+          setProfile(rows.map((r) => ({
+            dim: String(r.dim), bucket: String(r.bucket),
+            inCohort: r.inCohort === true || r.inCohort === "true",
+            sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
+            fatal: Number(r.fatal) || 0 })));
+        } catch { setProfile([]); }
+      }
     } catch { setPathSessions([]); }
   };
 
@@ -831,12 +852,76 @@ export function FlowSankey({
             <button className="flow-sel__b"
               onClick={fetchPathSessions}
               disabled={pathSessions === "loading"}
-              title="Fetch the sessions matching this path — each opens in Users & Sessions">
-              {pathSessions === "loading" ? "matching…" : "open matching sessions"}
+              title="Profile the users on this path against everyone else — and open a matching session">
+              {pathSessions === "loading" ? "matching…" : "who takes this path"}
             </button>
             <button className="flow-sel__b" onClick={() => setPicks([])}>
               clear path ✕
             </button>
+          </div>
+        );
+      })()}
+
+      {/* WHO takes this path. Per dimension, the buckets over-represented in
+          the cohort against the rest of the application — share beside share,
+          the lift between them stated. Only lifts worth reading (≥1.3× and
+          ≥5 cohort sessions) survive; a dimension where nothing stands out
+          says so in one line rather than printing an even table. */}
+      {profile === "loading" && (
+        <div className="flow-prof"><em className="flow-sess__none">profiling the cohort…</em></div>
+      )}
+      {Array.isArray(profile) && (() => {
+        const dims = [...new Set(profile.map((r) => r.dim))];
+        const cohortN = Math.max(1, ...dims.map((d) => profile
+          .filter((r) => r.dim === d && r.inCohort).reduce((a, r) => a + r.sessions, 0)));
+        const restN = Math.max(1, ...dims.map((d) => profile
+          .filter((r) => r.dim === d && !r.inCohort).reduce((a, r) => a + r.sessions, 0)));
+        // outcome characteristics — errors and fatal, cohort vs rest — from any one dimension
+        const d0 = dims[0];
+        const oc = profile.filter((r) => r.dim === d0);
+        const rate = (inC: boolean, k: "hit" | "fatal") => {
+          const rows = oc.filter((r) => r.inCohort === inC);
+          const n = rows.reduce((a, r) => a + r.sessions, 0);
+          return n ? rows.reduce((a, r) => a + r[k], 0) / n : 0;
+        };
+        const lifts = dims.map((d) => {
+          const rows = profile.filter((r) => r.dim === d);
+          const inTot = rows.filter((r) => r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
+          const outTot = rows.filter((r) => !r.inCohort).reduce((a, r) => a + r.sessions, 0) || 1;
+          const buckets = [...new Set(rows.map((r) => r.bucket))].map((b) => {
+            const i = rows.find((r) => r.bucket === b && r.inCohort)?.sessions ?? 0;
+            const o = rows.find((r) => r.bucket === b && !r.inCohort)?.sessions ?? 0;
+            const si = i / inTot, so = o / outTot;
+            return { b, i, si, so, lift: so > 0 ? si / so : (si > 0 ? Infinity : 1) };
+          }).filter((x) => x.i >= 5 && x.lift >= 1.3)
+            .sort((a, b) => b.lift - a.lift).slice(0, 3);
+          return { d, buckets };
+        });
+        return (
+          <div className="flow-prof">
+            <div className="flow-prof__hd">
+              <b>who takes this path</b>
+              <em>{fmtN(cohortN)} in the cohort · {fmtN(restN)} everyone else ·
+                lift = the cohort&apos;s share ÷ everyone else&apos;s</em>
+            </div>
+            <div className="flow-prof__oc">
+              <span>hit by errors <b>{fmtPct(rate(true, "hit") * 100)}</b>
+                <em> vs {fmtPct(rate(false, "hit") * 100)}</em></span>
+              <span>crash / ANR <b>{fmtPct(rate(true, "fatal") * 100)}</b>
+                <em> vs {fmtPct(rate(false, "fatal") * 100)}</em></span>
+            </div>
+            {lifts.map(({ d, buckets }) => (
+              <div className="flow-prof__row" key={d}>
+                <span className="flow-prof__dim">{d}</span>
+                {buckets.length ? buckets.map((x) => (
+                  <span className="flow-prof__b" key={x.b}
+                    title={`${fmtN(x.i)} cohort sessions · ${fmtPct(x.si * 100)} of the cohort vs ${fmtPct(x.so * 100)} of everyone else`}>
+                    {x.b} <b>{x.lift === Infinity ? "only here" : `${x.lift.toFixed(1)}×`}</b>
+                    <em>{fmtPct(x.si * 100)} vs {fmtPct(x.so * 100)}</em>
+                  </span>
+                )) : <em className="flow-sess__none">nothing stands out</em>}
+              </div>
+            ))}
           </div>
         );
       })()}

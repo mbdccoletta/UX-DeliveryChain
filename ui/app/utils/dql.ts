@@ -261,6 +261,54 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | limit 2000`;
 
 /**
+ * WHO takes a path — the cohort profiled against everyone else.
+ *
+ * The reader's actual question behind "show me the sessions": what do the
+ * users who walk this exact route have in common, and how do they differ
+ * from the rest? A list of session ids cannot answer that; a comparison of
+ * distributions can. So: every session of the application, tagged in/out
+ * of the cohort by id (the ids come from the same mining the diagram used,
+ * so membership is provably the diagram's), then per dimension the SHARE of
+ * sessions in each bucket, cohort beside baseline. The over-representation
+ * between the two columns is the pattern.
+ *
+ * Dimensions are the ones RUM stamps on every event and this app has seen
+ * populated on this tenant: country, OS, OS version, device model, app
+ * version, connection type, user type, new-vs-returning. Each is a separate
+ * grouping so a null in one does not drop the row from the others. The
+ * per-session outcome columns (errors, crashes, duration) ride along as
+ * medians / rates, because "these users hit errors 3× more" is a
+ * characteristic too.
+ *
+ * Bounded: the id list is chunked by the caller (in-list of ~500) and the
+ * result is one row per (dimension, bucket) — hundreds, not thousands.
+ */
+export const qCohortProfile = (
+  tf: Timeframe, rumAppId: string, cohortIds: string[],
+) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const ids = cohortIds.slice(0, 500).map((i) => `"${i.replace(/["\\]/g, "")}"`).join(",");
+  const dim = (name: string, expr: string) => `
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}"
+  | summarize v = takeAny(${expr}), inCohort = takeAny(in(dt.rum.session.id, {${ids}})),
+      errs = countIf(characteristics.classifier == "error"),
+      crash = countIf(error.type == "crash" or error.type == "anr"),
+    by: { sid = dt.rum.session.id }
+  | filter isNotNull(v)
+  | summarize sessions = count(), hit = countIf(errs > 0), fatal = countIf(crash > 0),
+    by: { dim = "${name}", bucket = toString(v), inCohort } ]`;
+  return `
+data record(dim = "", bucket = "", inCohort = false, sessions = 0, hit = 0, fatal = 0)
+| filter false${dim("country", "geo.country.iso_code")}${dim("os", "os.name")}${
+    dim("os version", "os.version")}${dim("device", "device.model")}${
+    dim("app version", "app.short_version")}${dim("connection", "network.connection.type")}${
+    dim("user type", "dt.rum.user_type")}${dim("new user", "session.is_new_user")}
+| sort dim asc, sessions desc
+| limit 400`;
+};
+
+/**
  * Collapses the identifier-looking parts of a view name, so two sessions that
  * differ only by a product id or an order UUID count as the same journey.
  *

@@ -178,6 +178,28 @@ svg { shape-rendering: geometricPrecision; }
 .flow-empty em { display: block; margin-top: 6px; font-style: normal;
   font: 400 11px var(--mono); color: var(--ink-3); }
 
+/* who takes this path — the cohort's over-represented traits vs everyone else */
+.flow-prof { padding: 10px 14px 6px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 6px; }
+.flow-prof__hd { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink); }
+.flow-prof__hd em { font: 400 10px var(--mono); text-transform: none;
+  letter-spacing: 0; color: var(--ink-3); font-style: normal; }
+.flow-prof__oc { display: flex; gap: 18px; font: 500 11px var(--mono); color: var(--ink-2); }
+.flow-prof__oc b { color: var(--ink); }
+.flow-prof__oc em { color: var(--ink-3); font-style: normal; }
+.flow-prof__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font: 500 11px var(--mono); }
+.flow-prof__dim { min-width: 96px; color: var(--ink-3); text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 10px; }
+.flow-prof__b { display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 2px 9px; border-radius: 999px; color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.flow-prof__b b { color: var(--accent); }
+.flow-prof__b em { color: var(--ink-3); font-style: normal; font-size: 10px; }
+
 /* the sessions matching a custom path — chips that open the platform viewer */
 .flow-sess { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 8px 14px; border-top: 1px solid var(--border); }
