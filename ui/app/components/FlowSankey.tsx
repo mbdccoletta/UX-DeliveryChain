@@ -663,8 +663,10 @@ export function FlowSankey({
     if (!appId || !tf) return;
     setInfo("loading");
     try {
-      // 1. the cohort — the same mining the diagram used, so membership is
-      //    provably the ribbon's
+      // 1. the cohort — WHATEVER IS ON SCREEN. With waypoints picked, the
+      //    journeys passing through them; with none, every journey the flow
+      //    draws (matchesPicks against an empty list is true for all). Same
+      //    mining the diagram used, so membership is provably the ribbon's.
       const rows = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
       const ids: string[] = [];
       for (const r of rows) {
@@ -802,8 +804,8 @@ export function FlowSankey({
       {/* The custom path, stated: each waypoint in order, the isolated
           cohort's size, and the way out. Numbers on the canvas are already
           the cohort's own — the model was rebuilt from matching journeys. */}
-      {picks.length > 0 && (() => {
-        const app = appId ? apps.find((a) => a.appId === appId) : undefined;
+      {appId && mode === "steps" && (() => {
+        const app = apps.find((a) => a.appId === appId);
         if (!app) return null;
         const mine = seqs.filter((q) => q.appId === app.appId && q.journey.length > 0);
         const all = mine.reduce((a, q) => a + q.sessions, 0);
@@ -819,9 +821,10 @@ export function FlowSankey({
           const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);
           return st(a) - st(b);
         });
+        if (all === 0) return null;
         return (
           <div className="flow-sel flow-sel--path">
-            <span className="flow-sel__nm">custom path</span>
+            <span className="flow-sel__nm">{picks.length ? "custom path" : "whole flow"}</span>
             {orderly.map((id) => (
               <button key={id} className="flow-pick"
                 title="Remove this waypoint"
@@ -830,20 +833,25 @@ export function FlowSankey({
               </button>
             ))}
             <span className="flow-sel__num">
-              {fmtN(iso)} of {fmtN(all)} sessions
-              {all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}
+              {picks.length
+                ? <>{fmtN(iso)} of {fmtN(all)} sessions{all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}</>
+                : <>{fmtN(all)} sessions on screen · click views to narrow</>}
             </span>
             <div className="spacer" />
-            {/* the poster: who walks this route, laid over the screen */}
+            {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
+                narrowed one; the reader's rule: characteristics refer to
+                everything the screen currently shows */}
             <button className="flow-sel__b flow-sel__b--on"
               onClick={openInfographic}
               disabled={info === "loading"}
-              title="Draw the route's portrait over the screen — who takes it, on what, from where, with what outcome">
+              title="Draw the portrait of everything on screen — who these users are, on what, from where, with what outcome">
               {info === "loading" ? "drawing…" : "infographic ↗"}
             </button>
-            <button className="flow-sel__b" onClick={() => setPicks([])}>
-              clear path ✕
-            </button>
+            {picks.length > 0 && (
+              <button className="flow-sel__b" onClick={() => setPicks([])}>
+                clear path ✕
+              </button>
+            )}
           </div>
         );
       })()}
@@ -864,7 +872,8 @@ export function FlowSankey({
           return st(a) - st(b);
         });
         return (
-          <RouteInfographic rows={info} path={orderly.map(word)}
+          <RouteInfographic rows={info}
+            path={orderly.length ? orderly.map(word) : ["every journey on screen"]}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
             onClose={() => setInfo(null)} />
         );
