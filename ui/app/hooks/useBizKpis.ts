@@ -1,0 +1,72 @@
+// Business Control's numbers: this window and the one before it, per app.
+//
+// One scan (qBizKpis) returns both periods for every application; the page
+// does the deltas. Memoised per window — the panel is opened by a click and
+// re-read only when the window changes.
+import { useEffect, useState } from "react";
+import { qBizKpis, runDql, type Timeframe } from "../utils/dql";
+
+export interface BizPeriod {
+  sessions: number; realSessions: number; converted: number; convertedReal: number;
+  hitReal: number; fatalSessions: number;
+  engaged: number; actions: number; abandoned: number;
+  satisfied: number; tolerating: number; frustrated: number;
+}
+export interface BizKpis {
+  /** Per RUM app id: current and previous period. */
+  byApp: Map<string, { cur: BizPeriod; prev: BizPeriod }>;
+  estate: { cur: BizPeriod; prev: BizPeriod };
+}
+
+const ZERO: BizPeriod = { sessions: 0, realSessions: 0, converted: 0, convertedReal: 0,
+  hitReal: 0, fatalSessions: 0, engaged: 0, actions: 0, abandoned: 0,
+  satisfied: 0, tolerating: 0, frustrated: 0 };
+const add = (a: BizPeriod, b: BizPeriod): BizPeriod => ({
+  sessions: a.sessions + b.sessions, realSessions: a.realSessions + b.realSessions,
+  converted: a.converted + b.converted, convertedReal: a.convertedReal + b.convertedReal,
+  hitReal: a.hitReal + b.hitReal, fatalSessions: a.fatalSessions + b.fatalSessions,
+  engaged: a.engaged + b.engaged, actions: a.actions + b.actions,
+  abandoned: a.abandoned + b.abandoned, satisfied: a.satisfied + b.satisfied,
+  tolerating: a.tolerating + b.tolerating, frustrated: a.frustrated + b.frustrated });
+
+const memo = new Map<string, BizKpis>();
+
+export function useBizKpis(tf: Timeframe): BizKpis | null {
+  const key = `${tf.from}|${tf.to}`;
+  const [out, setOut] = useState<BizKpis | null>(memo.get(key) ?? null);
+
+  useEffect(() => {
+    const hit = memo.get(key);
+    if (hit) { setOut(hit); return; }
+    setOut(null);
+    let live = true;
+    (async () => {
+      try {
+        const rows = await runDql<Record<string, unknown>>(qBizKpis(tf), 200);
+        const byApp = new Map<string, { cur: BizPeriod; prev: BizPeriod }>();
+        let ec = ZERO, ep = ZERO;
+        for (const r of rows) {
+          const id = String(r.appId ?? "");
+          if (!id) continue;
+          const p: BizPeriod = {
+            sessions: Number(r.sessions) || 0, realSessions: Number(r.realSessions) || 0,
+            converted: Number(r.converted) || 0, convertedReal: Number(r.convertedReal) || 0,
+            hitReal: Number(r.hitReal) || 0, fatalSessions: Number(r.fatalSessions) || 0,
+            engaged: Number(r.engaged) || 0, actions: Number(r.actions) || 0,
+            abandoned: Number(r.abandoned) || 0, satisfied: Number(r.satisfied) || 0,
+            tolerating: Number(r.tolerating) || 0, frustrated: Number(r.frustrated) || 0 };
+          const slot = byApp.get(id) ?? { cur: ZERO, prev: ZERO };
+          if (r.period === "cur") { slot.cur = p; ec = add(ec, p); }
+          else { slot.prev = p; ep = add(ep, p); }
+          byApp.set(id, slot);
+        }
+        const res: BizKpis = { byApp, estate: { cur: ec, prev: ep } };
+        memo.set(key, res);
+        if (live) setOut(res);
+      } catch { if (live) setOut({ byApp: new Map(), estate: { cur: ZERO, prev: ZERO } }); }
+    })();
+    return () => { live = false; };
+  }, [key]);
+
+  return out;
+}

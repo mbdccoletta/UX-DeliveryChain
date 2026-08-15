@@ -404,6 +404,61 @@ data record(dim = "", bucket = "", inCohort = false, sessions = 0, hit = 0, fata
 };
 
 /**
+ * Business Control — the KPIs of both fronts, this window beside the one
+ * before it of the same length, per application and for the estate.
+ *
+ * A control panel needs the trend, not a sentence about it. So one query
+ * measures the same eight per-session facts twice: `cur` over the window on
+ * screen and `prev` over the window immediately before it, both derived from
+ * the same DQL expressions the screen already uses (real user = not robot,
+ * not synthetic; hit = a session with an error; fatal = crash or anr; engaged
+ * = more than one view; abandoned = an action ended by page_hide; the Apdex
+ * bands over user actions). The panel does the deltas.
+ *
+ * `prev` is expressed as `now()-2×span` → `now()-span` for rolling windows —
+ * the only shape a "before" can take without knowing the calendar; for an
+ * absolute range the caller passes its own start and the same span. Rows
+ * carry the RUM app id so per-application tiles and the estate tile come
+ * from one scan.
+ */
+export const qBizKpis = (tf: Timeframe) => {
+  const span = `${Math.max(1, Math.round(tf.minutes))}m`;
+  // a session "converted" if any of its views names an outcome — the same
+  // keyword set reachesOutcome() uses, expressed for DQL as contains-any
+  const DONE_MATCH = ["checkout", "payment", "purchase", "confirm", "success",
+    "complete", "booked", "receipt", "thank"]
+    .map((w) => `contains(vn, "${w}")`).join(" or ");
+  const both = (label: string, from: string, to: string) => `
+| append [ fetch user.events, from: ${from}, to: ${to}
+  | fieldsAdd real = not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
+  | fieldsAdd vn = lower(coalesce(view.name, view.detected_name, ""))
+  | fieldsAdd done1 = if(${DONE_MATCH}, 1, else: 0)
+  | summarize isReal = takeAny(real), conv = max(done1),
+      errs = countIf(characteristics.classifier == "error"),
+      fatal = countIf(error.type == "crash" or error.type == "anr"),
+      views = countIf(characteristics.classifier == "view_summary"),
+      acts = countIf(characteristics.classifier == "user_action"),
+      aband = countIf(characteristics.classifier == "user_action" and user_action.complete_reason == "page_hide"),
+      sat = countIf(characteristics.classifier == "user_action" and toLong(duration) <= ${APDEX_T_NS}),
+      tol = countIf(characteristics.classifier == "user_action" and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
+      fru = countIf(characteristics.classifier == "user_action" and toLong(duration) > ${APDEX_4T_NS}),
+    by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
+  | filter isNotNull(appId) and appId != ""
+  | summarize sessions = count(), realSessions = countIf(isReal),
+      converted = countIf(conv == 1), convertedReal = countIf(isReal and conv == 1),
+      hitReal = countIf(isReal and errs > 0), fatalSessions = countIf(fatal > 0),
+      engaged = countIf(views > 1), actions = sum(acts), abandoned = sum(aband),
+      satisfied = sum(sat), tolerating = sum(tol), frustrated = sum(fru),
+    by: { appId, period = "${label}" } ]`;
+  return `
+data record(appId = "", period = "", sessions = 0, realSessions = 0, converted = 0,
+  convertedReal = 0, hitReal = 0, fatalSessions = 0,
+  engaged = 0, actions = 0, abandoned = 0, satisfied = 0, tolerating = 0, frustrated = 0)
+| filter false${both("cur", tf.from, tf.to)}${both("prev", `${tf.from}-${span}`, tf.from)}
+| limit 200`;
+};
+
+/**
  * Collapses the identifier-looking parts of a view name, so two sessions that
  * differ only by a product id or an order UUID count as the same journey.
  *
