@@ -71,7 +71,9 @@ export function RouteInfographic({ rows, path, appName, cohort, total, onClose }
       aria-label={`Who takes this route through ${appName}`}>
       <div className="rinfo" onClick={(e) => e.stopPropagation()}>
         <header className="rinfo__hd">
-          <span className="rinfo__eyebrow">WHO TAKES THIS ROUTE · {appName}</span>
+          <span className="rinfo__eyebrow">
+            {path.length === 1 && path[0] === "every journey on screen"
+              ? "WHO THESE USERS ARE" : "WHO TAKES THIS ROUTE"} · {appName}</span>
           <h2 className="rinfo__path">
             {path.map((p, i) => (
               <React.Fragment key={i}>
@@ -82,7 +84,8 @@ export function RouteInfographic({ rows, path, appName, cohort, total, onClose }
           </h2>
           <div className="rinfo__cohort">
             <b className="num">{fmtN(cohort)}</b>
-            <span>sessions on this route · {total ? fmtPct(cohort / total) : "—"} of {fmtN(total)}</span>
+            <span>{cohort === total ? "sessions — the whole flow"
+              : `sessions on this route · ${total ? fmtPct(cohort / total) : "—"} of ${fmtN(total)}`}</span>
           </div>
           <button className="drawer__x" onClick={onClose} aria-label="Close">✕</button>
         </header>
