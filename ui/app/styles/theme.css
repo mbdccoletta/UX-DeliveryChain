@@ -200,6 +200,26 @@ svg { shape-rendering: geometricPrecision; }
 .flow-prof__b b { color: var(--accent); }
 .flow-prof__b em { color: var(--ink-3); font-style: normal; font-size: 10px; }
 
+/* the pivot's controls and table */
+.flow-prof__ctl { display: inline-flex; align-items: center; gap: 6px;
+  font: 500 10px var(--mono); text-transform: none; letter-spacing: 0;
+  color: var(--ink-3); }
+.flow-prof__ctl select { font: 600 11px var(--mono); color: var(--ink);
+  background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px;
+  padding: 2px 6px; }
+.flow-pv { width: 100%; border-collapse: collapse; font: 500 11px var(--mono); }
+.flow-pv th { text-align: left; font: 600 9px var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border); }
+.flow-pv td { padding: 5px 8px; border-bottom: 1px solid var(--border);
+  color: var(--ink-2); white-space: nowrap; }
+.flow-pv td b { color: var(--ink); }
+.flow-pv td em { color: var(--ink-3); font-style: normal; font-size: 10px; }
+.flow-pv__b { color: var(--ink) !important; max-width: 260px; overflow: hidden;
+  text-overflow: ellipsis; }
+.flow-pv--up { color: var(--accent) !important; font-weight: 700; }
+.flow-pv--down { color: var(--ink-3) !important; }
+
 /* the sessions matching a custom path — chips that open the platform viewer */
 .flow-sess { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 8px 14px; border-top: 1px solid var(--border); }
