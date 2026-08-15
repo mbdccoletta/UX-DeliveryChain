@@ -43,7 +43,7 @@ const TABS: Array<[Tab, string, string]> = [
   // without losing the application or the window.
   ["flow", "Journeys", "Where users go and how they get there"],
   ["health", "Health", "The environment as a whole, aggregated"],
-  ["report", "Insights", "Protect the brand · deliver personalised journeys — in the business's own numbers"],
+  ["report", "Business Control", "Two fronts, one board — numbers and trends, this window against the last"],
 ];
 /** Everything a link has to carry for someone else to see the same screen. */
 /** The window the app opens on, in the selector's own grammar. */
