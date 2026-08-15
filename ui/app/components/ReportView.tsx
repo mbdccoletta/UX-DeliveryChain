@@ -37,6 +37,8 @@ export function ReportView({ data, onGo }: {
   const [anon, setAnon] = useState(true);
   const [ticket, setTicket] = useState<string>("");
   const [sym, setSym] = useState("$");
+  // the whole estate by default; one application when the reader narrows it
+  const [scopeApp, setScopeApp] = useState<string>("");
   const kpis = useBizKpis(data.tf);
   const aliases = useMemo(() => aliasMap(data), [data]);
   const nameOf = (id: string) => {
@@ -59,7 +61,11 @@ export function ReportView({ data, onGo }: {
       engagedShare: (s?.sessions ?? 0) ? (s?.engaged ?? 0) / (s?.sessions ?? 1) : 0,
     };
   };
-  const c = f(kpis?.estate.cur), p = f(kpis?.estate.prev);
+  // scope: one application's own two periods, or the estate's
+  const scoped = scopeApp ? kpis?.byApp.get(scopeApp) : undefined;
+  const curP = scopeApp ? scoped?.cur : kpis?.estate.cur;
+  const prevP = scopeApp ? scoped?.prev : kpis?.estate.prev;
+  const c = f(curP), p = f(prevP);
 
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
     if (!kpis) return <div className="bc__hero bc__hero--load" />;
@@ -100,9 +106,10 @@ export function ReportView({ data, onGo }: {
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
     const t = trend(cv, pv, riseIsGood);
-    const top = mover ? [...kpis.byApp.entries()]
+    const top = (mover && !scopeApp) ? [...kpis.byApp.entries()]
       .map(([id, v]) => ({ id, v: mover(v.cur) }))
-      .filter((m) => m.v > 0).sort((a, b) => b.v - a.v)[0] : null;
+      .filter((m) => m.v > 0).sort((a, b) => b.v - a.v)[0]
+      : (mover && scopeApp) ? { id: scopeApp, v: mover(scoped?.cur ?? {} as BizPeriod) } : null;
     return (
       <div className="bc__stat">
         <span className="bc__stat-l">{label}</span>
@@ -127,6 +134,24 @@ export function ReportView({ data, onGo }: {
         <span className="lbl">Business Control</span>
         <span className="hint">{data.tf.label} vs the {data.tf.label} before · measured, not estimated</span>
         <div className="spacer" />
+        <select className="bc__scope" value={scopeApp}
+          onChange={(e) => setScopeApp(e.target.value)}
+          aria-label="Application scope"
+          title="Scope the whole board to one application, or the whole estate">
+          <option value="">All applications</option>
+          {data.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-")).length > 0 && (
+            <optgroup label="Web">
+              {data.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-"))
+                .map((a) => <option key={a.appId} value={a.appId}>{nameOf(a.appId)}</option>)}
+            </optgroup>
+          )}
+          {data.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-")).length > 0 && (
+            <optgroup label="Mobile">
+              {data.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-"))
+                .map((a) => <option key={a.appId} value={a.appId}>{nameOf(a.appId)}</option>)}
+            </optgroup>
+          )}
+        </select>
         <label className="bc__ticket" title="Value of one conversion — turns customers into revenue. Blank = customers only.">
           <span>{sym}</span>
           <input inputMode="decimal" placeholder="value / conversion"
@@ -154,7 +179,11 @@ export function ReportView({ data, onGo }: {
               fmt={(v) => fmtN(Math.round(v))} riseIsGood={false} tab="home" mover={(pp) => pp.fatalSessions} />
             <Stat label="brand health (0–100)" cur={c.reputationIndex} prev={p.reputationIndex}
               fmt={(v) => `${Math.round(v * 100)}`} riseIsGood={true} tab="chain" />
-            <Stat label="open incidents" cur={data.problems.length} prev={data.problems.length}
+            <Stat label="open incidents"
+              cur={scopeApp ? data.problems.filter((pr) => (pr.entityIds ?? [])
+                    .some((e) => e.toLowerCase().includes(scopeApp))).length : data.problems.length}
+              prev={scopeApp ? data.problems.filter((pr) => (pr.entityIds ?? [])
+                    .some((e) => e.toLowerCase().includes(scopeApp))).length : data.problems.length}
               fmt={(v) => fmtN(v)} riseIsGood={false} tab="chain" />
           </div>
         </div>
@@ -180,8 +209,10 @@ export function ReportView({ data, onGo }: {
               <Stat label="reached first screen only" cur={1 - c.engagedShare} prev={1 - p.engagedShare}
                 fmt={pct} riseIsGood={false} tab="flow" />
             )}
-            <Stat label="active applications" cur={data.apps.length} prev={data.apps.length}
-              fmt={(v) => fmtN(v)} riseIsGood={true} tab="home" />
+            <Stat label={scopeApp ? "customers who bounced" : "active applications"}
+              cur={scopeApp ? (c.customers - Math.round(c.engagedShare * (curP?.sessions ?? 0))) : data.apps.length}
+              prev={scopeApp ? (p.customers - Math.round(p.engagedShare * (prevP?.sessions ?? 0))) : data.apps.length}
+              fmt={(v) => fmtN(v)} riseIsGood={false} tab={scopeApp ? "flow" : "home"} />
           </div>
         </div>
       </section>
