@@ -7,11 +7,10 @@
 // optional and honest: the platform does not know what a conversion is worth,
 // so the reader supplies the ticket value and every money figure derives from
 // it live; with the field blank the board speaks in customers, which needs no
-// assumption. Anonymised by default so it can leave the building.
-import React, { useMemo, useState } from "react";
+// assumption.
+import React, { useState } from "react";
 import type { ChainData } from "../hooks/useChainData";
 import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
-import { aliasMap } from "../utils/appAlias";
 import { fmtN } from "../utils/dql";
 
 type Dir = "good" | "bad" | "flat";
@@ -34,18 +33,13 @@ export function ReportView({ data, onGo }: {
   data: ChainData;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
-  const [anon, setAnon] = useState(true);
   const [ticket, setTicket] = useState<string>("");
   const [sym, setSym] = useState("$");
   // the whole estate by default; one application when the reader narrows it
   const [scopeApp, setScopeApp] = useState<string>("");
   const kpis = useBizKpis(data.tf);
-  const aliases = useMemo(() => aliasMap(data), [data]);
-  const nameOf = (id: string) => {
-    const a = data.apps.find((x) => x.appId === id);
-    if (!a) return id.slice(0, 8);
-    return anon ? aliases.get(a.name) ?? a.name : a.name;
-  };
+  const nameOf = (id: string) =>
+    data.apps.find((x) => x.appId === id)?.name ?? id.slice(0, 8);
   const tv = Number(ticket) > 0 ? Number(ticket) : null;
 
   const f = (s?: BizPeriod) => {
@@ -160,12 +154,6 @@ export function ReportView({ data, onGo }: {
             {["$", "€", "£", "R$"].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
-        <div className="seg" role="group" aria-label="Identity">
-          <button className={anon ? "on" : ""} aria-pressed={anon} onClick={() => setAnon(true)}
-            title="Application names replaced by aliases — safe to share">anonymized</button>
-          <button className={!anon ? "on" : ""} aria-pressed={!anon} onClick={() => setAnon(false)}
-            title="Real names — internal use">named</button>
-        </div>
       </div>
 
       <section className="bc__front" style={{ ["--fh" as string]: "var(--t-pink)" }}>
