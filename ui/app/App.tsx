@@ -43,7 +43,7 @@ const TABS: Array<[Tab, string, string]> = [
   // without losing the application or the window.
   ["flow", "Journeys", "Where users go and how they get there"],
   ["health", "Health", "The environment as a whole, aggregated"],
-  ["report", "Report", "What is worth telling someone who will not read a chart"],
+  ["report", "Insights", "Protect the brand · deliver personalised journeys — in the business's own numbers"],
 ];
 /** Everything a link has to carry for someone else to see the same screen. */
 /** The window the app opens on, in the selector's own grammar. */
@@ -266,7 +266,12 @@ export function App() {
                 onHighlightClear={() => set({ hl: null }, false)} />
             </Boundary>
           )}
-          {tab === "report" && <Boundary label="Report"><ReportView data={d} /></Boundary>}
+          {tab === "report" && (
+            <Boundary label="Report">
+              <ReportView data={d}
+                onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null, hl: hl ?? null })} />
+            </Boundary>
+          )}
 
           {tab === "health" && (
             <div className="stack">

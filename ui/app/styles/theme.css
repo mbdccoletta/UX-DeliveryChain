@@ -445,6 +445,37 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .ins__none { font: 400 12px var(--sans); color: var(--ink-3); line-height: 1.5; }
 
 /* executive report */
+/* ── business insights: two fronts, fact → consequence → action ── */
+.biz { display: flex; flex-direction: column; gap: 12px; }
+.biz__hd { padding: 18px 20px 14px; border-radius: 14px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--fh) 16%, var(--panel)),
+    color-mix(in srgb, var(--fh) 4%, var(--panel)));
+  border: 1px solid color-mix(in srgb, var(--fh) 40%, var(--border)); }
+.biz__title { margin: 0; font: 700 22px var(--sans); color: #fff; letter-spacing: -0.01em; }
+.biz__sub { margin: 4px 0 14px; font: 400 13px var(--sans); color: var(--ink-2); }
+.biz__kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.biz__kpi { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px;
+  border-radius: 10px; background: rgba(255,255,255,0.05);
+  border-bottom: 2px solid var(--kt); }
+.biz__kpi .num { font-size: 26px; color: #fff; line-height: 1.1; }
+.biz__kpi span { font: 600 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); }
+.biz__card { border-left: 3px solid var(--sv); padding: 14px 18px; }
+.biz__meta { display: flex; gap: 10px; align-items: baseline; margin-bottom: 4px; }
+.biz__w { font: 700 11px var(--mono); color: var(--sv); text-transform: uppercase; letter-spacing: 0.08em; }
+.biz__app { font: 500 11px var(--mono); color: var(--ink-3); }
+.biz__claim { margin: 0 0 6px; font: 600 16px var(--sans); color: var(--ink); line-height: 1.3; }
+.biz__fact { margin: 0 0 8px; font: 400 12px var(--mono); color: var(--ink-3); line-height: 1.5;
+  max-width: 96ch; }
+.biz__why { margin: 0 0 10px; font: 400 13px var(--sans); color: var(--ink-2); line-height: 1.55;
+  max-width: 88ch; }
+.biz__why b { color: var(--fh); font-weight: 600; margin-right: 6px; }
+.biz__go { font: 600 12px var(--mono); color: var(--accent); background: none; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-2)); border-radius: 8px;
+  padding: 6px 12px; }
+.biz__go:hover, .biz__go:focus-visible { border-color: var(--accent); }
+.biz__none { padding: 14px 18px; font: 400 13px var(--sans); color: var(--ink-3); }
+
 .rp__f { border-left: 2px solid var(--sv); }
 .rp__meta { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
 .rp__sev { font: 700 12px var(--mono); color: var(--sv); text-transform: uppercase;
