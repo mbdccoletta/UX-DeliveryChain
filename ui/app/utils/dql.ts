@@ -326,18 +326,55 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 };
 
 /**
- * The route's INFOGRAPHIC, in one query: who walks it, on what, from where,
- * with what outcome — cohort beside everyone else, every panel at once.
+ * Every session CHARACTERISTIC the platform records, for the infographic.
  *
- * The pivot answers one dimension per query for an analyst; the infographic
- * is a poster, and a poster cannot wait for six round trips. So this brings
- * back the top buckets of every dimension the poster draws (country, OS,
- * device/browser, app version, connection, user type, entry view) plus the
- * outcome rates and durations, for both sides, in a single scan — the same
- * append-of-summaries shape verified for qCohortProfile on guu84124.
+ * "All available" was measured, not assumed: the field inventory of
+ * user.events was read off both a web and a mobile application on guu84124
+ * and reduced to the categorical, session-describing fields — who the user
+ * is, on what, from where. The rest of the schema (performance.*,
+ * web_vitals.*, interaction.*, error.*) is measurement, not
+ * characteristic, and already enters the poster as outcome.
+ *
+ * Every dimension is queried for every application; one that this
+ * application does not record returns no bucket and the poster simply does
+ * not draw it. Web-only fields (browser, DPR, protocol, navigation type,
+ * page domain) and mobile-only ones (manufacturer, model, rooted, app
+ * version, bundle, connection) coexist here for that reason.
+ */
+export const INFO_DIMS: Array<{ id: string; label: string; expr: string }> = [
+  { id: "country",  label: "country",          expr: "geo.country.iso_code" },
+  { id: "isp",      label: "isp / carrier",    expr: "client.isp" },
+  { id: "os",       label: "os",               expr: "os.name" },
+  { id: "osv",      label: "os version",       expr: "os.version" },
+  { id: "browser",  label: "browser",          expr: "browser.name" },
+  { id: "browserv", label: "browser version",  expr: "browser.version" },
+  { id: "devtype",  label: "device type",      expr: "device.type" },
+  { id: "manuf",    label: "manufacturer",     expr: "device.manufacturer" },
+  { id: "model",    label: "device model",     expr: "device.model.identifier" },
+  { id: "rooted",   label: "rooted device",    expr: "toString(device.is_rooted)" },
+  { id: "screen",   label: "screen",
+    expr: "concat(toString(device.screen.width), \"×\", toString(device.screen.height))" },
+  { id: "dpr",      label: "pixel ratio",      expr: "toString(browser.window.device_pixel_ratio)" },
+  { id: "orient",   label: "orientation",      expr: "device.orientation" },
+  { id: "conn",     label: "connection",       expr: "network.connection.type" },
+  { id: "proto",    label: "network protocol", expr: "network.protocol.name" },
+  { id: "utype",    label: "user type",        expr: "dt.rum.user_type" },
+  { id: "appv",     label: "app version",      expr: "app.short_version" },
+  { id: "bundle",   label: "app bundle",       expr: "app.bundle" },
+  { id: "agentv",   label: "agent version",    expr: "dt.rum.agent.version" },
+  { id: "navtype",  label: "navigation type",  expr: "navigation.type" },
+  { id: "pagedom",  label: "page domain",      expr: "page.url.domain" },
+];
+
+/**
+ * The route's INFOGRAPHIC, in one query: every characteristic above, cohort
+ * beside everyone else, plus the outcome measures — the append-of-summaries
+ * shape verified on guu84124. Twenty-one dimensions plus the entry view is
+ * twenty-two scans of the window; the poster is opened by a click and only
+ * by a click, so the cost is paid once per question.
  */
 export const qRouteInfographic = (
-  tf: Timeframe, rumAppId: string, cohortIds: string[], isMobile: boolean,
+  tf: Timeframe, rumAppId: string, cohortIds: string[],
 ) => {
   const app = rumAppId.replace(/["\\]/g, "");
   const ids = cohortIds.slice(0, 500).map((i) => `"${i.replace(/["\\]/g, "")}"`).join(",");
@@ -359,14 +396,11 @@ export const qRouteInfographic = (
     + per.replace("DIM", `v = takeAny(${expr})`).replace("NAME", name);
   const entry = "\n| append [ fetch user.events, from: " + tf.from + ", to: " + tf.to
     + `\n  | filter characteristics.classifier == "navigation" or characteristics.classifier == "view_summary"\n  | sort start_time asc`
-    + per.replace("DIM", "v = takeFirst(coalesce(view.name, view.detected_name))").replace("NAME", "entry");
+    + per.replace("DIM", "v = takeFirst(coalesce(view.name, view.detected_name))").replace("NAME", "entry view");
   return `
 data record(dim = "", bucket = "", inCohort = false, sessions = 0, hit = 0, fatal = 0, p50dur = 0, p50views = 0)
-| filter false${dim("country", "geo.country.iso_code")}${dim("os", "os.name")}${
-    isMobile ? dim("device", "device.manufacturer") : dim("browser", "browser.name")}${
-    isMobile ? dim("app version", "app.short_version") : dim("device type", "device.type")}${
-    dim("connection", isMobile ? "network.connection.type" : "dt.rum.user_type")}${entry}
-| limit 400`;
+| filter false${INFO_DIMS.map((d) => dim(d.label, d.expr)).join("")}${entry}
+| limit 1200`;
 };
 
 /**
