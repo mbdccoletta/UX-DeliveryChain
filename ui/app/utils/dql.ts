@@ -424,6 +424,44 @@ data record(appId = "", period = "", kind = "", bucket = "", views = 0, meas = 0
 | limit 400`;
 };
 
+/**
+ * WHAT "NO PAGE TELEMETRY" IS — the sessions the path mining never saw,
+ * unpacked. Measured before designed: 94% of them carry exactly ONE stray
+ * event (~70 ms) of the "other" classifier WITH a page path — the session was
+ * on a real page, its navigation just fell outside the window (window-edge
+ * sessions and lone beacons); a few are request-only API traffic; some are
+ * robots. Two legs: the composition, and the pages those stray beacons name
+ * (per-session collectDistinct expanded back out — verified on the tenant).
+ */
+export const qNoTelemetry = (tf: Timeframe, rumAppId: string) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const base = `fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}"
+  | summarize navs = countIf(characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary"),
+      reqs = countIf(characteristics.classifier == "request"),
+      n = count(), pages = collectDistinct(page.url.path),
+      isReal = takeAny(dt.rum.user_type == "real_user"),
+      dur = max(toLong(duration)),
+    by: { sid = dt.rum.session.id }
+  | filter navs == 0`;
+  return `
+data record(kind = "", bucket = "", sessions = 0, real = 0, robots = 0,
+  oneEvent = 0, reqOnly = 0, p50dur = 0)
+| filter false
+| append [ ${base}
+  | summarize sessions = count(), real = countIf(isReal), robots = countIf(not(isReal)),
+      oneEvent = countIf(n == 1), reqOnly = countIf(reqs > 0),
+      p50dur = percentile(dur, 50),
+    by: { kind = "mix", bucket = "" } ]
+| append [ ${base}
+  | expand pg = pages
+  | filter isNotNull(pg)
+  | summarize sessions = count(), by: { kind = "page", bucket = pg }
+  | sort sessions desc | limit 8 ]
+| limit 20`;
+};
+
 /** The outcome-keyword match, per event, over _vn (the lowercased view name). */
 const DONE_DQL = ["checkout", "payment", "purchase", "confirm", "success",
   "complete", "booked", "receipt", "thank"].map((w) => `contains(_vn, "${w}")`).join(" or ");

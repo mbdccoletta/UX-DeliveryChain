@@ -529,6 +529,13 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
 .bc__cost-verdict b { font-size: 22px; color: var(--bad); }
 .bc__cost-verdict em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
+/* "no page telemetry", unpacked */
+.ntel { width: min(660px, 92vw); max-height: 86vh; overflow-y: auto; margin: auto;
+  background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px;
+  padding: 22px 26px; display: flex; flex-direction: column; gap: 16px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.55); }
+.ntel__pages h3 { margin: 0 0 8px; font: 700 10px var(--mono); letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3); }
 /* where the difficulty lives */
 .bc__diff { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px;
   padding: 16px 18px; border-radius: 14px; background: var(--panel-2);
