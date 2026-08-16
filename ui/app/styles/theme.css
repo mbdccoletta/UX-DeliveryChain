@@ -1148,6 +1148,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-core__ic { color: #fff; width: 32px; height: 32px; }
 .tk-core__ic svg { width: 32px; height: 32px;
   filter: drop-shadow(0 0 9px rgba(255, 255, 255, 0.55)); }
+.tk-core__pct--word, .cc .tk-core__pct--word { font-size: 30px; letter-spacing: 0.02em;
+  text-transform: uppercase; }
 .tk-core__pct { font-size: 40px; color: #fff; line-height: 1;
   text-shadow: 0 0 16px rgba(255, 255, 255, 0.35); }
 .tk-core__cap { font: 700 9px var(--mono); color: rgba(255, 255, 255, 0.7);
@@ -1934,6 +1936,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   .cc .cc-bars i { width: 4px; }
   /* the core in proportion to its neighbours */
   .cc .tk-core__pct { font-size: 52px; }
+  .cc .tk-core__pct--word { font-size: 38px; }
   .cc .tk-core__nm { font-size: 19px; }
   .cc .tk-core__ic, .cc .tk-core__ic svg { width: 40px; height: 40px; }
   .cc .tk-core__b { padding: 26px 20px 20px; }
