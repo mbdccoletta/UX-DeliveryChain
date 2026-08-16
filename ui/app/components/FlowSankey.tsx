@@ -82,6 +82,10 @@ const OUTCOME: Record<string, { id: string; nm: string; tone: Tone; sub: string 
   "st-none": { id: "o-blind", nm: "Invisible to the business", tone: "bad", sub: "instrumentation gap" },
 };
 
+/** A route node's id IS its journey — stable across model rebuilds, so a
+ *  picked route stays ringed when the diagram is re-mined from the cohort. */
+const routeId = (journey: string[]) => "jp-" + journey.join("\u0001");
+
 /** Builds nodes and ribbons from sessions per application and mined sequences. */
 export function buildModel(apps: AppRow[], seqs: SeqRow[]) {
   const nodes: Node[] = [];
@@ -180,8 +184,8 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0) {
   const MAX = 9;
   const worst = mine.filter((s) => abandons(s.journey)).sort((a, b) => b.sessions - a.sessions)[0];
   let covered = 0;
-  mine.slice(0, MAX).forEach((s, i) => {
-    const id = `j-${i}`;
+  mine.slice(0, MAX).forEach((s) => {
+    const id = routeId(s.journey);
     const label = s.journey.join(" → ");
     nodes.push({ id, c: 1, nm: label.length > 34 ? label.slice(0, 33) + "…" : label,
       full: label.length > 34 ? label : undefined,
@@ -419,6 +423,45 @@ export function FlowSankey({
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
   stepModeRef.current = !!appId && mode === "steps";
+  const pathsModeRef = useRef(false);
+  pathsModeRef.current = !!appId && mode === "paths";
+
+  /* Route mode picks too, by request: routes and stages are the pickable
+   * points. Ids carry their own meaning here as well — `jp-<journey>` is one
+   * route, `j-rest` the folded remainder, `st-*` a furthest-stage — and a
+   * session matches when it satisfies every column that has picks: any picked
+   * route (union within the column) AND any picked stage. */
+  const pathCtx = React.useMemo(() => {
+    const app = appId ? apps.find((a) => a.appId === appId) : undefined;
+    if (!app) return null;
+    const mine = seqs.filter((q) => q.appId === app.appId)
+      .sort((a, b) => b.sessions - a.sessions);
+    return {
+      top: new Set(mine.slice(0, 9).map((q) => routeId(q.journey))),
+      outcomes: mine.some((q) => reachesOutcome(q.journey)),
+      deepest: deepestOf(mine),
+    };
+  }, [apps, seqs, appId]);
+
+  const matchesRoutePicks = (journey: string[], pk: string[]): boolean => {
+    if (!pk.length) return true;
+    const routes = pk.filter((id) => id.startsWith("jp-") || id === "j-rest");
+    const stages = pk.filter((id) => id.startsWith("st-"));
+    if (routes.length) {
+      const key = routeId(journey);
+      const inTop = pathCtx?.top.has(key) ?? false;
+      if (!routes.some((id) => (id === "j-rest" ? !inTop : id === key))) return false;
+    }
+    if (stages.length) {
+      const st = stageOf(journey, pathCtx?.outcomes ?? true, pathCtx?.deepest ?? 0).id;
+      if (!stages.includes(st)) return false;
+    }
+    return true;
+  };
+
+  /** The pick predicate of whichever view is on screen. */
+  const matchesMode = (journey: string[], pk: string[]): boolean =>
+    stepModeRef.current ? matchesPicks(journey, pk) : matchesRoutePicks(journey, pk);
 
   /** Does this journey pass through every picked point? */
   const matchesPicks = (journey: string[], pk: string[]): boolean => {
@@ -444,13 +487,21 @@ export function FlowSankey({
     const app = appId ? apps.find((a) => a.appId === appId) : undefined;
     const fragmentsOf = (id: string) => ux?.get(id)?.fragments ?? 0;
   const stepMode = !!app && mode === "steps";
-    const seqsIn = stepMode && picks.length
-      ? seqs.filter((q) => q.appId !== app!.appId || matchesPicks(q.journey, picks))
+    const seqsIn = app && picks.length
+      ? seqs.filter((q) => q.appId !== app.appId ||
+          (stepMode ? matchesPicks(q.journey, picks) : matchesRoutePicks(q.journey, picks)))
       : seqs;
+    // route mode + picks: the model is remined from the matching journeys
+    // only, and the application node shrinks to the isolated cohort — no
+    // remainder is invented for the sessions filtered away
+    const isoApp = app && !stepMode && picks.length
+      ? { ...app, sessions: seqsIn.filter((q) => q.appId === app.appId)
+            .reduce((a, q) => a + q.sessions, 0) + fragmentsOf(app.appId) }
+      : app;
     const built = !app ? { ...buildModel(apps, seqs),
                            cols: ["Application", "Furthest stage reached", "Session outcome"] }
       : stepMode ? buildStepModel(app, seqsIn, transitions)
-      : { ...buildAppModel(app, seqs, app ? fragmentsOf(app.appId) : 0),
+      : { ...buildAppModel(isoApp!, seqsIn, fragmentsOf(app.appId)),
           cols: ["Application", "Navigation path", "Furthest stage reached"] };
     const { nodes, links, cols } = built;
 
@@ -657,7 +708,7 @@ export function FlowSankey({
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks]);
+  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks, pathCtx]);
 
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
@@ -697,7 +748,7 @@ export function FlowSankey({
         for (const r of pr) {
           const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
             .map(normalizeView).filter((v, k, a) => k === 0 || v !== a[k - 1]);
-          if (journey.length && matchesPicks(journey, picks)) set.add(String(r.sid));
+          if (journey.length && matchesMode(journey, picks)) set.add(String(r.sid));
         }
         return set;
       })();
@@ -766,6 +817,15 @@ export function FlowSankey({
      * journeys passing through all of them. The folded "N other views" node
      * is not a point on any path, so it only opens its panel. */
     if (stepModeRef.current && !hit.id.startsWith("more-")) {
+      setPicks((cur) => cur.includes(hit.id)
+        ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
+      setSelNode(hit); setSel(hit.id);
+      return;
+    }
+    /* Route mode: routes (jp-…, the folded remainder) and stages narrow the
+     * flow the same way; the poster then reads exactly what is on screen. */
+    if (pathsModeRef.current
+        && (hit.id.startsWith("jp-") || hit.id === "j-rest" || hit.id.startsWith("st-"))) {
       setPicks((cur) => cur.includes(hit.id)
         ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
       setSelNode(hit); setSel(hit.id);
@@ -860,27 +920,31 @@ export function FlowSankey({
       {/* The custom path, stated: each waypoint in order, the isolated
           cohort's size, and the way out. Numbers on the canvas are already
           the cohort's own — the model was rebuilt from matching journeys. */}
-      {appId && mode === "steps" && (() => {
+      {appId && (() => {
         const app = apps.find((a) => a.appId === appId);
         if (!app) return null;
+        const steps = mode === "steps";
         const mine = seqs.filter((q) => q.appId === app.appId && q.journey.length > 0);
         const all = mine.reduce((a, q) => a + q.sessions, 0);
-        const iso = mine.filter((q) => matchesPicks(q.journey, picks))
+        const iso = mine.filter((q) => (steps ? matchesPicks : matchesRoutePicks)(q.journey, picks))
           .reduce((a, q) => a + q.sessions, 0);
+        const names = new Map(a11yModel.nodes.map((n) => [n.id, n.nm]));
         const word = (id: string) => {
+          if (!steps) return names.get(id) ?? id.replace(/^jp-/, "").split("\u0001").join(" → ");
           const end = /^(done|exit)-(\d+)$/.exec(id);
           if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
           const m = /^n(\d+)-([\s\S]*)$/.exec(id);
           return m ? `${Number(m[1]) + 1}º ${m[2]}` : id;
         };
-        const orderly = [...picks].sort((a, b) => {
+        const orderly = steps ? [...picks].sort((a, b) => {
           const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);
           return st(a) - st(b);
-        });
+        }) : picks;
         if (all === 0) return null;
         return (
           <div className="flow-sel flow-sel--path">
-            <span className="flow-sel__nm">{picks.length ? "custom path" : "whole flow"}</span>
+            <span className="flow-sel__nm">
+              {picks.length ? (steps ? "custom path" : "custom selection") : "whole flow"}</span>
             {orderly.map((id) => (
               <button key={id} className="flow-pick"
                 title="Remove this waypoint"
@@ -891,7 +955,7 @@ export function FlowSankey({
             <span className="flow-sel__num">
               {picks.length
                 ? <>{fmtN(iso)} of {fmtN(all)} sessions{all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}</>
-                : <>{fmtN(all)} sessions on screen · click views to narrow</>}
+                : <>{fmtN(all)} sessions on screen · click {mode === "steps" ? "views" : "routes or stages"} to narrow</>}
             </span>
             <div className="spacer" />
             {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
@@ -905,7 +969,7 @@ export function FlowSankey({
             </button>
             {picks.length > 0 && (
               <button className="flow-sel__b" onClick={() => setPicks([])}>
-                clear path ✕
+                {mode === "steps" ? "clear path" : "clear selection"} ✕
               </button>
             )}
           </div>
@@ -917,16 +981,18 @@ export function FlowSankey({
         const app = appId ? apps.find((a) => a.appId === appId) : undefined;
         const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0);
         const all = mine.reduce((a, q) => a + q.sessions, 0);
+        const names = new Map(a11yModel.nodes.map((n) => [n.id, n.nm]));
         const word = (id: string) => {
+          if (mode === "paths") return names.get(id) ?? id.replace(/^jp-/, "").split("\u0001").join(" → ");
           const end = /^(done|exit)-(\d+)$/.exec(id);
           if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
           const m = /^n(\d+)-([\s\S]*)$/.exec(id);
           return m ? m[2] : id;
         };
-        const orderly = [...picks].sort((a, b) => {
+        const orderly = mode === "steps" ? [...picks].sort((a, b) => {
           const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);
           return st(a) - st(b);
-        });
+        }) : picks;
         return (
           <RouteInfographic rows={info}
             path={orderly.length ? orderly.map(word)
