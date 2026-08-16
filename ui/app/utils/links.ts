@@ -1076,13 +1076,23 @@ export function investigationPaths(
         const seg = SESSION_SEGMENT_CHIP[name];
         tech.push(sessionsLink(tf, scopedAppName, sessions, seg?.[0], seg?.[1]));
       }
-      // The Synthetic segment's own app (registry-verified on this tenant):
-      // its traffic IS monitors, and the app that owns them answers what a
-      // sessions list cannot — which monitors, their runs, their failures.
+      // The Synthetic segment's own app: its traffic IS monitors, and the
+      // registry declares the exact intent for "which monitors watch this
+      // application" — view_monitor_list_filtered_by_entity_ids, required
+      // prop dt.synthetic.monitored_entity_ids (array). Fed the scoped
+      // application's entity, it lists precisely the monitors generating
+      // this segment, not the whole estate.
       if (name === "Synthetic") {
-        tech.push(link("Open the monitors", "Synthetic · runs & results", {},
-          { app: "Synthetic", href: appHomeHref("dynatrace.synthetic"),
-            proves: "the monitors generating this traffic — their runs, results and failures" }));
+        tech.push(scopedEntity
+          ? link("Open the monitors", "Synthetic · monitors of this application",
+              withTf(tf, { "dt.synthetic.monitored_entity_ids": [scopedEntity] }),
+              { keyProperties: ["dt.synthetic.monitored_entity_ids"],
+                app: "Synthetic", appId: "dynatrace.synthetic",
+                intentId: "view_monitor_list_filtered_by_entity_ids",
+                proves: "the monitors watching this application — their runs, results and failures" })
+          : link("Open the monitors", "Synthetic · runs & results", {},
+              { app: "Synthetic", href: appHomeHref("dynatrace.synthetic"),
+                proves: "the monitors generating this traffic — their runs, results and failures" }));
       }
       /* The mobile segment has an entity where the others have none: the
        * scoped mobile application itself. Experience Vitals declares
