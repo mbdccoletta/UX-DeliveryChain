@@ -40,15 +40,17 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-export function ReportView({ data, scopeApp, onGo }: {
+export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
   data: ChainData;
   /** The application this board reads — the header's own selector drives it,
    *  the same element every page uses. */
   scopeApp: string;
+  /** The value of one conversion and its currency — URL state, shared with
+   *  the Journeys route economics, so both pages read the same money. */
+  ticket: string; sym: string;
+  onTicket: (ticket: string, sym: string) => void;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
-  const [ticket, setTicket] = useState<string>("");
-  const [sym, setSym] = useState("$");
   // the share of traffic Dynatrace monitors, per the reader; volumes are
   // extrapolated by 100/cov, rates never are
   const [cov, setCov] = useState<string>("");
@@ -257,8 +259,8 @@ export function ReportView({ data, scopeApp, onGo }: {
         <label className="bc__ticket" title="Value of one conversion — turns customers into revenue. Blank = customers only.">
           <span>{sym}</span>
           <input inputMode="decimal" placeholder="value / conversion"
-            value={ticket} onChange={(e) => setTicket(e.target.value.replace(/[^\d.]/g, ""))} />
-          <select value={sym} onChange={(e) => setSym(e.target.value)} aria-label="currency">
+            value={ticket} onChange={(e) => onTicket(e.target.value.replace(/[^\d.]/g, ""), sym)} />
+          <select value={sym} onChange={(e) => onTicket(ticket, e.target.value)} aria-label="currency">
             {["$", "€", "£", "R$"].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>

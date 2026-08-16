@@ -529,6 +529,15 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
 .bc__cost-verdict b { font-size: 22px; color: var(--bad); }
 .bc__cost-verdict em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
+/* what the route is worth — the poster's business strip */
+.rinfo__worth { border: 1px solid color-mix(in srgb, var(--t-cyan) 40%, var(--border));
+  background: color-mix(in srgb, var(--t-cyan) 7%, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__worth-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  color: var(--t-cyan); margin-bottom: 8px; }
+.rinfo__worth-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px; }
+.rinfo__kpi--worth { border: none; background: none; padding: 0; }
 /* "no page telemetry", unpacked */
 .ntel { width: min(660px, 92vw); max-height: 86vh; overflow-y: auto; margin: auto;
   background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px;

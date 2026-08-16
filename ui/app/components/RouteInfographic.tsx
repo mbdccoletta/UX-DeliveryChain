@@ -46,12 +46,24 @@ function median(rows: InfoRow[], k: "p50dur" | "p50views", inCohort: boolean) {
   return n ? r.reduce((a, x) => a + x[k] * x.sessions, 0) / n : 0;
 }
 
-export function RouteInfographic({ rows, path, appName, cohort, total, onClose }: {
+const money = (v: number, sym: string) =>
+  v >= 1e6 ? `${sym}${(v / 1e6).toFixed(1)}M`
+  : v >= 1e3 ? `${sym}${(v / 1e3).toFixed(0)}k`
+  : `${sym}${Math.round(v)}`;
+
+export function RouteInfographic({ rows, path, appName, cohort, total, biz, ticket, sym, onClose }: {
   rows: InfoRow[] | "loading";
   /** The picked waypoints, in order, in words. */
   path: string[];
   appName: string;
   cohort: number; total: number;
+  /** WHAT THE ROUTE IS WORTH — the cohort's business line: real customers,
+   *  their conversion beside everyone else's, and the error-touched. */
+  biz?: { customers: number; converted: number; conv: number;
+    restConv: number; hit: number } | null;
+  /** Business Control's value-of-one-conversion, shared via url state. */
+  ticket?: number | null;
+  sym?: string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -94,6 +106,53 @@ export function RouteInfographic({ rows, path, appName, cohort, total, onClose }
           <div className="rinfo__loading">drawing the route&apos;s portrait…</div>
         ) : (
           <>
+            {/* what the route is worth — the business line first: conversion
+                beside everyone else's, and with the ticket set, the money the
+                route carries and the money error-touched customers put at risk */}
+            {biz && biz.customers > 0 && (
+              <section className="rinfo__worth">
+                <span className="rinfo__worth-l">WHAT THIS ROUTE IS WORTH</span>
+                <div className="rinfo__worth-row">
+                  <div className="rinfo__kpi rinfo__kpi--worth">
+                    <b className="num">{fmtPct(biz.conv)}</b>
+                    <span className="rinfo__kpi-l">conversion</span>
+                    <em>{biz.restConv > 0
+                      ? (biz.conv / biz.restConv >= 1.15
+                          ? `${(biz.conv / biz.restConv).toFixed(1)}× everyone else's ${fmtPct(biz.restConv)}`
+                          : biz.conv / biz.restConv <= 0.87
+                            ? `${(biz.restConv / Math.max(biz.conv, 0.0001)).toFixed(1)}× below everyone's ${fmtPct(biz.restConv)}`
+                            : `same as everyone's ${fmtPct(biz.restConv)}`)
+                      : "no one else converted"}</em>
+                  </div>
+                  <div className="rinfo__kpi rinfo__kpi--worth">
+                    <b className="num">{fmtN(biz.customers)}</b>
+                    <span className="rinfo__kpi-l">customers</span>
+                    <em>{fmtN(biz.converted)} reached the goal</em>
+                  </div>
+                  {ticket ? (
+                    <>
+                      <div className="rinfo__kpi rinfo__kpi--worth">
+                        <b className="num">{money(biz.converted * ticket, sym ?? "$")}</b>
+                        <span className="rinfo__kpi-l">revenue carried</span>
+                        <em>at {sym}{ticket} per conversion</em>
+                      </div>
+                      <div className={`rinfo__kpi rinfo__kpi--worth${biz.hit > 0 ? " rinfo__kpi--bad" : ""}`}>
+                        <b className="num">{money(biz.hit * biz.conv * ticket, sym ?? "$")}</b>
+                        <span className="rinfo__kpi-l">at risk</span>
+                        <em>{fmtN(biz.hit)} customers met an error</em>
+                      </div>
+                    </>
+                  ) : (
+                    <div className={`rinfo__kpi rinfo__kpi--worth${biz.hit > 0 ? " rinfo__kpi--bad" : ""}`}>
+                      <b className="num">{fmtN(biz.hit)}</b>
+                      <span className="rinfo__kpi-l">met an error</span>
+                      <em>set a conversion value in Business Control for money</em>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {/* the outcome strip: what happens to these users vs everyone else */}
             <section className="rinfo__strip">
               {([

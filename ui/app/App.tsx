@@ -64,7 +64,12 @@ export function App() {
     /** A cohort intent the Flow opens straight into an infographic:
      *  "unconverted" = the journeys that reached no goal. */
     coh: string | null;
-  }>({ ...URL_DEFAULTS, hl: null, coh: null });
+    /** The value of one conversion + its currency — set on Business Control,
+     *  read wherever money is derived (route economics included). In the URL
+     *  so a shared link carries the same figures. */
+    tkt: string | null;
+    cur: string | null;
+  }>({ ...URL_DEFAULTS, hl: null, coh: null, tkt: null, cur: null });
 
   // old ?tab=journey links keep working: they land on the merged page,
   // already switched to the journey view
@@ -253,6 +258,8 @@ export function App() {
                 tf={tf}
                 cohort={state.coh === "unconverted" ? "unconverted" : null}
                 onCohortConsumed={() => set({ coh: null }, false)}
+                ticket={Number(state.tkt) > 0 ? Number(state.tkt) : null}
+                sym={state.cur ?? "$"}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
             </div>
@@ -269,6 +276,8 @@ export function App() {
           {tab === "report" && (
             <Boundary label="Report">
               <ReportView data={d} scopeApp={current}
+                ticket={state.tkt ?? ""} sym={state.cur ?? "$"}
+                onTicket={(t, cu) => set({ tkt: t || null, cur: cu === "$" ? null : cu }, false)}
                 onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null,
                   hl: t === "chain" ? (hl ?? null) : null,
                   coh: t === "flow" ? (hl ?? null) : null })} />
