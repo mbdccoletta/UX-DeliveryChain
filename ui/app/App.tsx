@@ -161,7 +161,7 @@ export function App() {
                   {activeProblems} active problems
                 </span>
               )}
-              {!d.loading && d.apps.length > 0 && tab !== "report" && (
+              {!d.loading && d.apps.length > 0 && (
                 <Select
                   value={current}
                   onChange={(v) => { if (v) setAppId(v as string); }}>
@@ -268,7 +268,7 @@ export function App() {
           )}
           {tab === "report" && (
             <Boundary label="Report">
-              <ReportView data={d}
+              <ReportView data={d} scopeApp={current}
                 onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null,
                   hl: t === "chain" ? (hl ?? null) : null,
                   coh: t === "flow" ? (hl ?? null) : null })} />

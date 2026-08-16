@@ -40,19 +40,18 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-export function ReportView({ data, onGo }: {
+export function ReportView({ data, scopeApp, onGo }: {
   data: ChainData;
+  /** The application this board reads — the header's own selector drives it,
+   *  the same element every page uses. */
+  scopeApp: string;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
   const [ticket, setTicket] = useState<string>("");
   const [sym, setSym] = useState("$");
-  // always ONE application on this board (no all-applications view, by
-  // request) — the busiest until the reader picks another
-  const [pickedApp, setPickedApp] = useState<string>("");
   // the share of traffic Dynatrace monitors, per the reader; volumes are
   // extrapolated by 100/cov, rates never are
   const [cov, setCov] = useState<string>("");
-  const scopeApp = pickedApp || data.apps[0]?.appId || "";
   const kpis = useBizKpis(data.tf);
   const fc = useBizForecast(data.tf, scopeApp || null);
   const breakdown = useBizBreakdown(data.tf);
@@ -249,23 +248,6 @@ export function ReportView({ data, onGo }: {
           {ex ? <b className="bc__ex-note">volumes ×{factor.toFixed(1)} — extrapolated from {covN}% monitored; rates as measured</b>
             : "measured, not estimated"}</span>
         <div className="spacer" />
-        <select className="bc__scope" value={scopeApp}
-          onChange={(e) => setPickedApp(e.target.value)}
-          aria-label="Application scope"
-          title="The application this board reads">
-          {data.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-")).length > 0 && (
-            <optgroup label="Web">
-              {data.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-"))
-                .map((a) => <option key={a.appId} value={a.appId}>{nameOf(a.appId)}</option>)}
-            </optgroup>
-          )}
-          {data.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-")).length > 0 && (
-            <optgroup label="Mobile">
-              {data.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-"))
-                .map((a) => <option key={a.appId} value={a.appId}>{nameOf(a.appId)}</option>)}
-            </optgroup>
-          )}
-        </select>
         <label className="bc__ticket bc__cov"
           title="Share of your traffic Dynatrace monitors. Below 100, every volume on the board is extrapolated to the whole (marked with an approx sign); rates stay as measured — a representative sample carries them unchanged.">
           <input inputMode="numeric" placeholder="100"
