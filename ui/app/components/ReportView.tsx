@@ -117,28 +117,44 @@ export function ReportView({ data, onGo }: {
     );
   };
 
-  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, mover, coh }: {
+  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share }: {
     label: string; cur: number; prev: number; fmt: (v: number) => string;
-    riseIsGood: boolean; tab: "home" | "flow" | "chain"; mover?: (p: BizPeriod) => number;
+    riseIsGood: boolean; tab: "home" | "flow" | "chain";
     /** A cohort intent passed to the Flow — opens its infographic directly. */
     coh?: string;
+    /** One line of meaning under the number — what this counts, in words. */
+    caption?: string;
+    /** Share of the customer base (0..1): drawn as a thin proportion bar. */
+    share?: number;
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
     const t = trend(cv, pv, riseIsGood);
-    const top = mover && coh && scopeApp
-      ? { id: scopeApp, v: mover(scoped?.cur ?? {} as BizPeriod) } : null;
+    const drill = coh && scopeApp;
     return (
       <div className="bc__stat">
         <span className="bc__stat-l">{label}</span>
-        <b className="bc__stat-v num">{fmt(cv)}</b>
-        <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
-          {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
-        </span>
-        {top && (
-          <button className="bc__stat-mv" onClick={() => onGo?.(tab, top.id, coh)}
-            title={coh ? `${nameOf(top.id)} — portrait of who left`
-              : `${nameOf(top.id)} — open`}>{nameOf(top.id)}{coh ? " ↗ who they are" : ""}</button>
+        <div className="bc__stat-row">
+          <b className="bc__stat-v num">{fmt(cv)}</b>
+          <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
+            {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
+          </span>
+        </div>
+        {caption && <span className="bc__stat-cap">{caption}</span>}
+        {share !== undefined && Number.isFinite(share) && (
+          <span className="bc__stat-bar" role="img"
+            aria-label={`${pct(Math.max(0, Math.min(1, share)))} of customers`}>
+            <i style={{ width: `${Math.max(0, Math.min(1, share)) * 100}%` }} />
+          </span>
         )}
+        <div className="bc__stat-ft">
+          <span className="bc__stat-prev" title={`Previous ${data.tf.label}`}>
+            was {fmt(pv)}</span>
+          {drill && (
+            <button className="bc__stat-mv" onClick={() => onGo?.(tab, scopeApp, coh)}
+              title="Portrait of who left — country, device, browser, where they enter">
+              ↗ who they are</button>
+          )}
+        </div>
       </div>
     );
   };
@@ -300,17 +316,23 @@ export function ReportView({ data, onGo }: {
           <Hero front="brand" />
           <div className="bc__stats">
             <Stat label="customers hit by a failure" cur={c.customersAtRisk} prev={p.customersAtRisk}
-              fmt={fmtCount} riseIsGood={false} tab="home" />
+              fmt={fmtCount} riseIsGood={false} tab="home"
+              caption={`${pct(c.customers ? c.customersAtRisk / c.customers : 0)} of the customer base`}
+              share={c.customers ? c.customersAtRisk / c.customers : 0} />
             <Stat label="sessions lost to a crash" cur={c.crashed} prev={p.crashed}
-              fmt={fmtCount} riseIsGood={false} tab="home" />
+              fmt={fmtCount} riseIsGood={false} tab="home"
+              caption="ended with no way back — the customer was dropped" />
             <Stat label="brand health (0–100)" cur={c.reputationIndex} prev={p.reputationIndex}
-              fmt={(v) => `${Math.round(v * 100)}`} riseIsGood={true} tab="chain" />
+              fmt={(v) => `${Math.round(v * 100)}`} riseIsGood={true} tab="chain"
+              caption="share of customers untouched by any failure"
+              share={c.reputationIndex} />
             <Stat label="open incidents"
               cur={scopeApp ? data.problems.filter((pr) => (pr.entityIds ?? [])
                     .some((e) => e.toLowerCase().includes(scopeApp))).length : data.problems.length}
               prev={scopeApp ? data.problems.filter((pr) => (pr.entityIds ?? [])
                     .some((e) => e.toLowerCase().includes(scopeApp))).length : data.problems.length}
-              fmt={(v) => fmtN(v)} riseIsGood={false} tab="chain" />
+              fmt={(v) => fmtN(v)} riseIsGood={false} tab="chain"
+              caption="confirmed by AI monitoring, live right now" />
           </div>
         </div>
       </section>
@@ -321,24 +343,31 @@ export function ReportView({ data, onGo }: {
           <Hero front="journeys" />
           <div className="bc__stats">
             <Stat label="customers who converted" cur={c.converted} prev={p.converted}
-              fmt={fmtCount} riseIsGood={true} tab="flow" />
+              fmt={fmtCount} riseIsGood={true} tab="flow"
+              caption={`${pct(c.conversion)} of the customer base reached the goal`}
+              share={c.conversion} />
             <Stat label="customers who left unconverted"
               cur={c.customers - c.converted} prev={p.customers - p.converted}
               fmt={fmtCount} riseIsGood={false} tab="flow"
-              mover={(pp) => pp.realSessions - pp.convertedReal} coh="unconverted" />
+              caption="the growth pool — every one is a winnable sale"
+              share={c.customers ? (c.customers - c.converted) / c.customers : 0}
+              coh="unconverted" />
             {tv ? (
               <Stat label="opportunity on the table"
                 cur={(c.customers - c.converted) * c.conversion * tv}
                 prev={(p.customers - p.converted) * p.conversion * tv}
-                fmt={fmtMoney} riseIsGood={false} tab="flow" />
+                fmt={fmtMoney} riseIsGood={false} tab="flow"
+                caption="if the unconverted converted at today's rate" />
             ) : (
               <Stat label="reached first screen only" cur={1 - c.engagedShare} prev={1 - p.engagedShare}
-                fmt={pct} riseIsGood={false} tab="flow" />
+                fmt={pct} riseIsGood={false} tab="flow"
+                caption="never saw a second screen" share={1 - c.engagedShare} />
             )}
             <Stat label="customers who bounced"
               cur={c.customers - Math.round(c.engagedShare * (curP?.sessions ?? 0))}
               prev={p.customers - Math.round(p.engagedShare * (prevP?.sessions ?? 0))}
-              fmt={fmtCount} riseIsGood={false} tab="flow" />
+              fmt={fmtCount} riseIsGood={false} tab="flow"
+              caption="came, saw one screen, left" />
           </div>
         </div>
       </section>

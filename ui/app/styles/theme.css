@@ -484,18 +484,27 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 /* the support row: four compact stats */
 .bc__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px; }
-.bc__stat { display: grid; grid-template-columns: 1fr auto; grid-template-areas:
-  "l l" "v t" "mv mv"; gap: 2px 8px; padding: 12px 14px; border-radius: 12px;
-  background: var(--panel-2); border: 1px solid var(--border); align-content: start; }
-.bc__stat--load { min-height: 78px; }
-.bc__stat-l { grid-area: l; font: 600 10px var(--mono); letter-spacing: 0.04em;
+.bc__stat { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
+  border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+.bc__stat--load { min-height: 110px; }
+.bc__stat-l { font: 600 10px var(--mono); letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--ink-3); }
-.bc__stat-v { grid-area: v; font-size: 26px; line-height: 1.1; color: #fff; }
-.bc__stat-t { grid-area: t; align-self: end; font: 700 11px var(--mono); }
-.bc__stat-mv { grid-area: mv; justify-self: start; margin-top: 6px;
-  font: 500 10px var(--mono); color: var(--ink-2); cursor: pointer;
-  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
-  border-radius: 999px; padding: 2px 8px; }
+.bc__stat-row { display: flex; align-items: baseline; gap: 10px; }
+.bc__stat-v { font-size: 26px; line-height: 1.1; color: #fff; }
+.bc__stat-t { font: 700 11px var(--mono); }
+.bc__stat-cap { font: 400 11px var(--sans, var(--mono)); color: var(--ink-2);
+  line-height: 1.45; }
+.bc__stat-bar { display: block; height: 3px; border-radius: 999px; margin-top: 2px;
+  background: rgba(255,255,255,0.07); overflow: hidden; }
+.bc__stat-bar i { display: block; height: 100%; border-radius: 999px;
+  background: color-mix(in srgb, var(--fh) 75%, #fff); min-width: 2px; }
+/* the footer anchors the card's base: what it was, and the way deeper */
+.bc__stat-ft { display: flex; align-items: center; gap: 8px; margin-top: auto;
+  padding-top: 8px; }
+.bc__stat-prev { font: 500 10px var(--mono); color: var(--ink-3); }
+.bc__stat-mv { margin-left: auto; font: 600 10px var(--mono); color: var(--ink-2);
+  cursor: pointer; background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 .bc__stat-mv:hover { border-color: var(--fh); color: var(--ink); }
 @media (max-width: 720px) { .bc__row { grid-template-columns: 1fr; } }
 /* forecast strip — visibly a projection, not a measurement */
