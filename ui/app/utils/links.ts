@@ -1076,6 +1076,14 @@ export function investigationPaths(
         const seg = SESSION_SEGMENT_CHIP[name];
         tech.push(sessionsLink(tf, scopedAppName, sessions, seg?.[0], seg?.[1]));
       }
+      // The Synthetic segment's own app (registry-verified on this tenant):
+      // its traffic IS monitors, and the app that owns them answers what a
+      // sessions list cannot — which monitors, their runs, their failures.
+      if (name === "Synthetic") {
+        tech.push(link("Open the monitors", "Synthetic · runs & results", {},
+          { app: "Synthetic", href: appHomeHref("dynatrace.synthetic"),
+            proves: "the monitors generating this traffic — their runs, results and failures" }));
+      }
       /* The mobile segment has an entity where the others have none: the
        * scoped mobile application itself. Experience Vitals declares
        * view-frontend and accepts MOBILE_APPLICATION- ids (verified — see
@@ -1149,6 +1157,14 @@ export function investigationPaths(
   }
   const prob = pLink();
   if (prob) tech.push(prob);
+  // An element wearing anomaly flags earns the app that OWNS baselining
+  // (dynatrace.davis.anomalydetection, registry-verified): the thresholds and
+  // history behind the amber marks, and where to tune them.
+  if (signals > 0) {
+    tech.push(link("See its baselines", `${signals} anomal${signals > 1 ? "ies" : "y"} under watch`, {},
+      { app: "Anomaly Detection", href: appHomeHref("dynatrace.davis.anomalydetection"),
+        proves: "the baselining behind the anomaly flags — thresholds, history and tuning" }));
+  }
   if (assist) {
     tech.push(healthy
       ? aLink("Ask Assist", "where is the easy win",
