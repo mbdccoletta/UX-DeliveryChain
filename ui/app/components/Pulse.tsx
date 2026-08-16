@@ -680,9 +680,12 @@ function CleanCard(p: CardProps) {
         <button className="tk-core__b" onClick={p.onOpen}
           aria-label={`${p.name} — Apdex ${fmtApdex(p.apdex)}, open its delivery chain`}>
           <i className="tk-core__ic">{p.isMobile ? <MobileIcon /> : <DesktopIcon />}</i>
-          <b className="num tk-core__pct">{fmtApdex(p.apdex)}</b>
+          {/* The WORD leads — "Good" reads instantly where 0.92 needs a
+              scale; the number moves to the caption for whoever audits it. */}
+          <b className="num tk-core__pct tk-core__pct--word">
+            {p.apdex === null ? "…" : apdexBand(p.apdex)}</b>
           <span className="tk-core__cap">
-            apdex{p.apdex === null ? "" : ` · ${apdexBand(p.apdex)}`}</span>
+            apdex{p.apdex === null ? "" : ` ${fmtApdex(p.apdex)}`}</span>
           {/* The score, translated: what happens in every 100 things users
               do — built from the same bands the number is, so the words and
               the figure cannot disagree. Slowness and errors are named
