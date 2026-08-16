@@ -539,7 +539,11 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   color: var(--ink-2); }
 .bc__diff-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
   margin-right: 5px; }
-.bc__diff-errs { display: flex; gap: 8px; flex-wrap: wrap; }
+.bc__diff-errs { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.bc__diff-el { font: 600 10px var(--mono); text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--ink-3); }
+.bc__diff-money { font: 400 12px var(--sans, var(--mono)); color: var(--ink-2);
+  margin-top: 8px; max-width: 240px; line-height: 1.5; }
 .bc__diff-e { font: 500 11px var(--mono); color: var(--ink-2);
   border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
 .bc__diff-e b { color: #fff; margin-right: 4px; }
