@@ -448,8 +448,6 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 /* ── Business Control: a C-level board — hero number per front, trend, support ── */
 .bc { gap: 16px; }
 .bc__bar { display: flex; align-items: center; gap: 12px; padding: 4px 2px; flex-wrap: wrap; }
-.bc__scope { font: 600 12px var(--mono); color: var(--ink); background: var(--panel-2);
-  border: 1px solid var(--border-2); border-radius: 8px; padding: 4px 8px; }
 .bc__ticket { display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--mono);
   color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--border-2);
   border-radius: 8px; padding: 3px 8px; }
