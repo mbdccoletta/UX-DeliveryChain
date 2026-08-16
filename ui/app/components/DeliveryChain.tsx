@@ -1618,21 +1618,16 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 </span>
               </div>
 
-              {/* WHAT MATTERS, FIRST — the reader's rule for element
-                  drill-downs: the aching truth in one line, then the apps
-                  that act on it, before any table. Chips are the routes'
-                  own steps deduplicated by destination, so they can never
-                  disagree with the full routes below. */}
+              {/* WHAT MATTERS, FIRST — the aching truth in one line before
+                  any table. The apps are proposed ONCE, by the investigation
+                  routes below — the reader cut an "open in" chip row from
+                  here as duplicated effort, and the routes carry what a chip
+                  cannot: the order and what each step proves. */}
               {(() => {
                 const probs = problemsFor(selElo.ids ?? []);
                 const sigs = signalsFor(selElo.ids ?? [])
                   .filter((x) => x.provider === "BASELINING");
-                const seen = new Set<string>();
-                const chips = (elRoutes?.list ?? [])
-                  .flatMap((r) => r.steps)
-                  .filter((st) => st.href && st.app && st.app !== "Assist"
-                    && !seen.has(st.app) && seen.add(st.app));
-                if (!probs.length && !sigs.length && !chips.length) return null;
+                if (!probs.length && !sigs.length) return null;
                 return (
                   <div className="elsum">
                     {probs.length > 0 ? (
@@ -1641,23 +1636,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                         <em>{probs[0].display_id} · {probs[0].category}
                           {probs.length > 1 && ` · +${probs.length - 1} more`}</em>
                       </span>
-                    ) : sigs.length > 0 && (
+                    ) : (
                       <span className="elsum__v elsum__v--warn">
                         ⚠ {sigs[0].name}
                         <em>anomaly under watch{sigs.length > 1 && ` · +${sigs.length - 1} more`}</em>
-                      </span>
-                    )}
-                    {chips.length > 0 && (
-                      <span className="elsum__apps">
-                        <i className="elsum__lbl">open in</i>
-                        {chips.slice(0, 5).map((st) => (
-                          <a key={st.app} className="elsum__chip" href={st.href}
-                            target="_blank" rel="noopener"
-                            title={`${st.app} — ${st.proves}`}
-                            style={{ ["--app" as string]: styleOf(st.app).hue }}>
-                            {st.app} ↗
-                          </a>
-                        ))}
                       </span>
                     )}
                   </div>
