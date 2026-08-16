@@ -1184,23 +1184,45 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
             .map((s) => [s.journey.join(" → "), fmtN(s.sessions)])} />
       </>);
     }
+    /* THE DRILL-DOWN RULE, the reader's: the KPIs count and analyse EVERY
+     * component of the layer — the whole environment — but the listed rows
+     * are only the elements that touch THIS chain in some way. What is
+     * counted and not listed says so in one line, so the totals never look
+     * like the list's length. */
     if (selTier === 4) {
+      const mine = new Set((tiers[4]?.items ?? []).map((n) => n.nm));
+      const chainCalls = data.calls.filter((c) =>
+        mine.has(c.src.split(" - ")[0]) || mine.has(c.dst.split(" - ")[0]));
       return (<>
         <div className="dd">
-          <Kpi l="Services" v={fmtN(data.topology.find((t) => t.type === "SERVICE")?.nodes ?? 0)} t="good" />
-          <Kpi l="Call relations" v={fmtN(data.calls.length)} t="good" />
+          <Kpi l="Services (environment)" v={fmtN(data.topology.find((t) => t.type === "SERVICE")?.nodes ?? 0)} t="good" />
+          <Kpi l="Call relations (environment)" v={fmtN(data.calls.length)} t="good" />
+          <Kpi l="Serving this chain" v={fmtN(chainCalls.length)} t="info" />
         </div>
-        <div className="dd__h">Mapped dependencies <em>smartscapeEdges "calls"</em></div>
+        <div className="dd__h">Mapped dependencies <em>smartscapeEdges "calls" · this chain only</em></div>
         <Table cols={["Service", "Calls"]}
-          rows={data.calls.slice(0, 12).map((c) => [c.src.split(" - ")[0], c.dst.split(" - ")[0]])} />
+          rows={chainCalls.slice(0, 12).map((c) => [c.src.split(" - ")[0], c.dst.split(" - ")[0]])} />
+        {data.calls.length > chainCalls.length && (
+          <p className="dd__note">{fmtN(data.calls.length - chainCalls.length)} further call relations
+            exist in the environment without touching this chain — counted above, not listed.</p>
+        )}
       </>);
     }
+    const mineNames = new Set((selTier !== null ? tiers[selTier]?.items ?? [] : []).map((n) => n.nm));
+    const chainPods = data.runtime.filter((r) => mineNames.has(r.pod) || mineNames.has(r.node));
     return (<>
       <div className="dd">
-        {data.topology.slice(0, 4).map((t) => <Kpi key={t.type} l={t.type} v={fmtN(t.nodes)} t="good" />)}
+        {data.topology.slice(0, 4).map((t) => <Kpi key={t.type} l={`${t.type} (environment)`} v={fmtN(t.nodes)} t="good" />)}
       </div>
-      <div className="dd__h">Pods and where they run <em>runs_on · Smartscape</em></div>
-      <Table cols={["Pod", "Node"]} rows={data.runtime.slice(0, 10).map((r) => [r.pod, r.node])} />
+      <div className="dd__h">Pods and where they run <em>runs_on · Smartscape · this chain only</em></div>
+      {chainPods.length > 0
+        ? <Table cols={["Pod", "Node"]} rows={chainPods.slice(0, 10).map((r) => [r.pod, r.node])} />
+        : <p className="dd__note">none of the mapped pods in this layer serve the selected
+            application&apos;s chain.</p>}
+      {data.runtime.length > chainPods.length && (
+        <p className="dd__note">{fmtN(data.runtime.length - chainPods.length)} further pods run in the
+          environment without serving this chain — counted above, not listed.</p>
+      )}
     </>);
   };
 
