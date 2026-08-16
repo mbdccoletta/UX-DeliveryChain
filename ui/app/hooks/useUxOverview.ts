@@ -54,19 +54,25 @@ export function useUxOverview(tf: Timeframe): Map<string, UxRow> | null {
     (async () => {
       try {
         const rows = await runDql<Record<string, unknown>>(qUxByApp(tf), 100);
-        const out = new Map<string, UxRow>(rows.map((r) => [String(r.appId), {
-          sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
-          realSessions: Number(r.realSessions) || 0,
-          errors: Number(r.errors) || 0, errorsThird: Number(r.errorsThird) || 0,
-          realErrors: Number(r.realErrors) || 0,
-          hitReal: Number(r.hitReal) || 0, hitRobot: Number(r.hitRobot) || 0,
-          hitSynth: Number(r.hitSynth) || 0,
-          engaged: Number(r.engaged) || 0,
-          actions: Number(r.actions) || 0, abandoned: Number(r.abandoned) || 0,
-          satisfied: Number(r.satisfied) || 0, tolerating: Number(r.tolerating) || 0,
-          frustrated: Number(r.frustrated) || 0,
-          fragments: Number(r.fragments) || 0,
-        }]));
+        // TWO row kinds share an appId: the main per-app row, and the Apdex
+        // leg's row carrying only satisfied/tolerating/frustrated (the bands
+        // live in their own subquery so Dynatrace's error rule can rate at
+        // view-instance grain). MERGE them — a plain Map(rows.map(...)) let
+        // the later row overwrite the earlier one, which zeroed every main
+        // field and put "0 reached a user" beside "86% of sessions hit".
+        const ZERO: UxRow = { sessions: 0, hit: 0, realSessions: 0, errors: 0,
+          errorsThird: 0, realErrors: 0, hitReal: 0, hitRobot: 0, hitSynth: 0,
+          engaged: 0, actions: 0, abandoned: 0, satisfied: 0, tolerating: 0,
+          frustrated: 0, fragments: 0 };
+        const out = new Map<string, UxRow>();
+        for (const r of rows) {
+          const id = String(r.appId);
+          const cur = out.get(id) ?? { ...ZERO };
+          for (const k of Object.keys(ZERO) as Array<keyof UxRow>) {
+            if (r[k] !== null && r[k] !== undefined) cur[k] = Number(r[k]) || 0;
+          }
+          out.set(id, cur);
+        }
         memo.set(key, out);
         if (live) setMap(out);
       } catch {
