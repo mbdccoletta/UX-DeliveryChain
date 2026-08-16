@@ -1119,6 +1119,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     (problemsFor(selElo.ids ?? []).length > 0 || signalsFor(selElo.ids ?? []).length > 0);
   // Whatever made this element amber or red, the reader is owed the count of
   // people behind it — measured harm earns the row exactly as a Davis problem does.
+  /* the layer drawer folds its unremarkable tail; a new selection folds it back */
+  const [drawerAll, setDrawerAll] = useState(false);
+  useEffect(() => { setDrawerAll(false); }, [sel]);
+
   const selShowsImpact = !!selElo && (selElo.tone === "bad" || selElo.tone === "warn");
 
   /* The element's investigation routes, computed once: the drawer's TOP
@@ -1576,12 +1580,31 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   (r.probs > 0 ? 0 : r.sigs > 0 ? 1 : r.n.tone === "bad" ? 2
                     : r.n.tone === "warn" ? 3 : 4);
                 const orderly = [...rows].sort((a, b) =>
-                  rank(a) - rank(b) || (b.probs - a.probs) || (b.sigs - a.sigs));
+                  rank(a) - rank(b) || (b.probs - a.probs) || (b.sigs - a.sigs)
+                    || (b.n.vol ?? 0) - (a.n.vol ?? 0));
+                /* THE CALCULATING CUT, the reader's rule: direct the customer
+                 * only where there is a chance of improvement. Shown open:
+                 * every element under a signal, plus the three that carry the
+                 * most volume (optimisation pays where the traffic is). The
+                 * unremarkable tail folds behind one honest button — counted
+                 * in the header, hidden from the eye. */
+                const topVol = new Set([...rows]
+                  .sort((a, b) => (b.n.vol ?? 0) - (a.n.vol ?? 0))
+                  .slice(0, 3).map((r) => r.i));
+                const lead = orderly.filter((r) => r.probs > 0 || r.sigs > 0 || topVol.has(r.i));
+                const shown = drawerAll ? orderly : lead;
+                const hidden = orderly.length - shown.length;
+                const layerVol = rows.reduce((acc, r) => acc + (r.n.vol ?? 0), 0);
                 return (<>
                   <div className="dd__h">All elements in this layer
                     <em>{fmtN(tiers[selAll].total)} total · {fmtN(tiers[selAll].items.length)} mapped
                       {impacted > 0 && <> · <b className="lrow__impn">{impacted} under an active signal</b></>}</em></div>
-                  {orderly.map(({ n, i, probs, sigs }) => (
+                  {impacted === 0 && rows.length > 1 && (
+                    <p className="dd__calm">Nothing is failing in this layer. The elements shown
+                      carry the most traffic — where optimisation pays; the rest are healthy
+                      and folded.</p>
+                  )}
+                  {shown.map(({ n, i, probs, sigs }) => (
                     <div key={i}
                          className={`lrow${probs > 0 || sigs > 0 ? " lrow--imp" : ""}`}
                          style={{ ["--tone" as string]: TVAR[n.tone] }}
@@ -1596,10 +1619,24 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                           title="Anomalies Davis is watching on this element">
                           {sigs} anomal{sigs > 1 ? "ies" : "y"}</i>}
                       </span>
-                      <span className="lrow__m">{n.mt}</span>
+                      <span className="lrow__m">{n.mt}
+                        {probs === 0 && sigs === 0 && topVol.has(i) && layerVol > 0
+                          && (n.vol ?? 0) / layerVol >= 0.05
+                          && <> · carries {Math.round(((n.vol ?? 0) / layerVol) * 100)}% of the layer&apos;s volume</>}
+                      </span>
                       <span className="lrow__v">{n.v}</span>
                     </div>
                   ))}
+                  {hidden > 0 && (
+                    <button className="lrow lrow--fold" onClick={() => setDrawerAll(true)}>
+                      show {fmtN(hidden)} more — nothing failing, nothing remarkable ▾
+                    </button>
+                  )}
+                  {drawerAll && orderly.length > lead.length && (
+                    <button className="lrow lrow--fold" onClick={() => setDrawerAll(false)}>
+                      fold the healthy tail ▴
+                    </button>
+                  )}
                 </>);
               })()}
               {tiers[selAll].total > tiers[selAll].items.length && (
