@@ -859,6 +859,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
   | summarize satisfied = sum(if(bad, 0, else: sat0)),
       tolerating = sum(if(bad, 0, else: tol0)),
       frustrated = sum(fru0) + sum(if(bad, sat0 + tol0, else: 0)),
+      fruErr = sum(if(bad, sat0 + tol0, else: 0)),
     by: { appId } ]`;
 
 /** Sessions and errors over time, for the landing page's trend chart. */

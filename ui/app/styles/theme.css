@@ -1152,6 +1152,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   text-shadow: 0 0 16px rgba(255, 255, 255, 0.35); }
 .tk-core__cap { font: 700 9px var(--mono); color: rgba(255, 255, 255, 0.7);
   text-transform: uppercase; letter-spacing: 0.12em; }
+.tk-core__words { display: block; font: 400 11px var(--mono); color: rgba(255,255,255,0.75);
+  max-width: 320px; margin: 6px auto 0; line-height: 1.5; }
 .tk-core__nm { font: 700 16px var(--sans); color: #fff; margin-top: 6px;
   text-align: center; }
 .tk-core__go { font: 600 10px var(--mono); color: rgba(255, 255, 255, 0.6); margin-top: 2px; }
