@@ -210,7 +210,7 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0) {
     // what remains after the fragments left: real sessions with no page
     // telemetry — request-only monitors, probes, sessions cut mid-load
     nodes.push({ id: "j-none", c: 1, nm: "No page telemetry", v: orphan, tone: "warn",
-      sub: `${fmtPct((orphan / total) * 100)} of sessions · click to see what they are` });
+      sub: `${fmtPct((orphan / total) * 100)} of sessions` });
     links.push({ s: "a-" + app.appId, t: "j-none", v: orphan, tone: "bad" });
     addStage([], orphan, "j-none");
   }
@@ -739,6 +739,24 @@ export function FlowSankey({
   // the poster describes one path over one window — a change closes it
   useEffect(() => { setInfo(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
 
+  /** Unpacks "No page telemetry" — opened from the band's button, never from
+   *  the node's click, which stays a selection like any other. */
+  const openNoTelemetry = async () => {
+    if (!appId || !tf) return;
+    setNtel("loading");
+    try {
+      const rows = await runDql<Record<string, unknown>>(qNoTelemetry(tf, appId), 20);
+      const mix = rows.find((r) => r.kind === "mix");
+      setNtel({
+        sessions: Number(mix?.sessions) || 0, real: Number(mix?.real) || 0,
+        robots: Number(mix?.robots) || 0, oneEvent: Number(mix?.oneEvent) || 0,
+        reqOnly: Number(mix?.reqOnly) || 0, p50dur: Number(mix?.p50dur) || 0,
+        pages: rows.filter((r) => r.kind === "page")
+          .map((r) => ({ pg: String(r.bucket), n: Number(r.sessions) || 0 })),
+      });
+    } catch { setNtel(null); }
+  };
+
   const openInfographic = async (mode?: "unconverted") => {
     if (!appId || !tf) return;
     setInfo("loading");
@@ -833,25 +851,6 @@ export function FlowSankey({
       setPicks((cur) => cur.includes(hit.id)
         ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
       setSelNode(hit); setSel(hit.id);
-      return;
-    }
-    /* "No page telemetry" is a question, not a waypoint — clicking it opens
-     * the card that unpacks what those sessions are. */
-    if (hit.id === "j-none" && appId && tf) {
-      setNtel("loading");
-      void (async () => {
-        try {
-          const rows = await runDql<Record<string, unknown>>(qNoTelemetry(tf, appId), 20);
-          const mix = rows.find((r) => r.kind === "mix");
-          setNtel({
-            sessions: Number(mix?.sessions) || 0, real: Number(mix?.real) || 0,
-            robots: Number(mix?.robots) || 0, oneEvent: Number(mix?.oneEvent) || 0,
-            reqOnly: Number(mix?.reqOnly) || 0, p50dur: Number(mix?.p50dur) || 0,
-            pages: rows.filter((r) => r.kind === "page")
-              .map((r) => ({ pg: String(r.bucket), n: Number(r.sessions) || 0 })),
-          });
-        } catch { setNtel(null); }
-      })();
       return;
     }
     /* Route mode: routes (jp-…, the folded remainder) and stages narrow the
@@ -993,6 +992,13 @@ export function FlowSankey({
             {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
                 narrowed one; the reader's rule: characteristics refer to
                 everything the screen currently shows */}
+            {sel === "j-none" && (
+              <button className="flow-sel__b"
+                onClick={openNoTelemetry} disabled={ntel === "loading"}
+                title="What the sessions without a recorded view are made of — measured, not guessed">
+                {ntel === "loading" ? "unpacking…" : "what are these? ↗"}
+              </button>
+            )}
             <button className="flow-sel__b flow-sel__b--on"
               onClick={() => openInfographic()}
               disabled={info === "loading"}
