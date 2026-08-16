@@ -25,14 +25,19 @@ const money = (v: number, sym: string) =>
   : v >= 1e3 ? `${sym}${(v / 1e3).toFixed(0)}k`
   : `${sym}${Math.round(v)}`;
 
-function trend(cur: number, prev: number, riseIsGood: boolean): { dir: Dir; rel: number | null } {
-  if (prev === 0 && cur === 0) return { dir: "flat", rel: 0 };
+/** The ARROW is the direction the number moved; the COLOUR is whether that
+ *  was good for the business. Risk rising = ▲ in red; risk falling = ▼ in
+ *  green. Conflating the two once made a 60% RISE in customers at risk wear
+ *  a down-arrow — the reader caught it. */
+function trend(cur: number, prev: number, riseIsGood: boolean):
+  { dir: Dir; rel: number | null; arrow: string } {
+  if (prev === 0 && cur === 0) return { dir: "flat", rel: 0, arrow: "—" };
   const rel = prev === 0 ? null : (cur - prev) / Math.abs(prev);
-  if (rel !== null && Math.abs(rel) < 0.03) return { dir: "flat", rel };
-  return { dir: (cur > prev) === riseIsGood ? "good" : "bad", rel };
+  if (rel !== null && Math.abs(rel) < 0.03) return { dir: "flat", rel, arrow: "—" };
+  return { dir: (cur > prev) === riseIsGood ? "good" : "bad", rel,
+    arrow: cur > prev ? "▲" : "▼" };
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
-const ARROW: Record<Dir, string> = { good: "▲", bad: "▼", flat: "—" };
 
 export function ReportView({ data, onGo }: {
   data: ChainData;
@@ -102,7 +107,7 @@ export function ReportView({ data, onGo }: {
         <span className="bc__hero-l">{label}</span>
         <b className="bc__hero-v num">{fmt(heroVal)}</b>
         <span className="bc__hero-t" style={{ color: TONE[t.dir] }}>
-          {ARROW[t.dir]} {t.rel === null ? "new" : t.dir === "flat" ? "steady" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
+          {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "steady" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
           <em> vs previous {data.tf.label}</em>
         </span>
         <span className="bc__hero-s">{sub}</span>
@@ -125,7 +130,7 @@ export function ReportView({ data, onGo }: {
         <span className="bc__stat-l">{label}</span>
         <b className="bc__stat-v num">{fmt(cv)}</b>
         <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
-          {ARROW[t.dir]} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
+          {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
         </span>
         {top && (
           <button className="bc__stat-mv" onClick={() => onGo?.(tab, top.id, coh)}
