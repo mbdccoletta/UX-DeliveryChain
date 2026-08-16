@@ -2,7 +2,7 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, qPathSessions,
+import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, qNoTelemetry, qPathSessions,
   qCohortSessions, reachesOutcome, runDql, type Timeframe } from "../utils/dql";
 import { RouteInfographic, type InfoRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
@@ -210,7 +210,7 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0) {
     // what remains after the fragments left: real sessions with no page
     // telemetry — request-only monitors, probes, sessions cut mid-load
     nodes.push({ id: "j-none", c: 1, nm: "No page telemetry", v: orphan, tone: "warn",
-      sub: `request-only or probes · ${fmtPct((orphan / total) * 100)} of sessions` });
+      sub: `${fmtPct((orphan / total) * 100)} of sessions · click to see what they are` });
     links.push({ s: "a-" + app.appId, t: "j-none", v: orphan, tone: "bad" });
     addStage([], orphan, "j-none");
   }
@@ -416,6 +416,12 @@ export function FlowSankey({
    * "loading" while the two scans run (the cohort's ids, then its portrait). */
   const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
   const [infoCohort, setInfoCohort] = useState(0);
+  /* "No page telemetry", unpacked on click: what those sessions are made of
+   * and which pages their stray beacons name. null = closed. */
+  const [ntel, setNtel] = useState<null | "loading" | {
+    sessions: number; real: number; robots: number; oneEvent: number;
+    reqOnly: number; p50dur: number; pages: Array<{ pg: string; n: number }>;
+  }>(null);
   // "paths" (Which routes they take) is the default view by request — the
   // step drop-off is one click away; a custom path or a cohort intent still
   // forces "steps" when it needs the positional columns.
@@ -798,6 +804,13 @@ export function FlowSankey({
 
   /* the lit-path ids belong to one model; changing mode invalidates them */
   useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId]);
+  /* the no-telemetry card closes on Esc, like every overlay here */
+  useEffect(() => {
+    if (ntel === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNtel(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ntel]);
 
   const hitAt = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const c = ref.current; if (!c) return null;
@@ -820,6 +833,25 @@ export function FlowSankey({
       setPicks((cur) => cur.includes(hit.id)
         ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
       setSelNode(hit); setSel(hit.id);
+      return;
+    }
+    /* "No page telemetry" is a question, not a waypoint — clicking it opens
+     * the card that unpacks what those sessions are. */
+    if (hit.id === "j-none" && appId && tf) {
+      setNtel("loading");
+      void (async () => {
+        try {
+          const rows = await runDql<Record<string, unknown>>(qNoTelemetry(tf, appId), 20);
+          const mix = rows.find((r) => r.kind === "mix");
+          setNtel({
+            sessions: Number(mix?.sessions) || 0, real: Number(mix?.real) || 0,
+            robots: Number(mix?.robots) || 0, oneEvent: Number(mix?.oneEvent) || 0,
+            reqOnly: Number(mix?.reqOnly) || 0, p50dur: Number(mix?.p50dur) || 0,
+            pages: rows.filter((r) => r.kind === "page")
+              .map((r) => ({ pg: String(r.bucket), n: Number(r.sessions) || 0 })),
+          });
+        } catch { setNtel(null); }
+      })();
       return;
     }
     /* Route mode: routes (jp-…, the folded remainder) and stages narrow the
@@ -972,6 +1004,79 @@ export function FlowSankey({
                 {mode === "steps" ? "clear path" : "clear selection"} ✕
               </button>
             )}
+          </div>
+        );
+      })()}
+
+      {/* "No page telemetry", unpacked — the sessions the mining never saw,
+          shown for what they are: mostly one stray beacon from a REAL page
+          whose navigation fell outside the window; some API-only; some robots.
+          Closes on Esc or a click outside. */}
+      {ntel !== null && (() => {
+        const app = appId ? apps.find((a) => a.appId === appId) : undefined;
+        const d = ntel === "loading" ? null : ntel;
+        const maxPg = d ? Math.max(...d.pages.map((x) => x.n), 1) : 1;
+        return (
+          <div className="ovl" onClick={() => setNtel(null)} role="dialog" aria-modal="true"
+            aria-label="What the sessions without page telemetry are">
+            <div className="ntel" onClick={(e) => e.stopPropagation()}>
+              <header className="rinfo__hd">
+                <span className="rinfo__eyebrow">WHAT THESE SESSIONS ARE · {app?.name ?? ""}</span>
+                <h2 className="rinfo__path"><span>No page telemetry, unpacked</span></h2>
+                {d && (
+                  <div className="rinfo__cohort">
+                    <b className="num">{fmtN(d.sessions)}</b>
+                    <span>sessions without a recorded view in this window</span>
+                  </div>
+                )}
+                <button className="drawer__x" onClick={() => setNtel(null)} aria-label="Close">✕</button>
+              </header>
+              {!d ? <div className="rinfo__loading">unpacking…</div> : (
+                <>
+                  <section className="rinfo__strip">
+                    <div className="rinfo__kpi">
+                      <b className="num">{fmtN(d.oneEvent)}</b>
+                      <span className="rinfo__kpi-l">one stray beacon</span>
+                      <em>a real page, seen for ~{fmtMs(d.p50dur)}</em>
+                    </div>
+                    <div className="rinfo__kpi">
+                      <b className="num">{fmtN(d.reqOnly)}</b>
+                      <span className="rinfo__kpi-l">API traffic only</span>
+                      <em>requests without any page</em>
+                    </div>
+                    <div className="rinfo__kpi">
+                      <b className="num">{fmtN(d.robots)}</b>
+                      <span className="rinfo__kpi-l">robots</span>
+                      <em>declared non-human</em>
+                    </div>
+                    <div className="rinfo__kpi">
+                      <b className="num">{fmtN(d.real)}</b>
+                      <span className="rinfo__kpi-l">real people</span>
+                      <em>of the {fmtN(d.sessions)}</em>
+                    </div>
+                  </section>
+                  {d.pages.length > 0 && (
+                    <section className="ntel__pages">
+                      <h3>the pages their beacons name</h3>
+                      {d.pages.map((x) => (
+                        <div className="rinfo__bar" key={x.pg} title={`${fmtN(x.n)} sessions`}>
+                          <span className="rinfo__bar-l">{x.pg}</span>
+                          <span className="rinfo__bar-t">
+                            <i className="rinfo__bar-fill" style={{ width: `${(x.n / maxPg) * 100}%` }} />
+                          </span>
+                          <b className="rinfo__bar-v">{fmtN(x.n)}</b>
+                        </div>
+                      ))}
+                    </section>
+                  )}
+                  <footer className="rinfo__ft">
+                    most of these sessions were on a real page — their navigation simply happened
+                    outside this window (window edges and lone beacons) · they are excluded from
+                    journey percentages so the funnel is not understated
+                  </footer>
+                </>
+              )}
+            </div>
           </div>
         );
       })()}
