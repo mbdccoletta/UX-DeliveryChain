@@ -176,21 +176,6 @@ export function ReportView({ data, onGo }: {
     };
   })();
 
-  // ── the portfolio: every application's own board line, worst risk first —
-  //    the one estate-wide glance, and the way between applications
-  const portfolio = (() => {
-    if (!kpis) return null;
-    return [...kpis.byApp.entries()].map(([id, v]) => {
-      const real = v.cur.realSessions, conv = real ? v.cur.convertedReal / real : 0;
-      const prevReal = v.prev.realSessions;
-      const prevConv = prevReal ? v.prev.convertedReal / prevReal : 0;
-      return { id, name: nameOf(id), customers: real, conv, convT: trend(conv, prevConv, true),
-        atRisk: v.cur.hitReal, riskT: trend(v.cur.hitReal, v.prev.hitReal, false),
-        crash: v.cur.fatalSessions };
-    }).filter((r) => r.customers > 0)
-      .sort((a, b) => (b.atRisk / Math.max(1, b.customers)) - (a.atRisk / Math.max(1, a.customers)));
-  })();
-
   const range = (pj: { lower: number; upper: number }) =>
     `${fmtN(Math.round(sc(Math.max(0, pj.lower))))}–${fmtN(Math.round(sc(pj.upper)))}`;
 
@@ -367,33 +352,6 @@ export function ReportView({ data, onGo }: {
                   ))}
                 </div>
               ))}
-          </div>
-        </section>
-      )}
-
-      {/* the portfolio: one line per application, worst failure-exposure
-          first; a click scopes the whole board to it */}
-      {portfolio && portfolio.length > 1 && (
-        <section className="bc__front">
-          <h2 className="bc__ftitle">Portfolio</h2>
-          <div className="bc__pf">
-            <div className="bc__pf-r bc__pf-r--hd" aria-hidden="true">
-              <span>application</span><span>customers</span><span>conversion</span>
-              <span>at risk</span><span>crashes</span>
-            </div>
-            {portfolio.map((r) => (
-              <button className={`bc__pf-r${r.id === scopeApp ? " bc__pf-r--on" : ""}`}
-                key={r.id} onClick={() => setPickedApp(r.id)}
-                title={`Scope the board to ${r.name}`}>
-                <span className="bc__pf-nm">{r.name}</span>
-                <span className="num">{fmtCount(r.customers)}</span>
-                <span className="num">{pct(r.conv)}
-                  <i style={{ color: TONE[r.convT.dir] }}> {ARROW[r.convT.dir]}</i></span>
-                <span className="num">{fmtCount(r.atRisk)}
-                  <i style={{ color: TONE[r.riskT.dir] }}> {ARROW[r.riskT.dir]}</i></span>
-                <span className="num">{r.crash ? fmtCount(r.crash) : "—"}</span>
-              </button>
-            ))}
           </div>
         </section>
       )}

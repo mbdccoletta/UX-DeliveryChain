@@ -11,10 +11,9 @@ import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
-import { fmtK, fmtN, tfFrom } from "./utils/dql";
+import { fmtN, tfFrom } from "./utils/dql";
 import { FlowSankey } from "./components/FlowSankey";
 import { DeliveryChain } from "./components/DeliveryChain";
-import { Overview } from "./components/Overview";
 import { Pulse } from "./components/Pulse";
 import { ReportView } from "./components/ReportView";
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
@@ -23,7 +22,7 @@ import { useUxOverview } from "./hooks/useUxOverview";
 import { usePageTitle } from "./hooks/usePageTitle";
 import { Boundary } from "./components/Boundary";
 
-type Tab = "home" | "flow" | "chain" | "health" | "report";
+type Tab = "home" | "flow" | "chain" | "report";
 /**
  * Tab id, header label, and the sentence the title bar puts under it.
  *
@@ -42,7 +41,6 @@ const TABS: Array<[Tab, string, string]> = [
   // the steps one session class takes. A view toggle switches between them
   // without losing the application or the window.
   ["flow", "Journeys", "Where users go and how they get there"],
-  ["health", "Health", "The environment as a whole, aggregated"],
   ["report", "Business Control", "Two fronts, one board — numbers and trends, this window against the last"],
 ];
 /** Everything a link has to carry for someone else to see the same screen. */
@@ -100,7 +98,6 @@ export function App() {
   const totalSessions = uxMap
     ? d.apps.reduce((a, x) => a + (uxMap.get(x.appId)?.sessions ?? x.sessions), 0)
     : d.apps.reduce((a, x) => a + x.sessions, 0);
-  const totalErrors = d.apps.reduce((a, x) => a + x.errors, 0);
   const activeProblems = d.problems.length;
   // The classic model and RUM both key a mobile app's entity as
   // MOBILE_APPLICATION-…, whichever of the two named it — verified against
@@ -245,8 +242,7 @@ export function App() {
                     openIntent(sessionsLink(tf, a.name,
                       uxMap?.get(current)?.sessions ?? a.sessions));
                   } else { setAppId(current); set({ tab: "flow", view: "journey", sel: null }); }
-                }}
-                onSeeEstate={() => setTab("health")} />
+                }} />
             </Boundary>
           )}
 
@@ -278,100 +274,11 @@ export function App() {
                   coh: t === "flow" ? (hl ?? null) : null })} />
             </Boundary>
           )}
-
-          {tab === "health" && (
-            <div className="stack">
-              {/* the estate heatmap — the triage table for whoever owns 500 apps */}
-              <Boundary label="Estate">
-                <Overview data={d} onOpen={(id) => { setAppId(id); setTab("chain"); }} />
-              </Boundary>
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Environment health</span>
-                  <span className="hint">aggregated · {tf.label}</span></div>
-                <div className="pad">
-                  <div className="dd">
-                    <K l="Applications" v={String(d.apps.length)} c="var(--info)" />
-                    <K l="Sessions" v={fmtN(totalSessions)} c="var(--info)" />
-                    <K l="Errors" v={fmtK(totalErrors)} c={totalErrors ? "var(--bad)" : "var(--good)"} />
-                    <K l="Active problems" v={String(activeProblems)} c={activeProblems ? "var(--bad)" : "var(--good)"} />
-                    <K l="Services in Smartscape" v={fmtN(d.topology.find((t) => t.type === "SERVICE")?.nodes ?? 0)} c="var(--info)" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Applications</span>
-                  <span className="hint">sessions · views · errors</span></div>
-                <div className="pad" style={{ overflowX: "auto" }}>
-                  <table className="dt">
-                    <thead><tr><th>Application</th><th>Sessions</th><th>Views</th><th>Errors</th><th>Errors/view</th></tr></thead>
-                    <tbody>
-                      {d.apps.map((a) => (
-                        <tr key={a.appId}>
-                          <td style={{ fontFamily: "var(--sans)" }}>{a.name}</td>
-                          <td>{fmtN(uxMap?.get(a.appId)?.sessions ?? a.sessions)}</td>
-                          <td>{fmtN(a.views)}</td>
-                          <td style={{ color: a.errors > a.views ? "var(--bad)" : undefined }}>{fmtN(a.errors)}</td>
-                          <td>{a.views ? (a.errors / a.views).toFixed(1) : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Problems detected by the AI</span>
-                  <span className="hint">dt.davis.problems · active</span></div>
-                <div className="pad" style={{ overflowX: "auto" }}>
-                  <table className="dt">
-                    <thead><tr><th>ID</th><th>Problem</th><th>Category</th><th>Entities</th></tr></thead>
-                    <tbody>
-                      {d.problems.map((p) => (
-                        <tr key={p.display_id}>
-                          <td className="hi">{p.display_id}</td>
-                          <td style={{ fontFamily: "var(--sans)" }}>{p.name}</td>
-                          <td>{p.category}</td>
-                          <td>{(p.affected ?? []).join(", ") || "—"}</td>
-                        </tr>
-                      ))}
-                      {!d.problems.length && <tr><td colSpan={4}>No active problems.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Custom alerts &amp; extensions</span>
-                  <span className="hint">event.provider · 24h</span></div>
-                <div className="pad" style={{ overflowX: "auto" }}>
-                  <table className="dt">
-                    <thead><tr><th>Provider</th><th>Event type</th><th>Volume</th></tr></thead>
-                    <tbody>
-                      {d.providers.slice(0, 14).map((p) => (
-                        <tr key={p.provider + p.type}>
-                          <td className="hi">{p.provider}</td><td>{p.type}</td><td>{fmtN(p.events)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
       </div>
       </PageLayout.Content>
       </PageLayout>
     </>
-  );
-}
-
-function K({ l, v, c }: { l: string; v: string; c: string }) {
-  return (
-    <div className="dd__k" style={{ borderBottomColor: c }}>
-      <div className="dd__kl">{l}</div><div className="dd__kv">{v}</div>
-    </div>
   );
 }
