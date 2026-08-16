@@ -379,7 +379,7 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 
 export function FlowSankey({
   apps, seqs, appId, transitions = [], friction = [], views = [], ux, tf,
-  cohort, onCohortConsumed, onPickApp, onOpen,
+  cohort, onCohortConsumed, ticket = null, sym = "$", onPickApp, onOpen,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
@@ -388,6 +388,10 @@ export function FlowSankey({
    *  infographic on the journeys that reached no goal, no picks required. */
   cohort?: "unconverted" | null;
   onCohortConsumed?: () => void;
+  /** The value of one conversion (Business Control's field, via url state) —
+   *  turns the route economics into money. null = customers only. */
+  ticket?: number | null;
+  sym?: string;
   transitions?: TransitionRow[]; friction?: FrictionRow[];
   /** Per-app UX aggregate — the funnel reads window-fragment counts from it. */
   ux?: Map<string, { fragments: number }> | null;
@@ -416,6 +420,13 @@ export function FlowSankey({
    * "loading" while the two scans run (the cohort's ids, then its portrait). */
   const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
   const [infoCohort, setInfoCohort] = useState(0);
+  /* WHAT THE ROUTE IS WORTH: the cohort's conversion beside everyone else's,
+   * customers, and — with the ticket set — the money the route carries. All
+   * from the same per-session scan the poster already runs. */
+  const [infoBiz, setInfoBiz] = useState<null | {
+    customers: number; converted: number; conv: number;
+    restConv: number; hit: number;
+  }>(null);
   /* "No page telemetry", unpacked on click: what those sessions are made of
    * and which pages their stray beacons name. null = closed. */
   const [ntel, setNtel] = useState<null | "loading" | {
@@ -781,6 +792,19 @@ export function FlowSankey({
         : pickIds ? pickIds.has(String(r.sid)) : true;
       const cohortN = rows.filter(inCohortOf).length;
       setInfoCohort(cohortN);
+      // route economics: real people only, converted = reached an outcome
+      const isRealRow = (r: Record<string, unknown>) =>
+        Number(r.isReal) === 1 || r.isReal === true || r.isReal === "true";
+      const bizOf = (rs: Array<Record<string, unknown>>) => {
+        const real = rs.filter(isRealRow);
+        const conv = real.filter((r) => Number(r.reached) === 1).length;
+        return { customers: real.length, converted: conv,
+          conv: real.length ? conv / real.length : 0,
+          hit: real.filter((r) => Number(r.errs) > 0).length };
+      };
+      const inB = bizOf(rows.filter(inCohortOf));
+      const outB = bizOf(rows.filter((r) => !inCohortOf(r)));
+      setInfoBiz({ ...inB, restConv: outB.conv });
       if (!cohortN) { setInfo([]); return; }
 
       // pivot to the long form RouteInfographic reads: one row per
@@ -1111,6 +1135,7 @@ export function FlowSankey({
               : ["every journey on screen"]}
             key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
+            biz={infoBiz} ticket={ticket} sym={sym}
             onClose={() => { setInfo(null); }} />
         );
       })()}
