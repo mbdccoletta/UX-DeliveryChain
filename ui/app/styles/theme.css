@@ -693,6 +693,16 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .lrow:hover { background: color-mix(in srgb, var(--tone) 10%, var(--panel-2)); }
 .lrow__n { font: 600 12px var(--sans); overflow-wrap: anywhere; }
 .lrow__v { font: 700 12px var(--mono); color: var(--tone); align-self: center; }
+.lrow--imp { border-left: 2px solid var(--tone);
+  background: color-mix(in srgb, var(--tone) 7%, var(--panel-2)); }
+.lrow__tag { font: 700 9px var(--mono); font-style: normal; letter-spacing: 0.04em;
+  text-transform: uppercase; border-radius: 999px; padding: 1px 7px; margin-left: 7px;
+  vertical-align: 1px; white-space: nowrap; }
+.lrow__tag--p { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+  background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.lrow__tag--a { color: var(--warn, #e8b04b); border: 1px solid color-mix(in srgb, var(--warn, #e8b04b) 55%, transparent);
+  background: color-mix(in srgb, var(--warn, #e8b04b) 12%, transparent); }
+.lrow__impn { color: var(--bad); font-weight: 700; }
 .lrow__m { grid-column: 1 / -1; font: 400 12px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
 
 /* element card inside a pillar */
