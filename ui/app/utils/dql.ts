@@ -813,15 +813,6 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     views = countIf(characteristics.classifier == "view_summary"),
     acts = countIf(characteristics.classifier == "user_action"),
     aband = countIf(user_action.complete_reason == "page_hide"),
-    // Apdex bands, counted on USER ACTIONS — the unit Dynatrace rates. An
-    // action with no duration falls in none of the three, so it never inflates
-    // the score by being treated as satisfied; see utils/apdex.ts for T.
-    sat = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) <= ${APDEX_T_NS}),
-    tol = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
-    fru = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_4T_NS}),
     navs = countIf(characteristics.classifier == "navigation"),
     reqs = countIf(characteristics.classifier == "request"),
     utype = takeAny(dt.rum.user_type),
@@ -843,9 +834,32 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // errors carried by sessions belonging to real people
     realErrors = sum(if(not(utype == "robot") and not(utype == "synthetic")
       and synth == 0, errs, else: 0)),
-    satisfied = sum(sat), tolerating = sum(tol), frustrated = sum(fru),
     fragments = countIf(navs == 0 and views == 0 and acts == 0 and reqs == 0),
-  by: { appId }`;
+  by: { appId }
+// APDEX, in its own leg at VIEW-INSTANCE grain, because Dynatrace's rule —
+// "user actions with reported errors are rated as Frustrated" — needs the
+// error linked to the action, and this tenant's error events carry no
+// user_action.id. view.instance_id is the grain both sides share (verified:
+// 1,224 view instances hold both), so an errored view frustrates its own
+// actions. An error without a view instance frustrates nothing — the rule
+// only fires where the data actually links.
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter characteristics.classifier == "user_action"
+      or characteristics.classifier == "error"
+  | summarize verrs = countIf(characteristics.classifier == "error"),
+      sat0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) <= ${APDEX_T_NS}),
+      tol0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
+      fru0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_4T_NS}),
+    by: { appId = dt.rum.application.id, vi = view.instance_id }
+  | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
+  | fieldsAdd bad = verrs > 0 and isNotNull(vi)
+  | summarize satisfied = sum(if(bad, 0, else: sat0)),
+      tolerating = sum(if(bad, 0, else: tol0)),
+      frustrated = sum(fru0) + sum(if(bad, sat0 + tol0, else: 0)),
+    by: { appId } ]`;
 
 /** Sessions and errors over time, for the landing page's trend chart. */
 export const qPulseSeries = (tf: Timeframe, rumAppId: string) => `
@@ -1138,14 +1152,36 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     p50 = percentile(if(characteristics.classifier == "user_action", toLong(duration)), 50),
     p90 = percentile(if(characteristics.classifier == "user_action", toLong(duration)), 90),
     p95 = percentile(if(characteristics.classifier == "user_action", toLong(duration)), 95),
-    sat = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) <= ${APDEX_T_NS}),
-    tol = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
-    fru = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_4T_NS}),
   by: { name = ${VIEW_NAME} }
 | filter isNotNull(name) and name != "" and vol > 0
+| sort vol desc | limit 8
+// Apdex per view, at the grain Dynatrace's error rule links: an errored view
+// INSTANCE frustrates its own actions regardless of speed. Computed in its
+// own leg (per name+instance, then per name) and merged back by name, so the
+// percentiles above stay percentiles.
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+      and (characteristics.classifier == "user_action"
+        or characteristics.classifier == "error")
+  | summarize verrs = countIf(characteristics.classifier == "error"),
+      sat0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) <= ${APDEX_T_NS}),
+      tol0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
+      fru0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_4T_NS}),
+    by: { name = ${VIEW_NAME}, vi = view.instance_id }
+  | filter isNotNull(name) and name != ""
+  | fieldsAdd bad = verrs > 0 and isNotNull(vi)
+  | summarize sat = sum(if(bad, 0, else: sat0)),
+      tol = sum(if(bad, 0, else: tol0)),
+      fru = sum(fru0) + sum(if(bad, sat0 + tol0, else: 0)),
+    by: { name } ]
+| summarize vol = sum(vol), errors = sum(errors), sessions = sum(sessions),
+    p50 = max(p50), p90 = max(p90), p95 = max(p95),
+    sat = sum(sat), tol = sum(tol), fru = sum(fru),
+  by: { name }
+| filter vol > 0
 | sort vol desc | limit 8`;
 
 /**
