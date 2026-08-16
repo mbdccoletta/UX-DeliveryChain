@@ -1201,17 +1201,19 @@ export function investigationPaths(
         node ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined));
       break;
     case "host":
-      // Topology is the question here, and only the classic Smartscape app
-      // answers it for a host — the Gen3 one declares nothing for `dt.entity.host`
-      // (its actions are about problems). So this names that app directly rather
-      // than resolving Gen3-first and landing on a view that cannot answer.
+      // Topology is the question. The Gen3 Smartscape declares nothing for
+      // `dt.entity.host`, but it DOES answer view_topology_in_context for a
+      // bare Smartscape `id` — the exact hop the technical route already
+      // uses for this host. The rule (the reader's): never propose a Gen2
+      // app where the Gen3 one covers the question — so the classic
+      // view-host hand-off is gone.
       tac.push(link("What this host carries",
         "The processes a host-level event would take down.",
-        withTf(tf, { "dt.entity.host": host }),
-        { keyProperties: ["dt.entity.host"],
+        { id: host },
+        { keyProperties: ["id"],
           proves: "The topology around this machine, as Smartscape maps it.",
-          app: "Smartscape Classic",
-          appId: "dynatrace.classic.smartscape", intentId: "view-host" }));
+          app: "Smartscape",
+          appId: "dynatrace.smartscape", intentId: "view_topology_in_context" }));
       break;
     case "origin": case "domain3p": case "domain1p": case "store":
       // The same evidence the technical route offers, asked as a different
@@ -1260,77 +1262,42 @@ export function investigationPaths(
   }
 
   /* ── executive: the reading, not the data ── */
+  /* THE BUSINESS ROUTE IS ASSIST, ALONE — the reader's design. Entity
+   * hand-offs (sessions apps, classic replay) belong to the technical
+   * personas; the business reader gets one node that answers in their
+   * language, with an advanced brief built from everything this element's
+   * context carries. The classic session link died with this — the Gen3
+   * sessions app coexists, and the rule is never to propose a Gen2 app
+   * where a Gen3 one covers it. */
   const exec: DeepLink[] = [];
-  /*
-   * Offered for the element's own application entity when IT is the app
-   * (webApp/mobileApp), and for the SCOPED application when the element is a
-   * segment or an address belonging to it (origin/domain3p/domain1p) — a
-   * Consume-layer Mobile card used to have no way to reach this step at all,
-   * because `rumAppId` was only ever threaded through for the application
-   * card itself. Left off service/host/pod/store: an owner clicking a
-   * database wants database evidence, not the whole app's session count.
-   *
-   * `scopedEntity` — resolved by the caller from the real entity, not
-   * guessed — takes priority over the hex fallback appEntityOf() still keeps
-   * for callers that have only ever had a rumAppId to work with. The hex trick
-   * holds for web only (a mobile RUM id is a UUID, not the entity's suffix),
-   * which is exactly why the real entity is worth passing when it is known.
-   */
-  const wantsAppSessions = kind === "webApp" || kind === "mobileApp"
-    || kind === "origin" || kind === "domain3p" || kind === "domain1p";
-  const appEntity = wantsAppSessions
-    ? appEntityOf(app ?? scopedEntity, rumAppId) : undefined;
-  if (appEntity) {
-    exec.push(eLink("Sessions and conversion",
-      "The real-user picture the RUM app already maintains.",
-      "dt.entity.application", appEntity,
-      appEntity.startsWith("MOBILE_APPLICATION-") ? "mobile" : "rum"));
-  }
-  /*
-   * The impact as ONE user lived it — the worst-hit session, opened in the
-   * apps dedicated to single sessions, both generations. Two steps by request,
-   * not gen3-with-classic-fallback: the Gen3 app reads the session's events
-   * from Grail, the classic one holds the session timeline and the replay, and
-   * they answer differently enough to both earn a card. Payloads are exactly
-   * what each intent declares — see SESSION_GEN3 / SESSION_CLASSIC.
-   */
-  const sess = impacted?.ex;
-  if (sess) {
-    exec.push(link("Open an impacted session", `${sess.errs} errors · one user`,
-      { "dt.rum.session.id": sess.sid, "start_time": sess.start },
-      { keyProperties: ["dt.rum.session.id"],
-        proves: "The impact as one user lived it — the worst-hit session, event by event.",
-        app: "Users & Sessions",
-        appId: SESSION_GEN3.appId, intentId: SESSION_GEN3.intentId }));
-    if (sess.inst) {
-      exec.push(link("The same session, classic", "timeline & replay",
-        { "dt.rum.session.id": sess.sid, "dt.rum.instance.id": sess.inst,
-          "start_time": sess.start },
-        { keyProperties: ["dt.rum.session.id"],
-          proves: "The classic session timeline, with the replay when one was captured.",
-          app: "Session Segmentation (Classic)",
-          appId: SESSION_CLASSIC.appId, intentId: SESSION_CLASSIC.intentId }));
-    }
-  }
   if (assist) {
     exec.push(
       healthy
-        ? aLink("Ask Assist", "where improvement pays most",
-            "Turns healthy numbers into the investment worth making.",
-            `${subject[0].toUpperCase()}${subject.slice(1)} is healthy right now. ` +
-            "Which improvement to it would users notice most, and what makes it " +
-            "worth doing before anything else?",
-            scope, undefined)
-        // One Assist per route, not two. "what does this cost us" and "what
-        // should we do first" were adjacent nodes asking the same person the
-        // same thing twice; merged into the question an owner actually has.
-        : aLink("Ask Assist", "what this costs and what to do first",
-            "Turns the measured numbers into the consequence an owner acts on, "
-            + "and the first move worth making.",
-            `What is the business impact of the current state of ${subject}, which ` +
-            "of these numbers should worry me most, and what would you fix first?",
+        ? aLink("Ask Assist", "where investment pays most",
+            "A three-line owner's brief: the best improvement, its expected gain, and what to watch.",
+            `Brief me as the business owner of ${subject}. It is healthy right now. ` +
+            "1) Which single improvement would customers notice most — speed, " +
+            "conversion or coverage — and which measured number says so? " +
+            "2) What gain should we expect if we make it, in sessions or conversions? " +
+            "3) What early signal would change this verdict and deserve a re-check?",
+            scope,
+            "Answer as a three-line executive brief, one line per question, the number " +
+            "first in each line, no jargon — name views, errors and segments in plain " +
+            "words. Close with one word: invest, schedule, or hold." + GROUNDED)
+        : aLink("Ask Assist", "the business brief",
+            "A five-line owner's brief: what broke, what it costs, the fix, and the risk of waiting.",
+            `Brief me as the business owner of ${subject}. ` +
+            "1) What is broken, said in customer terms? " +
+            "2) How many customers or sessions is it costing in this window, and is that " +
+            "rising or falling? " +
+            "3) Which single fix recovers the most sessions, and whose work is it? " +
+            "4) What is the risk of doing nothing for one day? " +
+            "5) When should I look at this again?",
             scope + " Consider effort, blast radius and how many sessions each option " +
-            "would recover."),
+            "would recover.",
+            "Answer as a five-line executive brief, one numbered line per question, the " +
+            "number first in each line, no jargon — name views, errors and segments in " +
+            "plain words. Close with one sentence: fix now, schedule, or monitor." + GROUNDED),
     );
   }
   if (exec.length) {
