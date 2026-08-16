@@ -6,6 +6,8 @@ import { qBizBreakdown, runDql, type Timeframe } from "../utils/dql";
 export interface BreakRow {
   d: string; bucket: string; appId: string;
   sessions: number; conv: number; realN: number; realConv: number;
+  /** Real sessions in this bucket that met at least one error. */
+  realHit: number;
 }
 
 const memo = new Map<string, BreakRow[]>();
@@ -26,6 +28,7 @@ export function useBizBreakdown(tf: Timeframe): BreakRow[] | null {
           d: String(r.d ?? ""), bucket: String(r.bucket ?? ""), appId: String(r.appId ?? ""),
           sessions: Number(r.sessions) || 0, conv: Number(r.conv) || 0,
           realN: Number(r.realN) || 0, realConv: Number(r.realConv) || 0,
+          realHit: Number(r.realHit) || 0,
         })).filter((r) => r.d);
         memo.set(key, res);
         if (live) setOut(res);
