@@ -606,7 +606,8 @@ function CleanCard(p: CardProps) {
               <div className="tk-apdex">
                 {apdexBand(p.apdex)} · {APDEX_LABEL}
                 {conflicted && (
-                  <><br />speed only — errors cost no time here, so they do not lower it</>
+                  <><br />errored views frustrate their own actions (Dynatrace&apos;s rule);
+                    errors outside any rated action still cost no time</>
                 )}
               </div>
             );

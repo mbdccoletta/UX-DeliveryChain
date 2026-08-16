@@ -22,11 +22,18 @@
 // changed the setting. Where a tenant HAS changed it, ours will differ, which
 // is exactly why the label says which T produced it.
 //
-// One Dynatrace variant is deliberately not implemented: the optional
-// "count user actions with errors as frustrated" rule. Measured on this tenant,
-// not one of the 195,206 actions in a 24h window reports a non-zero
-// `user_action.error_count` — so the rule has nothing to act on, and adding it
-// would be a branch that silently never fires.
+// DYNATRACE'S ERROR RULE — "user actions with reported errors are rated as
+// Frustrated" (docs, verified 2026-08) — IS implemented, at the closest grain
+// this tenant's data links. The docs' mechanism is server-side; in Grail the
+// error events carry no user_action.id (checked: none of the populated
+// fields), so per-action attribution is impossible. What both sides DO share
+// is view.instance_id (measured: 1,224 view instances in a 2h window hold
+// both errors and actions, covering 1,738 of 63,901 actions), so the rule
+// fires at view grain: an errored view instance frustrates its own actions,
+// whatever their speed. An error with no view instance frustrates nothing —
+// the rule only acts where the data actually links. Implemented in qUxByApp
+// and qDetailExperience; an earlier note here cited `user_action.error_count`
+// (always zero on this tenant) — that field was never Dynatrace's mechanism.
 
 /** Dynatrace's default tolerated threshold for user actions. */
 export const APDEX_T_MS = 3_000;
