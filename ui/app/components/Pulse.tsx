@@ -294,6 +294,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         hitSessions={impacted?.hit ?? 0}
         loadP50={app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? apdexOf(uxRow) : null}
+        apdexBands={uxRow ? { sat: uxRow.satisfied, tol: uxRow.tolerating,
+          fru: uxRow.frustrated, fruErr: uxRow.fruErr } : null}
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
         services={scopeCount} svcNames={svcNames} domNames={domNames}
@@ -361,6 +363,8 @@ interface CardProps {
   requests: number; reqFail: number; loadP50: number;
   /** Apdex over this application's user actions, or null when none were rated. */
   apdex: number | null;
+  /** The bands behind it — what the words under the score are built from. */
+  apdexBands: { sat: number; tol: number; fru: number; fruErr: number } | null;
   /** Errors that reached a real person, and the third-party share of all of
    *  them — null while the estate scan is still in flight. */
   realErrors: number | null;
@@ -679,6 +683,26 @@ function CleanCard(p: CardProps) {
           <b className="num tk-core__pct">{fmtApdex(p.apdex)}</b>
           <span className="tk-core__cap">
             apdex{p.apdex === null ? "" : ` · ${apdexBand(p.apdex)}`}</span>
+          {/* The score, translated: what happens in every 100 things users
+              do — built from the same bands the number is, so the words and
+              the figure cannot disagree. Slowness and errors are named
+              separately because they are fixed by different people. */}
+          {p.apdexBands && (() => {
+            const { sat, tol, fru, fruErr } = p.apdexBands;
+            const rated = sat + tol + fru;
+            if (!rated) return null;
+            const per = (v: number) => Math.round((v / rated) * 100);
+            const slow = per(fru - fruErr) + per(tol);
+            const err = per(fruErr);
+            const fine = Math.max(0, 100 - slow - err);
+            return (
+              <span className="tk-core__words">
+                of every 100 things users do here, ~{fine} feel fine
+                {slow > 0 && <> · {slow} drag{err > 0 ? "" : " — speed, not errors"}</>}
+                {err > 0 && <> · {err} ruined by errors</>}
+              </span>
+            );
+          })()}
           <span className="tk-core__nm">{p.name}</span>
           {/* What Davis detected, beside what we measured. Silence is stated
               too — "no problems detected" is a finding, and leaving the line

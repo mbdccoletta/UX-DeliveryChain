@@ -32,6 +32,9 @@ export interface UxRow {
   satisfied: number;
   tolerating: number;
   frustrated: number;
+  /** Of the frustrated: actions an ERRORED VIEW reassigned there (Dynatrace's
+   *  error rule at view grain) rather than slowness. Feeds the explainer. */
+  fruErr: number;
   /** Sessions whose only in-window content is stray metadata — their real
    *  activity happened outside the window. Not journeys; excluded from
    *  funnels, reported as a transparency line. */
@@ -63,7 +66,7 @@ export function useUxOverview(tf: Timeframe): Map<string, UxRow> | null {
         const ZERO: UxRow = { sessions: 0, hit: 0, realSessions: 0, errors: 0,
           errorsThird: 0, realErrors: 0, hitReal: 0, hitRobot: 0, hitSynth: 0,
           engaged: 0, actions: 0, abandoned: 0, satisfied: 0, tolerating: 0,
-          frustrated: 0, fragments: 0 };
+          frustrated: 0, fruErr: 0, fragments: 0 };
         const out = new Map<string, UxRow>();
         for (const r of rows) {
           const id = String(r.appId);
