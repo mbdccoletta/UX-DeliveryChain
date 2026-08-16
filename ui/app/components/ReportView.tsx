@@ -16,6 +16,7 @@ import type { ChainData } from "../hooks/useChainData";
 import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
 import { useBizForecast } from "../hooks/useBizForecast";
 import { useBizBreakdown } from "../hooks/useBizBreakdown";
+import { useDifficulty } from "../hooks/useDifficulty";
 import { fmtN } from "../utils/dql";
 
 type Dir = "good" | "bad" | "flat";
@@ -55,6 +56,7 @@ export function ReportView({ data, onGo }: {
   const kpis = useBizKpis(data.tf);
   const fc = useBizForecast(data.tf, scopeApp || null);
   const breakdown = useBizBreakdown(data.tf);
+  const difficulty = useDifficulty(data.tf);
   const nameOf = (id: string) =>
     data.apps.find((x) => x.appId === id)?.name ?? id.slice(0, 8);
   const tv = Number(ticket) > 0 ? Number(ticket) : null;
@@ -179,6 +181,45 @@ export function ReportView({ data, onGo }: {
       best: rows.filter((x) => x.lift > 1).sort((a, b) => b.lift - a.lift).slice(0, 4),
       worst: rows.filter((x) => x.lift < 1).sort((a, b) => a.lift - b.lift).slice(0, 4),
     };
+  })();
+
+  // ── where the difficulty lives: inside the backend or outside it.
+  //    Time evidence: each view's wait decomposed by the agent. Error
+  //    evidence: each error's origin. Differential: does the suffering
+  //    concentrate in one segment (points outside) or hit all alike
+  //    (points inside)? Davis corroborates from the chain's own problems.
+  const where = (() => {
+    const d = scopeApp ? difficulty?.get(scopeApp) : undefined;
+    if (!d) return null;
+    const sh = (x: { net: number; srv: number; rend: number }) => {
+      const tot = x.net + x.srv + x.rend;
+      return tot ? { srv: x.srv / tot, net: x.net / tot, rend: x.rend / tot } : null;
+    };
+    const cur = sh(d.slow.cur), prev = sh(d.slow.prev);
+    const per = (v: number) => d.slow.cur.meas ? v / d.slow.cur.meas : 0; // ns per measured view
+    const err = d.err.cur;
+    const errN = (b: string) => err.get(b as never) ?? 0;
+    const outErr = errN("frontend") + errN("third_party") + errN("device")
+      + errN("connection") + errN("request_4xx") + errN("other");
+    // differential: does the error-hit concentrate in one segment?
+    let conc: { bucket: string; dim: string; lift: number } | null = null;
+    if (scopedRows) {
+      const overallN = scopedRows.filter((r) => r.d === "__err")
+        .reduce((a, r) => a + r.realN, 0);
+      const overallHit = scopedRows.filter((r) => r.d === "__err")
+        .reduce((a, r) => a + r.realHit, 0);
+      const base = overallN ? overallHit / overallN : 0;
+      if (base > 0) {
+        for (const r of scopedRows) {
+          if (r.d === "__err" || r.d === "user type" || r.realN < 50 || r.realHit < 20) continue;
+          const lift = (r.realHit / r.realN) / base;
+          if (lift >= 2 && (!conc || lift > conc.lift)) conc = { bucket: r.bucket, dim: r.d, lift };
+        }
+      }
+    }
+    const backendProblems = data.problems.filter((pr) => (pr.entityIds ?? [])
+      .some((e) => /^(SERVICE-|HOST-|PROCESS_GROUP|KUBERNETES|CLOUD_APPLICATION|RELATIONAL_|QUEUE-|CUSTOM_DEVICE-)/.test(e))).length;
+    return { cur, prev, per, d, errN, outErr, conc, backendProblems };
   })();
 
   const range = (pj: { lower: number; upper: number }) =>
@@ -333,6 +374,72 @@ export function ReportView({ data, onGo }: {
           </div>
         </section>
       )}
+
+      {/* where the difficulty lives — inside the backend, or outside it */}
+      {where && where.cur && (() => {
+        const t = trend(where.cur.srv, where.prev?.srv ?? where.cur.srv, false);
+        const ms = (ns: number) => ns >= 1e9 ? `${(ns / 1e9).toFixed(1)}s` : `${Math.round(ns / 1e6)}ms`;
+        const ERR_LBL: Array<[string, string, boolean]> = [
+          ["backend", "your backend (5xx)", true],
+          ["frontend", "frontend code", false],
+          ["third_party", "third parties", false],
+          ["device", "customer's device", false],
+          ["connection", "customer's connection", false],
+          ["request_4xx", "content & auth (4xx)", false],
+        ];
+        return (
+          <section className="bc__front" style={{ ["--fh" as string]: "var(--t-violet, var(--accent))" }}>
+            <h2 className="bc__ftitle">Where the difficulty lives</h2>
+            <div className="bc__diff">
+              <div className="bc__diff-hero">
+                <b className="num">{pct(where.cur.srv)}</b>
+                <span className="bc__diff-hl">of the waiting time is your backend</span>
+                <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
+                  {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "steady"
+                    : `${Math.abs(t.rel * 100).toFixed(0)}%`} vs previous {data.tf.label}
+                </span>
+              </div>
+              <div className="bc__diff-body">
+                {/* time evidence: the split bar */}
+                <div className="bc__diff-bar" role="img"
+                  aria-label={`server ${pct(where.cur.srv)}, network ${pct(where.cur.net)}, download and render ${pct(where.cur.rend)}`}>
+                  <i style={{ width: `${where.cur.srv * 100}%`, background: "var(--bad)" }} />
+                  <i style={{ width: `${where.cur.net * 100}%`, background: "var(--t-cyan)" }} />
+                  <i style={{ width: `${where.cur.rend * 100}%`, background: "var(--warn, #e8b04b)" }} />
+                </div>
+                <div className="bc__diff-leg">
+                  <span><i style={{ background: "var(--bad)" }} />server wait {ms(where.per(where.d.slow.cur.srv))}/view</span>
+                  <span><i style={{ background: "var(--t-cyan)" }} />connection &amp; DNS {ms(where.per(where.d.slow.cur.net))}/view</span>
+                  <span><i style={{ background: "var(--warn, #e8b04b)" }} />download &amp; render {ms(where.per(where.d.slow.cur.rend))}/view</span>
+                </div>
+                {/* error evidence: origin chips */}
+                <div className="bc__diff-errs">
+                  {ERR_LBL.filter(([b]) => where.errN(b) > 0).map(([b, lbl, inside]) => (
+                    <span key={b} className={`bc__diff-e${inside ? " bc__diff-e--in" : ""}`}>
+                      <b className="num">{fmtCount(where.errN(b))}</b> {lbl}
+                    </span>
+                  ))}
+                </div>
+                {/* the two corroborations */}
+                <div className="bc__diff-verdict">
+                  <span>
+                    {where.conc
+                      ? <>suffering concentrates in <b>{where.conc.bucket}</b> ({where.conc.dim},
+                          {" "}{where.conc.lift.toFixed(1)}× the average) — points <b>outside</b> your backend</>
+                      : <>suffering is spread evenly across segments — when it grows, look <b>inside</b> first</>}
+                  </span>
+                  <button className="bc__diff-dv" onClick={() => onGo?.("chain", scopeApp)}
+                    title="Open the delivery chain">
+                    Davis: {where.backendProblems
+                      ? `${fmtN(where.backendProblems)} open problem${where.backendProblems > 1 ? "s" : ""} on backend entities ↗`
+                      : "no open backend problems ↗"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
 
       {/* where conversion lives and dies — the segments to personalise for */}
       {segments && (segments.best.length > 0 || segments.worst.length > 0) && (

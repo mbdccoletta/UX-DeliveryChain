@@ -375,6 +375,55 @@ export const INFO_DIMS: Array<{ id: string; label: string; expr: string }> = [
  * dimension and both cohorts itself. One fetch, a dozen expressions, no id
  * list, and switching dimension or measure in the poster costs nothing.
  */
+/**
+ * WHERE THE DIFFICULTY LIVES — inside the backend or outside it — per
+ * application, both windows, one query. Two kinds of evidence:
+ *
+ * TIME (leg "slow", from view_summary): every view's wait decomposed by the
+ * agent itself — dns+connection = the user's NETWORK, ttfb waiting = the
+ * SERVER thinking, largest-paint minus first-byte = DOWNLOAD & RENDER on the
+ * user's device. Sums, so the share of total waiting is readable directly.
+ *
+ * ERRORS (leg "err"): each error's origin from its own record — request 5xx
+ * is the backend's fault; status 0/none never reached it (connection);
+ * crash/anr is the device; exception is frontend code; csp a third party or
+ * the user's own browser policy. Sessions counted per bucket.
+ */
+export const qDifficulty = (tf: Timeframe) => {
+  const span = `${tf.minutes}m`;
+  // UNITS, measured on the tenant: ttfb.* come in MILLISECONDS (floats —
+  // truncating them to long zeroes sub-ms waits), web_vitals.* and duration
+  // in NANOSECONDS. Everything is normalised to ns here.
+  const slow = (label: string, from: string, to: string) => `
+| append [ fetch user.events, from: ${from}, to: ${to}
+  | filter characteristics.classifier == "view_summary"
+  | fieldsAdd _net = (coalesce(toDouble(ttfb.dns_duration), 0.0) + coalesce(toDouble(ttfb.connection_duration), 0.0)) * 1000000
+  | fieldsAdd _srv = coalesce(toDouble(ttfb.waiting_duration), 0.0) * 1000000
+  | fieldsAdd _lcp = coalesce(toDouble(web_vitals.largest_contentful_paint), 0.0)
+  | fieldsAdd _ttfb = coalesce(toDouble(ttfb.value), 0.0) * 1000000
+  | fieldsAdd _rend = if(_lcp > _ttfb, _lcp - _ttfb, else: 0.0)
+  | summarize views = count(), meas = countIf(isNotNull(ttfb.value)),
+      net = sum(_net), srv = sum(_srv), rend = sum(_rend),
+    by: { appId = dt.rum.application.id, period = "${label}", kind = "slow", bucket = "" } ]`;
+  const err = (label: string, from: string, to: string) => `
+| append [ fetch user.events, from: ${from}, to: ${to}
+  | filter characteristics.classifier == "error"
+  | fieldsAdd bucket = if(error.type == "crash" or error.type == "anr", "device",
+      else: if(error.type == "csp", "third_party",
+      else: if(error.type == "exception", "frontend",
+      else: if(error.type == "request" and http.response.status_code >= 500, "backend",
+      else: if(error.type == "request" and (http.response.status_code == 0
+          or isNull(http.response.status_code)), "connection",
+      else: if(error.type == "request", "request_4xx", else: "other"))))))
+  | summarize sessions = countDistinct(dt.rum.session.id),
+    by: { appId = dt.rum.application.id, period = "${label}", kind = "err", bucket } ]`;
+  return `
+data record(appId = "", period = "", kind = "", bucket = "", views = 0, meas = 0,
+  net = 0.0, srv = 0.0, rend = 0.0, sessions = 0)
+| filter false${slow("cur", tf.from, tf.to)}${slow("prev", `${tf.from}-${span}`, tf.from)}${err("cur", tf.from, tf.to)}${err("prev", `${tf.from}-${span}`, tf.from)}
+| limit 400`;
+};
+
 /** The outcome-keyword match, per event, over _vn (the lowercased view name). */
 const DONE_DQL = ["checkout", "payment", "purchase", "confirm", "success",
   "complete", "booked", "receipt", "thank"].map((w) => `contains(_vn, "${w}")`).join(" or ");
@@ -428,6 +477,7 @@ export const qBizBreakdown = (tf: Timeframe) => {
   | filter isNotNull(v)
   | summarize sessions = count(), conv = countIf(reached == 1),
       realN = countIf(real), realConv = countIf(real and reached == 1),
+      realHit = countIf(real and errs > 0),
     by: { d = "${name}", bucket = toString(v), appId }
   | sort sessions desc | limit 40 ]`;
   // the error-cost leg: bucket = whether the session met an error
@@ -441,9 +491,10 @@ export const qBizBreakdown = (tf: Timeframe) => {
     by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
   | summarize sessions = count(), conv = countIf(reached == 1),
       realN = countIf(real), realConv = countIf(real and reached == 1),
+      realHit = countIf(real and errs > 0),
     by: { d = "__err", bucket = if(errs > 0, "hit", else: "clean"), appId } ]`;
   return `
-data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, realConv = 0)
+data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, realConv = 0, realHit = 0)
 | filter false${errLeg}${dims.map(([n, e]) => leg(n, e)).join("")}
 | limit 500`;
 };
