@@ -166,10 +166,9 @@ export function App() {
               )}
               {!d.loading && d.apps.length > 0 && tab !== "report" && (
                 <Select
-                  value={tab === "flow" ? appId : current}
-                  clearable={tab === "flow"}
-                  onChange={(v) => setAppId((v as string | null) ?? null)}>
-                  <Select.Trigger placeholder="All applications" />
+                  value={current}
+                  onChange={(v) => { if (v) setAppId(v as string); }}>
+                  <Select.Trigger placeholder="Application" />
                   <Select.Content>
                     {/* Web and mobile read differently in the rest of this app —
                         mobile carries no ingress, no third-party requests, and
@@ -253,7 +252,7 @@ export function App() {
 
           {tab === "flow" && (
             <div className="stack">
-              <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={appId}
+              <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={current || null}
                 transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
                 tf={tf}
                 cohort={state.coh === "unconverted" ? "unconverted" : null}
