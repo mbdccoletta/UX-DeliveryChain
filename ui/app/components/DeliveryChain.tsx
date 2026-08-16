@@ -1473,18 +1473,47 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         <div className="pad side__body drawer__body">
           {selAll !== null ? (
             <>
-              <div className="dd__h">All elements in this layer
-                <em>{fmtN(tiers[selAll].total)} total · {fmtN(tiers[selAll].items.length)} mapped</em></div>
-              {tiers[selAll].items.map((n, i) => (
-                <div key={i} className="lrow" style={{ ["--tone" as string]: TVAR[n.tone] }}
-                     role="button" tabIndex={0}
-                     onClick={() => setSel(`${selAll}-${i}`)}
-                     onKeyDown={(e) => { if (e.key === "Enter") setSel(`${selAll}-${i}`); }}>
-                  <span className="lrow__n">{n.nm}</span>
-                  <span className="lrow__m">{n.mt}</span>
-                  <span className="lrow__v">{n.v}</span>
-                </div>
-              ))}
+              {/* Impact leads, always: the elements dragging this layer come
+                  first, wearing their signals — a drill-down that buries the
+                  aching element under the healthy ones answers nothing. The
+                  original index rides along so selection still lands right. */}
+              {(() => {
+                const rows = tiers[selAll].items.map((n, i) => ({
+                  n, i,
+                  probs: n.miss ? 0 : problemsFor(n.ids ?? []).length,
+                  sigs: n.miss ? 0 : signalsFor(n.ids ?? []).length,
+                }));
+                const impacted = rows.filter((r) => r.probs > 0 || r.sigs > 0).length;
+                const rank = (r: typeof rows[number]) =>
+                  (r.probs > 0 ? 0 : r.sigs > 0 ? 1 : r.n.tone === "bad" ? 2
+                    : r.n.tone === "warn" ? 3 : 4);
+                const orderly = [...rows].sort((a, b) =>
+                  rank(a) - rank(b) || (b.probs - a.probs) || (b.sigs - a.sigs));
+                return (<>
+                  <div className="dd__h">All elements in this layer
+                    <em>{fmtN(tiers[selAll].total)} total · {fmtN(tiers[selAll].items.length)} mapped
+                      {impacted > 0 && <> · <b className="lrow__impn">{impacted} under an active signal</b></>}</em></div>
+                  {orderly.map(({ n, i, probs, sigs }) => (
+                    <div key={i}
+                         className={`lrow${probs > 0 || sigs > 0 ? " lrow--imp" : ""}`}
+                         style={{ ["--tone" as string]: TVAR[n.tone] }}
+                         role="button" tabIndex={0}
+                         onClick={() => setSel(`${selAll}-${i}`)}
+                         onKeyDown={(e) => { if (e.key === "Enter") setSel(`${selAll}-${i}`); }}>
+                      <span className="lrow__n">{n.nm}
+                        {probs > 0 && <i className="lrow__tag lrow__tag--p"
+                          title="Active Davis problems on this element">
+                          {probs} problem{probs > 1 ? "s" : ""}</i>}
+                        {sigs > 0 && <i className="lrow__tag lrow__tag--a"
+                          title="Anomalies Davis is watching on this element">
+                          {sigs} anomal{sigs > 1 ? "ies" : "y"}</i>}
+                      </span>
+                      <span className="lrow__m">{n.mt}</span>
+                      <span className="lrow__v">{n.v}</span>
+                    </div>
+                  ))}
+                </>);
+              })()}
               {tiers[selAll].total > tiers[selAll].items.length && (
                 <p className="dd__note">
                   {fmtN(tiers[selAll].total - tiers[selAll].items.length)} further elements exist in this layer
