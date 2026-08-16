@@ -379,13 +379,15 @@ export function ReportView({ data, onGo }: {
       {where && where.cur && (() => {
         const t = trend(where.cur.srv, where.prev?.srv ?? where.cur.srv, false);
         const ms = (ns: number) => ns >= 1e9 ? `${(ns / 1e9).toFixed(1)}s` : `${Math.round(ns / 1e6)}ms`;
-        const ERR_LBL: Array<[string, string, boolean]> = [
-          ["backend", "your backend (5xx)", true],
-          ["frontend", "frontend code", false],
-          ["third_party", "third parties", false],
-          ["device", "customer's device", false],
-          ["connection", "customer's connection", false],
-          ["request_4xx", "content & auth (4xx)", false],
+        // what the reader sees is business language; the measurement behind
+        // each phrase stays one hover away in the tooltip
+        const ERR_LBL: Array<[string, string, string, boolean]> = [
+          ["backend", "let down by your service", "server errors (HTTP 5xx)", true],
+          ["frontend", "hit a defect in the app", "JavaScript exceptions in your frontend code", false],
+          ["third_party", "hit a partner's service", "content-security violations naming the third party", false],
+          ["device", "let down by their own phone", "app crashes and freezes (crash / ANR)", false],
+          ["connection", "lost their own connection", "requests that never got a response (status 0)", false],
+          ["request_4xx", "asked for something unavailable", "HTTP 4xx — missing content or sign-in required", false],
         ];
         return (
           <section className="bc__front" style={{ ["--fh" as string]: "var(--t-violet, var(--accent))" }}>
@@ -393,10 +395,14 @@ export function ReportView({ data, onGo }: {
             <div className="bc__diff">
               <div className="bc__diff-hero">
                 <b className="num">{pct(where.cur.srv)}</b>
-                <span className="bc__diff-hl">of the waiting time is your backend</span>
+                <span className="bc__diff-hl">of your customers&apos; waiting is caused by your systems</span>
                 <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
                   {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "steady"
                     : `${Math.abs(t.rel * 100).toFixed(0)}%`} vs previous {data.tf.label}
+                </span>
+                <span className="bc__diff-money">
+                  Your systems answer in {ms(where.per(where.d.slow.cur.srv))} — the rest of the
+                  wait happens on the customer&apos;s side.
                 </span>
               </div>
               <div className="bc__diff-body">
@@ -408,14 +414,19 @@ export function ReportView({ data, onGo }: {
                   <i style={{ width: `${where.cur.rend * 100}%`, background: "var(--warn, #e8b04b)" }} />
                 </div>
                 <div className="bc__diff-leg">
-                  <span><i style={{ background: "var(--bad)" }} />server wait {ms(where.per(where.d.slow.cur.srv))}/view</span>
-                  <span><i style={{ background: "var(--t-cyan)" }} />connection &amp; DNS {ms(where.per(where.d.slow.cur.net))}/view</span>
-                  <span><i style={{ background: "var(--warn, #e8b04b)" }} />download &amp; render {ms(where.per(where.d.slow.cur.rend))}/view</span>
+                  <span title="Server processing — time to first byte, waiting portion">
+                    <i style={{ background: "var(--bad)" }} />your systems · {ms(where.per(where.d.slow.cur.srv))} per screen</span>
+                  <span title="The customer's network — DNS lookup + connection time">
+                    <i style={{ background: "var(--t-cyan)" }} />the customer&apos;s internet · {ms(where.per(where.d.slow.cur.net))} per screen</span>
+                  <span title="After the first byte: downloading and drawing the screen on the customer's device">
+                    <i style={{ background: "var(--warn, #e8b04b)" }} />the customer&apos;s device · {ms(where.per(where.d.slow.cur.rend))} per screen</span>
                 </div>
                 {/* error evidence: origin chips */}
                 <div className="bc__diff-errs">
-                  {ERR_LBL.filter(([b]) => where.errN(b) > 0).map(([b, lbl, inside]) => (
-                    <span key={b} className={`bc__diff-e${inside ? " bc__diff-e--in" : ""}`}>
+                  <span className="bc__diff-el">customers who…</span>
+                  {ERR_LBL.filter(([b]) => where.errN(b) > 0).map(([b, lbl, tech, inside]) => (
+                    <span key={b} className={`bc__diff-e${inside ? " bc__diff-e--in" : ""}`}
+                      title={tech}>
                       <b className="num">{fmtCount(where.errN(b))}</b> {lbl}
                     </span>
                   ))}
@@ -424,15 +435,17 @@ export function ReportView({ data, onGo }: {
                 <div className="bc__diff-verdict">
                   <span>
                     {where.conc
-                      ? <>suffering concentrates in <b>{where.conc.bucket}</b> ({where.conc.dim},
-                          {" "}{where.conc.lift.toFixed(1)}× the average) — points <b>outside</b> your backend</>
-                      : <>suffering is spread evenly across segments — when it grows, look <b>inside</b> first</>}
+                      ? <>the pain concentrates on customers using <b>{where.conc.bucket}</b>
+                          {" "}({where.conc.lift.toFixed(1)}× the average) — a sign the cause is on
+                          {" "}<b>their side</b>, not yours</>
+                      : <>the pain touches every kind of customer alike — when it grows, the cause
+                          is usually on <b>your side</b></>}
                   </span>
                   <button className="bc__diff-dv" onClick={() => onGo?.("chain", scopeApp)}
-                    title="Open the delivery chain">
-                    Davis: {where.backendProblems
-                      ? `${fmtN(where.backendProblems)} open problem${where.backendProblems > 1 ? "s" : ""} on backend entities ↗`
-                      : "no open backend problems ↗"}
+                    title="Davis AI's open problems on backend entities — opens the delivery chain">
+                    {where.backendProblems
+                      ? `AI monitoring confirms ${fmtN(where.backendProblems)} live incident${where.backendProblems > 1 ? "s" : ""} in your systems ↗`
+                      : "AI monitoring sees no live incident in your systems ↗"}
                   </button>
                 </div>
               </div>
