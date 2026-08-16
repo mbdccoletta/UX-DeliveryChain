@@ -1111,6 +1111,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const selDomainTraces = useDomainTraces(
     selAddress ? [selAddress] : [], data.tf, !!selAddress);
 
+
   // Whether the open drawer's element carries detected signals — it decides
   // which rows the drawer offers, not whether impact gets fetched (impact is
   // now loaded up front, because it colours the graph).
@@ -1119,6 +1120,71 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // Whatever made this element amber or red, the reader is owed the count of
   // people behind it — measured harm earns the row exactly as a Davis problem does.
   const selShowsImpact = !!selElo && (selElo.tone === "bad" || selElo.tone === "warn");
+
+  /* The element's investigation routes, computed once: the drawer's TOP
+   * proposes the destination apps from them (the reader's rule — summarise
+   * what matters, then name where to act), and the bottom still walks the
+   * full routes. */
+  const elRoutes = React.useMemo(() => {
+    if (!selElo) return null;
+    const fcObj = metTarget?.kind === "app" ? ahead : met?.fc;
+    const fcRising = (!!fcObj && fcObj.slope > 0) || selElo.spark?.rising === true;
+    const nProbs = problemsFor(selElo.ids ?? []).length;
+    const nSigs = signalsFor(selElo.ids ?? []).length;
+    const scopedApp = data.apps.find((a) => a.appId === appId);
+    return {
+      list: investigationPaths({
+                  ids: selElo.ids ?? [],
+                  name: selElo.nm,
+                  tf: data.tf,
+                  // buildTiers already knows exactly what kind of card this
+                  // is — decided once, here, not re-guessed from ids prefixes
+                  // inside investigationPaths (see kindOf's own comment).
+                  kind: kindOf(selTier ?? -1, selElo),
+                  problems: nProbs,
+                  problem: problemsFor(selElo.ids ?? [])[0],
+                  problemHints: problemsFor(selElo.ids ?? [])
+                    .map((x) => `${x.category} ${x.name}`),
+                  // Every element in this chain belongs to the one scoped
+                  // application, whichever layer it sits in — not only the
+                  // application card itself. A Consume-layer origin bucket
+                  // (Mobile, Robots…) used to have no way to reach "Sessions
+                  // and conversion" at all because this was gated to tier 2.
+                  rumAppId: appId,
+                  scopedAppName: scopedApp?.name,
+                  scopedEntity: scopedApp?.entity,
+                  // lets the route offer Error Inspector — the Gen3 app whose
+                  // whole subject is the thing this element is failing at.
+                  // Passed for every card; the kind switch decides which of
+                  // them actually offer it (the app card and the origins).
+                  errors: scopedApp?.errors,
+                  // an origin card's vol IS its session count — the sessions
+                  // hand-off is gated on it, so a segment with nothing to
+                  // list offers no list
+                  sessions: selTier === 0 ? selElo.vol : undefined,
+                  // the fatal subset, so a mobile application's route can
+                  // lead with the thing its card leads with
+                  crashes: scopedApp?.crashes,
+                  dbEntity: dbEntity ?? undefined,
+                  // A store card carries no `domain`, it carries `store` — the
+                  // same address shape, just named for what it is.
+                  domain: selElo.domain ?? selElo.store,
+                  domainHasSpans: !!selAddress && !!selDomainTraces?.has(selAddress),
+                  impacted: selShowsImpact && impacted && impacted.hit > 0 ? impacted : undefined,
+                  signals: nSigs,
+                  forecastRising: fcRising,
+                  assist,
+                  apps,
+                  // the element's own measured numbers travel as hidden context,
+                  // so Assist reads this element rather than the environment
+                  facts: { lines: selElo.det.map(([k, v]) => `${k}: ${v}.`) },
+      }),
+      mode: (selElo.tone === "good" ? "optimize" : "incident") as "optimize" | "incident",
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selElo, selTier, appId, data, met, ahead, dbEntity, selAddress,
+      selDomainTraces, impacted, assist, apps]);
+
 
   const bar = (items: Array<[string, number]>, tone: (k: string) => Tone) => {
     const tot = items.reduce((a, i) => a + i[1], 0) || 1;
@@ -1551,6 +1617,52 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   <i className="sig" style={{ background: TVAR[selElo.tone] }} />{selElo.nm}
                 </span>
               </div>
+
+              {/* WHAT MATTERS, FIRST — the reader's rule for element
+                  drill-downs: the aching truth in one line, then the apps
+                  that act on it, before any table. Chips are the routes'
+                  own steps deduplicated by destination, so they can never
+                  disagree with the full routes below. */}
+              {(() => {
+                const probs = problemsFor(selElo.ids ?? []);
+                const sigs = signalsFor(selElo.ids ?? [])
+                  .filter((x) => x.provider === "BASELINING");
+                const seen = new Set<string>();
+                const chips = (elRoutes?.list ?? [])
+                  .flatMap((r) => r.steps)
+                  .filter((st) => st.href && st.app && st.app !== "Assist"
+                    && !seen.has(st.app) && seen.add(st.app));
+                if (!probs.length && !sigs.length && !chips.length) return null;
+                return (
+                  <div className="elsum">
+                    {probs.length > 0 ? (
+                      <span className="elsum__v elsum__v--bad">
+                        ⚠ {probs[0].name}
+                        <em>{probs[0].display_id} · {probs[0].category}
+                          {probs.length > 1 && ` · +${probs.length - 1} more`}</em>
+                      </span>
+                    ) : sigs.length > 0 && (
+                      <span className="elsum__v elsum__v--warn">
+                        ⚠ {sigs[0].name}
+                        <em>anomaly under watch{sigs.length > 1 && ` · +${sigs.length - 1} more`}</em>
+                      </span>
+                    )}
+                    {chips.length > 0 && (
+                      <span className="elsum__apps">
+                        <i className="elsum__lbl">open in</i>
+                        {chips.slice(0, 5).map((st) => (
+                          <a key={st.app} className="elsum__chip" href={st.href}
+                            target="_blank" rel="noopener"
+                            title={`${st.app} — ${st.proves}`}
+                            style={{ ["--app" as string]: styleOf(st.app).hue }}>
+                            {st.app} ↗
+                          </a>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
               {met && (() => {
                 const fc = metTarget?.kind === "app" ? ahead : met.fc;
                 const fcRising = !!fc && fc.slope > 0;
@@ -1654,75 +1766,25 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     </>)}
                     {exts.length > 0 && (<>
                       <div className="dd__h" style={{ color: "var(--accent)" }}>
-                        Extension events <em>24h</em>
+                        Extension events <em>24h · first line of each signal</em>
                       </div>
+                      {/* A signal's name can be a page of process dumps (the
+                          zombie-accumulation event ships its samples inline).
+                          The row keeps the first line — the finding — and the
+                          detail stays in the platform that raised it. */}
                       <Table cols={["Provider", "Signal", "Events"]}
-                        rows={exts.slice(0, 6).map((x) => [x.provider, x.name, fmtN(x.events)])} />
+                        rows={exts.slice(0, 6).map((x) => {
+                          const one = String(x.name).split(/[.;](\s|$)/)[0];
+                          return [x.provider,
+                            one.length > 110 ? one.slice(0, 110) + "…" : one,
+                            fmtN(x.events)];
+                        })} />
                     </>)}
                   </div>
                 );
               })()}
 
-              {(() => {
-                const fcObj = metTarget?.kind === "app" ? ahead : met?.fc;
-                const fcRising = (!!fcObj && fcObj.slope > 0) || selElo.spark?.rising === true;
-                const nProbs = problemsFor(selElo.ids ?? []).length;
-                const nSigs = signalsFor(selElo.ids ?? []).length;
-                const scopedApp = data.apps.find((a) => a.appId === appId);
-                return <Routes list={investigationPaths({
-                  ids: selElo.ids ?? [],
-                  name: selElo.nm,
-                  tf: data.tf,
-                  // buildTiers already knows exactly what kind of card this
-                  // is — decided once, here, not re-guessed from ids prefixes
-                  // inside investigationPaths (see kindOf's own comment).
-                  kind: kindOf(selTier ?? -1, selElo),
-                  problems: nProbs,
-                  problem: problemsFor(selElo.ids ?? [])[0],
-                  problemHints: problemsFor(selElo.ids ?? [])
-                    .map((x) => `${x.category} ${x.name}`),
-                  // Every element in this chain belongs to the one scoped
-                  // application, whichever layer it sits in — not only the
-                  // application card itself. A Consume-layer origin bucket
-                  // (Mobile, Robots…) used to have no way to reach "Sessions
-                  // and conversion" at all because this was gated to tier 2.
-                  rumAppId: appId,
-                  scopedAppName: scopedApp?.name,
-                  scopedEntity: scopedApp?.entity,
-                  // lets the route offer Error Inspector — the Gen3 app whose
-                  // whole subject is the thing this element is failing at.
-                  // Passed for every card; the kind switch decides which of
-                  // them actually offer it (the app card and the origins).
-                  errors: scopedApp?.errors,
-                  // an origin card's vol IS its session count — the sessions
-                  // hand-off is gated on it, so a segment with nothing to
-                  // list offers no list
-                  sessions: selTier === 0 ? selElo.vol : undefined,
-                  // the fatal subset, so a mobile application's route can
-                  // lead with the thing its card leads with
-                  crashes: scopedApp?.crashes,
-                  dbEntity: dbEntity ?? undefined,
-                  // A store card carries no `domain`, it carries `store` — the
-                  // same address shape, just named for what it is.
-                  domain: selElo.domain ?? selElo.store,
-                  domainHasSpans: !!selAddress && !!selDomainTraces?.has(selAddress),
-                  impacted: selShowsImpact && impacted && impacted.hit > 0 ? impacted : undefined,
-                  signals: nSigs,
-                  forecastRising: fcRising,
-                  assist,
-                  apps,
-                  // the element's own measured numbers travel as hidden context,
-                  // so Assist reads this element rather than the environment
-                  facts: { lines: selElo.det.map(([k, v]) => `${k}: ${v}.`) },
-                })}
-                  // The element's own verdict decides the framing, not the
-                  // Davis signals alone. Judging by signals only, easytrade —
-                  // 675 of 2,041 sessions hit, every one of them a real person
-                  // — was announced as "nothing is failing", two lines under a
-                  // Status row that said Warning. The header must never
-                  // contradict the drawer it sits in.
-                  mode={selElo.tone === "good" ? "optimize" : "incident"} />;
-              })()}
+              {elRoutes && <Routes list={elRoutes.list} mode={elRoutes.mode} />}
             </>
           )}
         </div>
