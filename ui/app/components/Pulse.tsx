@@ -65,13 +65,12 @@ function useCountUp(target: number, ms = 1100): number {
   return v;
 }
 
-export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
+export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;
   appId: string;
   onOpenChain: (hl?: "anomalies") => void;
   /** "Analyze user sessions", answered inside this app: the Journey tab. */
   onAnalyze: () => void;
-  onSeeEstate: () => void;
 }) {
   const app = data.apps.find((a) => a.appId === appId);
   const impacted = useImpacted(appId, data.tf, true);
@@ -232,7 +231,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze, onSeeEstate }: {
           })() : "…"}
           {" "}· <b className="num">{data.problems.length}</b> active problems
         </span>
-        <button className="pl-link" onClick={onSeeEstate}>see the whole estate →</button>
       </div>
 
       <div className="tk-hd">
