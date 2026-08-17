@@ -16,7 +16,7 @@ let activeDone: (v: string) => boolean = (v) => DONE.test(v);
 const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
-import { edgeHealth, frictionFor, priorities } from "../utils/friction";
+import { edgeHealth, frictionFor } from "../utils/friction";
 
 type Tone = "good" | "warn" | "bad" | "info";
 interface Node {
@@ -1406,7 +1406,6 @@ export function FlowSankey({
           })}
         </ul>
       </div>
-      <Priorities list={priorities(transitions, friction, appId, apps)} />
     </div>
   );
 }
@@ -1416,22 +1415,4 @@ export function FlowSankey({
  * the only ordering the business can act on — a lost session outranks a slow
  * one, and volume breaks the tie.
  */
-function Priorities({ list }: { list: ReturnType<typeof priorities> }) {
-  if (!list.length) return null;
-  return (
-    <div className="prio">
-      <div className="prio__t">Fix first</div>
-      {list.map((p) => (
-        <div className="prio__r" key={p.rank}
-          style={{ ["--h" as string]: p.health === "losing" ? "var(--bad)" : "var(--warn)" }}>
-          <span className="prio__n">{p.rank}</span>
-          <span className="prio__w">
-            {p.app && <em className="prio__a">{p.app}</em>}{p.where}
-          </span>
-          <span className="prio__d">{p.what}</span>
-          {p.cause && <span className="prio__c">{p.cause}</span>}
-        </div>
-      ))}
-    </div>
-  );
-}
+

@@ -844,20 +844,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
                  background: var(--panel); padding: 1px 5px; }
 
 /* fix-first ranking, under the flow */
-.prio { border-top: 1px solid var(--border); padding: 9px 14px 11px; flex: none;
-        max-height: 168px; overflow-y: auto; }
-.prio__t { font: 700 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
-           color: var(--ink-3); margin-bottom: 6px; }
-.prio__r { display: grid; grid-template-columns: auto auto 1fr; gap: 4px 10px;
-           align-items: baseline; padding: 5px 0 5px 9px; border-left: 2px solid var(--h);
-           margin-bottom: 4px; }
-.prio__n { font: 700 11px var(--mono); color: var(--h); }
-.prio__w { font: 600 12px var(--mono); color: var(--ink); }
-.prio__d { font: 400 12px var(--sans); color: var(--ink-2); }
-.prio__c { grid-column: 2 / -1; font: 400 11px var(--mono); color: var(--ink-3);
-           word-break: break-all; }
-.prio__a { font-style: normal; color: var(--ink-3); margin-right: 8px;
-           font: 500 11px var(--sans); }
 
 /* marks a node that is only classic because no new-platform app is installed */
 .path__gen { font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
