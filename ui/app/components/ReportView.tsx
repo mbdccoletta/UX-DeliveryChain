@@ -66,10 +66,10 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   onClearRoutes?: () => void;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
-  const kpis = useBizKpis(data.tf, outcomeDefs);
+  const kpis = useBizKpis(data.tf, outcomeDefs, scopeApp || null);
   const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs);
-  const breakdown = useBizBreakdown(data.tf, outcomeDefs);
-  const difficulty = useDifficulty(data.tf);
+  const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
+  const difficulty = useDifficulty(data.tf, scopeApp || null);
   // the SAME closure the delivery chain resolves — so "incidents in your
   // systems" counts exactly what a click on the button will show lit
   const chainScope = useAppScope(scopeApp || undefined,
@@ -120,10 +120,11 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
       engagedShare: real ? (s?.realEngaged ?? 0) / real : 0,
     };
   };
-  // scope: one application's own two periods, or the estate's
-  const appPeriods = scopeApp ? kpis?.byApp.get(scopeApp) : undefined;
-  const curP = scopeApp ? appPeriods?.cur : kpis?.estate.cur;
-  const prevP = scopeApp ? appPeriods?.prev : kpis?.estate.prev;
+  // one application's own two periods — the board has had no estate view
+  // since "All applications" was removed, and the query is scoped to match
+  const appPeriods = kpis?.byApp.get(scopeApp);
+  const curP = appPeriods?.cur;
+  const prevP = appPeriods?.prev;
   /** The route cohort wears the same shape the app figures do. */
   const asFacts = (x?: CohortFacts) => ({
     customersAtRisk: x?.hit ?? 0, crashed: x?.crashed ?? 0,

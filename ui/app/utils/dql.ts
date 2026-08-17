@@ -465,13 +465,16 @@ data record(kind = "", bucket = "", n = 0, meas = 0, cacheMs = 0.0, dnsMs = 0.0,
 | limit 40`;
 };
 
-export const qDifficulty = (tf: Timeframe) => {
+export const qDifficulty = (tf: Timeframe, rumAppId?: string | null) => {
   const span = `${tf.minutes}m`;
+  // scoped like the board it feeds — the section describes one application
+  const appFilter = rumAppId
+    ? `\n  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
   // UNITS, measured on the tenant: ttfb.* come in MILLISECONDS (floats —
   // truncating them to long zeroes sub-ms waits), web_vitals.* and duration
   // in NANOSECONDS. Everything is normalised to ns here.
   const slow = (label: string, from: string, to: string) => `
-| append [ fetch user.events, from: ${from}, to: ${to}
+| append [ fetch user.events, from: ${from}, to: ${to}${appFilter}
   | filter characteristics.classifier == "view_summary"
   | fieldsAdd _net = (coalesce(toDouble(ttfb.dns_duration), 0.0) + coalesce(toDouble(ttfb.connection_duration), 0.0)) * 1000000
   | fieldsAdd _srv = coalesce(toDouble(ttfb.waiting_duration), 0.0) * 1000000
@@ -484,7 +487,7 @@ export const qDifficulty = (tf: Timeframe) => {
       net = sum(_net), srv = sum(_srv), rend = sum(_rend),
     by: { appId = dt.rum.application.id, period = "${label}", kind = "slow", bucket = "" } ]`;
   const err = (label: string, from: string, to: string) => `
-| append [ fetch user.events, from: ${from}, to: ${to}
+| append [ fetch user.events, from: ${from}, to: ${to}${appFilter}
   | filter characteristics.classifier == "error"
   | fieldsAdd bucket = if(error.type == "crash" or error.type == "anr", "device",
       else: if(error.type == "csp",
@@ -612,7 +615,13 @@ export const qBizSeries = (
   defs?: OutcomeDefs,
 ) => {
   const span = Math.max(tf.minutes, 30);
-  const history = `now()-${span * 6}m`;
+  /* THREE windows of history, not six. Measured both against the analyzer:
+   * 12h and 6h of history for a 2h view both return OK / VALID with the same
+   * eight forecast points — the extra six hours bought no quality and cost
+   * 17 GB per call on this tenant (two calls per board load). Merging the
+   * two metrics into one call was tried and rejected: the analyzer forecasts
+   * only the first series and silently drops the second. */
+  const history = `now()-${span * 3}m`;
   const interval = Math.max(5, Math.round(span / 8));
   const appFilter = rumAppId
     ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
@@ -631,53 +640,44 @@ export const qBizSeries = (
  * { d, bucket, appId, sessions, conv, realN, realConv }, per application so
  * the board's scope filter cuts it client-side.
  */
-export const qBizBreakdown = (tf: Timeframe, defs?: OutcomeDefs) => {
-  const dims: Array<[string, string]> = [
-    ["country", "geo.country.iso_code"],
-    ["os", "os.name"],
-    ["browser", "browser.name"],
-    ["device type", "device.type"],
-    ["user type", "dt.rum.user_type"],
-  ];
-  const leg = (name: string, expr: string) => `
-| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
-  | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
-  | fieldsAdd _done = if(${outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
-  | summarize v = takeAny(${expr}), reached = max(_done),
-      errs = countIf(characteristics.classifier == "error"),
-      // deterministic like qBizKpis/qUxByApp — takeAny flipped a coin on the
-      // 117 sessions that carry two user_type values
-      real = min(if(not(dt.rum.user_type == "robot")
-        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
-    by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
-  | filter isNotNull(v) and isNotNull(appId) and appId != ""
-      and not(startsWith(appId, "APPLICATION-"))
-  | summarize sessions = count(), conv = countIf(reached == 1),
-      realN = countIf(real == 1), realConv = countIf(real == 1 and reached == 1),
-      realHit = countIf(real == 1 and errs > 0),
-    by: { d = "${name}", bucket = toString(v), appId }
-  | sort sessions desc | limit 40 ]`;
-  // the error-cost leg: bucket = whether the session met an error
-  const errLeg = `
-| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
-  | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
-  | fieldsAdd _done = if(${outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
-  | summarize reached = max(_done),
-      errs = countIf(characteristics.classifier == "error"),
-      // deterministic like qBizKpis/qUxByApp — takeAny flipped a coin on the
-      // 117 sessions that carry two user_type values
-      real = min(if(not(dt.rum.user_type == "robot")
-        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
-    by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
-  | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
-  | summarize sessions = count(), conv = countIf(reached == 1),
-      realN = countIf(real == 1), realConv = countIf(real == 1 and reached == 1),
-      realHit = countIf(real == 1 and errs > 0),
-    by: { d = "__err", bucket = if(errs > 0, "hit", else: "clean"), appId } ]`;
+/**
+ * Business Control's breakdown — ONE scan, not six.
+ *
+ * It used to be an append per dimension (five of them plus the error leg),
+ * and measured on this tenant each leg paid its own 5.9 GB: 35.4 GB for one
+ * board load, the single most expensive query in the app. Every leg read the
+ * same rows to group them differently, so the whole thing collapses into one
+ * per-session scan that carries the dimensions as columns; the browser does
+ * the grouping, which costs nothing.
+ *
+ * Scoped to one application, because the board has shown one since the estate
+ * view was removed — measured, that alone halves what remains (0.24 GB for a
+ * small application). 35.4 GB → 2.9 GB, same numbers on screen.
+ */
+export const qBizBreakdown = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | null) => {
+  const appFilter = rumAppId
+    ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
+  const done = rumAppId
+    ? outcomeDqlForApp("_vn", rumAppId, defs)
+    : outcomeDqlByApp("_vn", "dt.rum.application.id", defs);
   return `
-data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, realConv = 0, realHit = 0)
-| filter false${errLeg}${dims.map(([n, e]) => leg(n, e)).join("")}
-| limit 500`;
+fetch user.events, from: ${tf.from}, to: ${tf.to}${appFilter}
+| fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+| fieldsAdd _done = if(${done}, 1, else: 0)
+| summarize reached = max(_done),
+    errs = countIf(characteristics.classifier == "error"),
+    // deterministic, like every other session verdict in this file
+    real = min(if(not(dt.rum.user_type == "robot")
+      and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
+    country = takeAny(geo.country.iso_code),
+    os = takeAny(os.name),
+    browser = takeAny(browser.name),
+    deviceType = takeAny(device.type),
+    userType = takeAny(dt.rum.user_type),
+  by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
+| filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
+| fields appId, reached, errs, real, country, os, browser, deviceType, userType
+| limit 20000`;
 };
 
 export const qCohortSessions = (tf: Timeframe, rumAppId: string, defs?: OutcomeDefs) => {
@@ -735,13 +735,20 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * carry the RUM app id so per-application tiles and the estate tile come
  * from one scan.
  */
-export const qBizKpis = (tf: Timeframe, defs?: OutcomeDefs) => {
+export const qBizKpis = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | null) => {
+  /* SCOPED BY DEFAULT. Measured: an unfiltered leg over this tenant's 2h of
+   * user.events scans 5.9 GB, the same leg filtered to one application 2.9 GB
+   * (0.24 GB for a small one) — filters cut what projection cannot. The board
+   * has shown ONE application since the estate view was removed, so the
+   * estate aggregate this used to build had no reader at all. */
+  const appFilter = rumAppId
+    ? `\n  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
   const span = `${Math.max(1, Math.round(tf.minutes))}m`;
   // a session "converted" if any of its views names an outcome — the ONE
   // vocabulary (OUTCOME_WORDS) reachesOutcome() also uses
   const DONE_MATCH = outcomeDqlByApp("vn", "dt.rum.application.id", defs);
   const both = (label: string, from: string, to: string) => `
-| append [ fetch user.events, from: ${from}, to: ${to}
+| append [ fetch user.events, from: ${from}, to: ${to}${appFilter}
   | fieldsAdd real = not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
   | fieldsAdd vn = lower(coalesce(view.name, view.detected_name, ""))
   | fieldsAdd done1 = if(${DONE_MATCH}, 1, else: 0)
