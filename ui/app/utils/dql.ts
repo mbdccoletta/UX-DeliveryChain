@@ -462,9 +462,28 @@ data record(kind = "", bucket = "", sessions = 0, real = 0, robots = 0,
 | limit 20`;
 };
 
-/** The outcome-keyword match, per event, over _vn (the lowercased view name). */
-const DONE_DQL = ["checkout", "payment", "purchase", "confirm", "success",
-  "complete", "booked", "receipt", "thank"].map((w) => `contains(_vn, "${w}")`).join(" or ");
+/**
+ * THE OUTCOME VOCABULARY — one list, measured against every application on
+ * this tenant (audit 2026-08-16), shared by the DQL builders and the JS
+ * regex so no two screens can disagree about what "converted" means.
+ *
+ * What the audit changed: "payment" is NOT completion — on the orange apps
+ * the real completion is /orange-booking-finish.jsf and 894 sessions that
+ * stopped at the payment view were being counted converted while 204 real
+ * finishers were counted abandoned. "finish" joins the list, "payment" moves
+ * to INTENT. The banking apps complete at /deposit, /withdraw and
+ * /credit-card/order; easytravel-angular completes at a path ENDING in
+ * "/book" — endsWith, because contains("book") would swallow every
+ * "/orange-booking-…" page and convert the whole estate.
+ */
+const OUTCOME_WORDS = ["checkout", "purchase", "confirm", "success",
+  "complete", "booked", "receipt", "thank", "finish", "deposit", "withdraw",
+  "credit-card/order"];
+/** The DQL contains-any over a lowercased view-name variable. */
+const outcomeDql = (v: string) =>
+  OUTCOME_WORDS.map((w) => `contains(${v}, "${w}")`).join(" or ")
+  + ` or endsWith(${v}, "/book")`;
+const DONE_DQL = outcomeDql("_vn");
 
 /**
  * The series Davis forecasts for Business Control — sessions or conversions
@@ -539,8 +558,7 @@ data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, 
 
 export const qCohortSessions = (tf: Timeframe, rumAppId: string) => {
   const app = rumAppId.replace(/["\\]/g, "");
-  const DONE = ["checkout", "payment", "purchase", "confirm", "success",
-    "complete", "booked", "receipt", "thank"].map((w) => `contains(_vn, "${w}")`).join(" or ");
+  const DONE = outcomeDql("_vn");
   const field = (id: string, expr: string) => `${id} = takeAny(${expr})`;
   const cols = INFO_DIMS.filter((d) => d.expr).map((d) => field(d.id, d.expr)).join(",\n      ");
   return `
@@ -548,6 +566,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${app}"
 | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
 | fieldsAdd _done = if(${DONE}, 1, else: 0)
+| sort start_time asc
 | summarize
       ${cols},
       entry = takeFirst(if(characteristics.classifier == "navigation"
@@ -585,11 +604,9 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  */
 export const qBizKpis = (tf: Timeframe) => {
   const span = `${Math.max(1, Math.round(tf.minutes))}m`;
-  // a session "converted" if any of its views names an outcome — the same
-  // keyword set reachesOutcome() uses, expressed for DQL as contains-any
-  const DONE_MATCH = ["checkout", "payment", "purchase", "confirm", "success",
-    "complete", "booked", "receipt", "thank"]
-    .map((w) => `contains(vn, "${w}")`).join(" or ");
+  // a session "converted" if any of its views names an outcome — the ONE
+  // vocabulary (OUTCOME_WORDS) reachesOutcome() also uses
+  const DONE_MATCH = outcomeDql("vn");
   const both = (label: string, from: string, to: string) => `
 | append [ fetch user.events, from: ${from}, to: ${to}
   | fieldsAdd real = not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
@@ -635,8 +652,10 @@ data record(appId = "", period = "", sessions = 0, realSessions = 0, converted =
  * and a mobile screen (`CheckoutActivity`) alike. A heuristic, not a contract:
  * callers must handle the case where an application uses none of these words.
  */
-export const DONE = /checkout|payment|purchase|confirm|success|thank|complete|receipt|booked/i;
-export const INTENT = /cart|basket|bag|order|booking|reserv|signup|register|subscribe|apply|quote/i;
+export const DONE =
+  /checkout|purchase|confirm|success|thank|complete|receipt|booked|finish|deposit|withdraw|credit-card\/order|\/book$/i;
+export const INTENT =
+  /cart|basket|bag|order|booking|reserv|signup|register|subscribe|apply|quote|payment/i;
 
 /** True when this journey reaches a recognisable final step. */
 export const reachesOutcome = (journey: string[]) => journey.some((v) => DONE.test(v));
