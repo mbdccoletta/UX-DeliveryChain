@@ -63,6 +63,17 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
   // systems" counts exactly what a click on the button will show lit
   const chainScope = useAppScope(scopeApp || undefined,
     data.apps.find((a) => a.appId === scopeApp)?.entity ?? undefined);
+  /** Problems touching THIS application's chain — the board's ONE problem
+   *  definition, shared by the open-incidents tile and the Davis button.
+   *  (The tile once matched entity ids by substring: zero for every app,
+   *  forever, while the header said 24 — three auditors caught it.) */
+  const chainProblems = (() => {
+    if (!chainScope.resolved) return null;
+    const entity = data.apps.find((a) => a.appId === scopeApp)?.entity ?? "";
+    return data.problems.filter((pr) => (pr.entityIds ?? [])
+      .some((e) => chainScope.services.has(e) || chainScope.runtime.has(e)
+        || e === entity)).length;
+  })();
   const nameOf = (id: string) =>
     data.apps.find((x) => x.appId === id)?.name ?? id.slice(0, 8);
   const tv = Number(ticket) > 0 ? Number(ticket) : null;
@@ -83,7 +94,10 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
       customers: real,
       conversion: real ? convR / real : 0,
       converted: convR,
-      engagedShare: (s?.sessions ?? 0) ? (s?.engaged ?? 0) / (s?.sessions ?? 1) : 0,
+      // REAL people only — engaged over all sessions once mixed with the
+      // real customer base and understated bounces by 15% (audit-measured)
+      realEngaged: s?.realEngaged ?? 0,
+      engagedShare: real ? (s?.realEngaged ?? 0) / real : 0,
     };
   };
   // scope: one application's own two periods, or the estate's
@@ -123,7 +137,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
     );
   };
 
-  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share }: {
+  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share, liveOnly }: {
     label: string; cur: number; prev: number; fmt: (v: number) => string;
     riseIsGood: boolean; tab: "home" | "flow" | "chain";
     /** A cohort intent passed to the Flow — opens its infographic directly. */
@@ -132,6 +146,8 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
     caption?: string;
     /** Share of the customer base (0..1): drawn as a thin proportion bar. */
     share?: number;
+    /** A live-only fact (open problems): no honest previous value exists. */
+    liveOnly?: boolean;
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
     const t = trend(cv, pv, riseIsGood);
@@ -141,9 +157,11 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
         <span className="bc__stat-l">{label}</span>
         <div className="bc__stat-row">
           <b className="bc__stat-v num">{fmt(cv)}</b>
-          <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
-            {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
-          </span>
+          {!liveOnly && (
+            <span className="bc__stat-t" style={{ color: TONE[t.dir] }}>
+              {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "—" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
+            </span>
+          )}
         </div>
         {caption && <span className="bc__stat-cap">{caption}</span>}
         {share !== undefined && Number.isFinite(share) && (
@@ -153,8 +171,10 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
           </span>
         )}
         <div className="bc__stat-ft">
-          <span className="bc__stat-prev" title={`Previous ${data.tf.label}`}>
-            was {fmt(pv)}</span>
+          <span className="bc__stat-prev"
+            title={liveOnly ? "Only live problems are known — there is no honest previous value"
+              : `Previous ${data.tf.label}`}>
+            {liveOnly ? "live now" : `was ${fmt(pv)}`}</span>
           {drill && (
             <button className="bc__stat-mv" onClick={() => onGo?.(tab, scopeApp, coh)}
               title="Portrait of who left — country, device, browser, where they enter">
@@ -239,21 +259,12 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
         }
       }
     }
-    // Scoped to THIS application's chain, not the environment: the button
-    // opens the chain, and the reader clicked once on "10 live incidents"
-    // that lit nothing there — the count was estate-wide backend problems
-    // while every other figure on the board is the application's own. Now a
-    // problem counts only when it touches an entity the chain resolves
-    // (services, their runtime, or the application itself).
-    const inChain = (e: string) =>
-      chainScope.services.has(e) || chainScope.runtime.has(e)
-      || e === (data.apps.find((a) => a.appId === scopeApp)?.entity ?? "");
-    const backendProblems = chainScope.resolved
-      ? data.problems.filter((pr) => (pr.entityIds ?? []).some(inChain)).length
-      : null;
+    // ONE problem definition on this board: chainProblems (chain-scoped),
+    // shared with the open-incidents tile above.
     const errTotal = ["backend", "frontend", "policy", "third_party", "device",
       "connection", "request_4xx", "other"].reduce((a, b) => a + errN(b), 0);
-    return { cur, prev, per, d, errN, outErr, errTotal, conc, backendProblems };
+    return { cur, prev, per, d, errN, outErr, errTotal, conc,
+      backendProblems: chainProblems };
   })();
 
   const range = (pj: { lower: number; upper: number }) =>
@@ -291,10 +302,10 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
           <>
             {fc.conversions && (
               <span className="bc__fc-item">
-                <b className="num">{tv ? money(sc(fc.conversions.point) * tv, sym)
+                <b className="num">{tv ? `≈ ${money(sc(fc.conversions.point) * tv, sym)}`
                   : `≈ ${fmtN(Math.round(sc(fc.conversions.point)))}`}</b>
                 {tv ? " revenue expected" : " conversions expected"}
-                <em>({tv ? `${money(sc(Math.max(0, fc.conversions.lower)) * tv, sym)}–${money(sc(fc.conversions.upper) * tv, sym)}`
+                <em>({tv ? `≈ ${money(sc(Math.max(0, fc.conversions.lower)) * tv, sym)}–${money(sc(fc.conversions.upper) * tv, sym)}`
                   : range(fc.conversions)})</em>
               </span>
             )}
@@ -320,20 +331,18 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
               fmt={fmtCount} riseIsGood={false} tab="home"
               caption={`${pct(c.customers ? c.customersAtRisk / c.customers : 0)} of the customer base`}
               share={c.customers ? c.customersAtRisk / c.customers : 0} />
-            <Stat label="sessions lost to a crash" cur={c.crashed} prev={p.crashed}
+            <Stat label="sessions lost to a crash or freeze" cur={c.crashed} prev={p.crashed}
               fmt={fmtCount} riseIsGood={false} tab="home"
-              caption="ended with no way back — the customer was dropped" />
+              caption="crashes and ANRs — ended with no way back" />
             <Stat label="brand health (0–100)" cur={c.reputationIndex} prev={p.reputationIndex}
               fmt={(v) => `${Math.round(v * 100)}`} riseIsGood={true} tab="chain"
               caption="share of customers untouched by any failure"
               share={c.reputationIndex} />
             <Stat label="open incidents"
-              cur={scopeApp ? data.problems.filter((pr) => (pr.entityIds ?? [])
-                    .some((e) => e.toLowerCase().includes(scopeApp))).length : data.problems.length}
-              prev={scopeApp ? data.problems.filter((pr) => (pr.entityIds ?? [])
-                    .some((e) => e.toLowerCase().includes(scopeApp))).length : data.problems.length}
-              fmt={(v) => fmtN(v)} riseIsGood={false} tab="chain"
-              caption="confirmed by AI monitoring, live right now" />
+              cur={chainProblems ?? 0} prev={chainProblems ?? 0}
+              fmt={(v) => (chainProblems === null ? "…" : fmtN(v))}
+              riseIsGood={false} tab="chain" liveOnly
+              caption="on this application's chain — confirmed by AI monitoring" />
           </div>
         </div>
       </section>
@@ -365,8 +374,8 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
                 caption="never saw a second screen" share={1 - c.engagedShare} />
             )}
             <Stat label="customers who bounced"
-              cur={c.customers - Math.round(c.engagedShare * (curP?.sessions ?? 0))}
-              prev={p.customers - Math.round(p.engagedShare * (prevP?.sessions ?? 0))}
+              cur={Math.max(0, c.customers - c.realEngaged)}
+              prev={Math.max(0, p.customers - p.realEngaged)}
               fmt={fmtCount} riseIsGood={false} tab="flow"
               caption="came, saw one screen, left" />
           </div>
@@ -390,7 +399,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
             </div>
             <div className="bc__cost-verdict">
               {errCost.lost > 0 ? (
-                <>errors cost <b className="num">{tv ? money(sc(errCost.lost) * tv, sym) : `≈ ${fmtN(Math.round(sc(errCost.lost)))}`}</b>
+                <>errors cost <b className="num">{tv ? `≈ ${money(sc(errCost.lost) * tv, sym)}` : `≈ ${fmtN(Math.round(sc(errCost.lost)))}`}</b>
                   {tv ? "" : " conversions"} this {data.tf.label.replace(/^last /i, "")}
                   <em>{fmtCount(errCost.hitN)} customers met an error and converted
                     {errCost.rClean > 0 ? ` ${(errCost.rHit / errCost.rClean) < 1

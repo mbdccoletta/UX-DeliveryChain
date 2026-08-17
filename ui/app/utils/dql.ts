@@ -546,13 +546,16 @@ export const qBizBreakdown = (tf: Timeframe) => {
   | fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
   | summarize v = takeAny(${expr}), reached = max(_done),
       errs = countIf(characteristics.classifier == "error"),
-      real = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
+      // deterministic like qBizKpis/qUxByApp — takeAny flipped a coin on the
+      // 117 sessions that carry two user_type values
+      real = min(if(not(dt.rum.user_type == "robot")
+        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
     by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
   | filter isNotNull(v) and isNotNull(appId) and appId != ""
       and not(startsWith(appId, "APPLICATION-"))
   | summarize sessions = count(), conv = countIf(reached == 1),
-      realN = countIf(real), realConv = countIf(real and reached == 1),
-      realHit = countIf(real and errs > 0),
+      realN = countIf(real == 1), realConv = countIf(real == 1 and reached == 1),
+      realHit = countIf(real == 1 and errs > 0),
     by: { d = "${name}", bucket = toString(v), appId }
   | sort sessions desc | limit 40 ]`;
   // the error-cost leg: bucket = whether the session met an error
@@ -562,12 +565,15 @@ export const qBizBreakdown = (tf: Timeframe) => {
   | fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
   | summarize reached = max(_done),
       errs = countIf(characteristics.classifier == "error"),
-      real = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
+      // deterministic like qBizKpis/qUxByApp — takeAny flipped a coin on the
+      // 117 sessions that carry two user_type values
+      real = min(if(not(dt.rum.user_type == "robot")
+        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
     by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
   | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
   | summarize sessions = count(), conv = countIf(reached == 1),
-      realN = countIf(real), realConv = countIf(real and reached == 1),
-      realHit = countIf(real and errs > 0),
+      realN = countIf(real == 1), realConv = countIf(real == 1 and reached == 1),
+      realHit = countIf(real == 1 and errs > 0),
     by: { d = "__err", bucket = if(errs > 0, "hit", else: "clean"), appId } ]`;
   return `
 data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, realConv = 0, realHit = 0)
@@ -648,13 +654,16 @@ export const qBizKpis = (tf: Timeframe) => {
   | summarize sessions = count(), realSessions = countIf(isReal == 1),
       converted = countIf(conv == 1), convertedReal = countIf(isReal == 1 and conv == 1),
       hitReal = countIf(isReal == 1 and errs > 0), fatalSessions = countIf(fatal > 0),
-      engaged = countIf(views > 1), actions = sum(acts), abandoned = sum(aband),
+      engaged = countIf(views > 1),
+      realEngaged = countIf(isReal == 1 and views > 1),
+      actions = sum(acts), abandoned = sum(aband),
       satisfied = sum(sat), tolerating = sum(tol), frustrated = sum(fru),
     by: { appId, period = "${label}" } ]`;
   return `
 data record(appId = "", period = "", sessions = 0, realSessions = 0, converted = 0,
   convertedReal = 0, hitReal = 0, fatalSessions = 0,
-  engaged = 0, actions = 0, abandoned = 0, satisfied = 0, tolerating = 0, frustrated = 0)
+  engaged = 0, realEngaged = 0, actions = 0, abandoned = 0,
+  satisfied = 0, tolerating = 0, frustrated = 0)
 | filter false${both("cur", tf.from, tf.to)}${both("prev", `${tf.from}-${span}`, tf.from)}
 | limit 200`;
 };
