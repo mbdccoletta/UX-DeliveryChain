@@ -151,7 +151,11 @@ const abandons = (journey: string[]) =>
  * Single-application mode: one ribbon per discovered navigation path, sized by
  * sessions, labeled with count and share of the application's sessions.
  */
-export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0) {
+export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
+  /** Stage vocabulary from the FULL mine — when the model is rebuilt from a
+   *  picked subset, deciding outcomes/deepest from the remainder made the
+   *  drawn stages disagree with the pick matcher's (audit). */
+  vocab?: { outcomes: boolean; deepest: number }) {
   const nodes: Node[] = [];
   const links: Link[] = [];
   // Window fragments — sessions whose only in-window content is one stray
@@ -171,8 +175,8 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0) {
       + (fragments > 0 ? ` · ${fmtN(fragments)} window fragments excluded` : ""),
     appId: app.appId });
 
-  const outcomes = mine.some((s) => reachesOutcome(s.journey));
-  const deepest = deepestOf(mine);
+  const outcomes = vocab?.outcomes ?? mine.some((s) => reachesOutcome(s.journey));
+  const deepest = vocab?.deepest ?? deepestOf(mine);
   const stageTot = new Map<string, { nm: string; tone: Tone; sub: string; v: number }>();
   const addStage = (path: string[], v: number, from: string) => {
     const st = stageOf(path, outcomes, deepest);
@@ -420,6 +424,11 @@ export function FlowSankey({
    * "loading" while the two scans run (the cohort's ids, then its portrait). */
   const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
   const [infoCohort, setInfoCohort] = useState(0);
+  /** Whether the OPEN poster shows the unconverted cohort (set per open —
+   *  the old cohortRef read leaked the label onto later manual posters). */
+  const [infoIsCohort, setInfoIsCohort] = useState(false);
+  /** True when the poster's figures were scaled from capped samples. */
+  const [infoApprox, setInfoApprox] = useState(false);
   /* WHAT THE ROUTE IS WORTH: the cohort's conversion beside everyone else's,
    * customers, and — with the ticket set — the money the route carries. All
    * from the same per-session scan the poster already runs. */
@@ -518,7 +527,8 @@ export function FlowSankey({
     const built = !app ? { ...buildModel(apps, seqs),
                            cols: ["Application", "Furthest stage reached", "Session outcome"] }
       : stepMode ? buildStepModel(app, seqsIn, transitions)
-      : { ...buildAppModel(isoApp!, seqsIn, fragmentsOf(app.appId)),
+      : { ...buildAppModel(isoApp!, seqsIn, fragmentsOf(app.appId),
+            pathCtx ? { outcomes: pathCtx.outcomes, deepest: pathCtx.deepest } : undefined),
           cols: ["Application", "Navigation path", "Furthest stage reached"] };
     const { nodes, links, cols } = built;
 
@@ -734,12 +744,21 @@ export function FlowSankey({
   // portrait of who left without converting, then drop the intent so a manual
   // mode switch does not reopen it.
   const cohortRef = useRef<string | null>(null);
+  /** Poster fetch token — a picks-change can close the poster while a fetch
+   *  is in flight, and the late answer must not reopen it (audit nit). */
+  const infoSeq = useRef(0);
   useEffect(() => {
     // fire once per (intent, app) arrival — not cleared from the url here, so a
     // dev-server hiccup or a re-render cannot lose it; a manual mode switch
     // already closes the poster, and re-firing is blocked by the key match
     const kk = cohort && appId ? `${cohort}|${appId}` : null;
-    if (!kk || !tf || cohortRef.current === kk) return;
+    if (!kk || !tf) return;
+    if (cohortRef.current === kk) {
+      // blocked (poster already fired for this intent) — still CONSUME the
+      // url param, or it strands and re-fires the poster on the next mount
+      onCohortConsumed?.();
+      return;
+    }
     cohortRef.current = kk;
     setMode("steps"); setPicks([]);
     void openInfographic("unconverted");
@@ -748,7 +767,7 @@ export function FlowSankey({
   }, [cohort, appId, tf]);
   // the fetched list describes ONE set of picks over one window
   // the poster describes one path over one window — a change closes it
-  useEffect(() => { setInfo(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
+  useEffect(() => { infoSeq.current++; setInfo(null); }, [picks.join("|"), appId, tf?.from, tf?.to]);
 
   /** Unpacks "No page telemetry" — opened from the band's button, never from
    *  the node's click, which stays a selection like any other. */
@@ -770,27 +789,55 @@ export function FlowSankey({
 
   const openInfographic = async (mode?: "unconverted") => {
     if (!appId || !tf) return;
+    const seq = ++infoSeq.current;
     setInfo("loading");
     try {
       // ONE per-session scan: attributes, whether it reached a goal, outcomes.
-      const rows = await runDql<Record<string, unknown>>(qCohortSessions(tf, appId), 5000);
+      const rows = await runDql<Record<string, unknown>>(qCohortSessions(tf, appId), 10000);
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
       // used, so the cohort is provably the ribbon's.
+      let prTotal = 0, prMatched = 0;
       const pickIds = mode === "unconverted" ? null : await (async () => {
         const pr = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
+        prTotal = pr.length;
         const set = new Set<string>();
         for (const r of pr) {
           const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
             .map(normalizeView).filter((v, k, a) => k === 0 || v !== a[k - 1]);
           if (journey.length && matchesMode(journey, picks)) set.add(String(r.sid));
         }
+        prMatched = set.size;
         return set;
       })();
       const inCohortOf = (r: Record<string, unknown>) =>
         mode === "unconverted" ? Number(r.reached) === 0
         : pickIds ? pickIds.has(String(r.sid)) : true;
-      const cohortN = rows.filter(inCohortOf).length;
+      /* HONEST SAMPLING. Both scans are capped (10k sessions, 2k paths);
+       * printing a sample's absolute count against the band's full total once
+       * read "≈33% of 5,022" for what the band called 100% (audit, vmware).
+       * When a cap was hit, counts are scaled from the sample's match RATE to
+       * the full mined total and the poster says "≈ · scaled from a sample". */
+      const journeyedTotal = seqs.filter((q) => q.appId === appId && q.journey.length > 0)
+        .reduce((a, q) => a + q.sessions, 0);
+      const appTotal = apps.find((a) => a.appId === appId)?.sessions ?? rows.length;
+      let cohortN: number;
+      let sampled: boolean;
+      if (mode === "unconverted") {
+        sampled = rows.length >= 10000;
+        const matched = rows.filter(inCohortOf).length;
+        cohortN = sampled && rows.length > 0
+          ? Math.round((matched / rows.length) * appTotal) : matched;
+      } else {
+        sampled = prTotal >= 2000 || rows.length >= 10000;
+        // the match RATE comes from the path sample itself — the one place
+        // that knows which journeys satisfy the picks — scaled to the full
+        // mined volume the band displays
+        cohortN = sampled && prTotal > 0
+          ? Math.round((prMatched / prTotal) * (journeyedTotal || prTotal))
+          : rows.filter(inCohortOf).length;
+      }
+      setInfoApprox(sampled);
       setInfoCohort(cohortN);
       // route economics: real people only, converted = reached an outcome
       const isRealRow = (r: Record<string, unknown>) =>
@@ -804,8 +851,15 @@ export function FlowSankey({
       };
       const inB = bizOf(rows.filter(inCohortOf));
       const outB = bizOf(rows.filter((r) => !inCohortOf(r)));
-      setInfoBiz({ ...inB, restConv: outB.conv });
-      if (!cohortN) { setInfo([]); return; }
+      // counts scale with the same factor the headline count used; RATES
+      // (conv, restConv) are the sample's own and stay untouched
+      const rawMatched = rows.filter(inCohortOf).length;
+      const kf = sampled && rawMatched > 0 ? cohortN / rawMatched : 1;
+      setInfoBiz({ customers: Math.round(inB.customers * kf),
+        converted: Math.round(inB.converted * kf), conv: inB.conv,
+        hit: Math.round(inB.hit * kf), restConv: outB.conv });
+      setInfoIsCohort(mode === "unconverted");
+      if (!cohortN) { if (seq === infoSeq.current) setInfo([]); return; }
 
       // pivot to the long form RouteInfographic reads: one row per
       // (dimension, bucket, in/out) with the measures aggregated. Entry view
@@ -840,12 +894,12 @@ export function FlowSankey({
           sessions: a.sessions, hit: a.hit, fatal: a.fatal,
           p50dur: med(a.durs), p50views: med(a.views) };
       });
-      setInfo(info);
-    } catch { setInfo([]); }
+      if (seq === infoSeq.current) setInfo(info);
+    } catch { if (seq === infoSeq.current) setInfo([]); }
   };
 
   /* the lit-path ids belong to one model; changing mode invalidates them */
-  useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId]);
+  useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId, mode]);
   /* the no-telemetry card closes on Esc, like every overlay here */
   useEffect(() => {
     if (ntel === null) return;
@@ -946,7 +1000,8 @@ export function FlowSankey({
           </button>
         </div>
         {sum && (
-          <span className="flow-hd__a">
+          <span className="flow-hd__a"
+            title="Journeyed sessions — robots and synthetic included, no-telemetry excluded. Business Control counts real customers over all sessions, so its conversion figures differ by design.">
             {sum.outcomes ? (
               <>
                 <b>{fmtN(sum.done)}</b> of {fmtN(sum.measured)} sessions finished
@@ -1131,12 +1186,15 @@ export function FlowSankey({
         return (
           <RouteInfographic rows={info}
             path={orderly.length ? orderly.map(word)
-              : cohortRef.current ? ["customers who left unconverted"]
+              : infoIsCohort ? ["customers who left unconverted"]
               : ["every journey on screen"]}
             key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
-            biz={infoBiz} ticket={ticket} sym={sym}
-            onClose={() => { setInfo(null); }} />
+            biz={infoBiz} ticket={ticket} sym={sym} approx={infoApprox}
+            onClose={() => { setInfo(null);
+              // closing re-arms the cohort intent: a fresh click on the
+              // board's "who they are" fires again (it was dead before)
+              cohortRef.current = null; }} />
         );
       })()}
 

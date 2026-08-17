@@ -605,7 +605,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     by: { sid = dt.rum.session.id }
 | fields sid, reached, errs, crash, views, dur, isReal, entry,
     ${INFO_DIMS.filter((d) => d.expr).map((d) => d.id).join(", ")}
-| limit 5000`;
+| limit 10000`;
 };
 
 
@@ -683,8 +683,10 @@ data record(appId = "", period = "", sessions = 0, realSessions = 0, converted =
  * and a mobile screen (`CheckoutActivity`) alike. A heuristic, not a contract:
  * callers must handle the case where an application uses none of these words.
  */
-export const DONE =
-  /checkout|purchase|confirm|success|thank|complete|receipt|booked|finish|deposit|withdraw|credit-card\/order|\/book$/i;
+// DERIVED from OUTCOME_WORDS — two hand-kept literals claiming to be one
+// vocabulary was itself an incoherence waiting to happen (auditor's nit)
+export const DONE = new RegExp(
+  [...OUTCOME_WORDS.map((w) => w.replace(/[/-]/g, "\\$&")), "\\/book$"].join("|"), "i");
 export const INTENT =
   /cart|basket|bag|order|booking|reserv|signup|register|subscribe|apply|quote|payment/i;
 
@@ -1673,6 +1675,6 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | summarize sessions = count(), views = sum(views),
     profiles = countDistinct(res),
   by: { appId, agent, utype }
-| filter isNotNull(appId) and appId != ""
+| filter not(startsWith(dt.rum.application.id, "APPLICATION-")) and isNotNull(appId) and appId != ""
 | sort sessions desc
 | limit 200`;

@@ -50,7 +50,6 @@ const URL_DEFAULTS = {
   tab: "home", from: TF0.from, to: TF0.to,
   app: null, sel: null, session: null,
   /** Journeys page altitude: the aggregated flow, or the ordered steps. */
-  view: "flow",
 } as const;
 
 export function App() {
@@ -58,7 +57,6 @@ export function App() {
     tab: string; from: string; to: string; app: string | null; sel: string | null;
     /** Validation: pin every RUM query to one session. */
     session: string | null;
-    view: string;
     /** "anomalies" spotlights the chain's anomalous components on arrival. */
     hl: string | null;
     /** A cohort intent the Flow opens straight into an infographic:
@@ -69,7 +67,10 @@ export function App() {
      *  so a shared link carries the same figures. */
     tkt: string | null;
     cur: string | null;
-  }>({ ...URL_DEFAULTS, hl: null, coh: null, tkt: null, cur: null });
+    /** Monitored-share (coverage %) — url state for the same reason as tkt:
+     *  a shared link must carry the same figures. */
+    cov: string | null;
+  }>({ ...URL_DEFAULTS, hl: null, coh: null, tkt: null, cur: null, cov: null });
 
   // old ?tab=journey links keep working: they land on the merged page,
   // already switched to the journey view
@@ -246,7 +247,7 @@ export function App() {
                   if (intentsAvailable() && a) {
                     openIntent(sessionsLink(tf, a.name,
                       uxMap?.get(current)?.sessions ?? a.sessions));
-                  } else { setAppId(current); set({ tab: "flow", view: "journey", sel: null }); }
+                  } else { setAppId(current); set({ tab: "flow", sel: null }); }
                 }} />
             </Boundary>
           )}
@@ -278,6 +279,7 @@ export function App() {
               <ReportView data={d} scopeApp={current}
                 ticket={state.tkt ?? ""} sym={state.cur ?? "$"}
                 onTicket={(t, cu) => set({ tkt: t || null, cur: cu === "$" ? null : cu }, false)}
+                cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}
                 onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null,
                   hl: t === "chain" ? (hl ?? null) : null,
                   coh: t === "flow" ? (hl ?? null) : null })} />

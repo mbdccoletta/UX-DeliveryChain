@@ -333,15 +333,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   );
 }
 
-function Counter({ v, l, tone }: { v: number; l: string; tone?: Tone }) {
-  const n = useCountUp(v);
-  return (
-    <div className="rv-kpi">
-      <b className="num" style={tone ? { color: TVAR[tone] } : undefined}>{fmtN(n)}</b>
-      <span>{l}</span>
-    </div>
-  );
-}
 
 /* ─────────────── the clean card ───────────────
  *
