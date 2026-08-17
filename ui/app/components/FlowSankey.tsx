@@ -92,6 +92,13 @@ const OUTCOME: Record<string, { id: string; nm: string; tone: Tone; sub: string 
   "st-none": { id: "o-blind", nm: "Invisible to the business", tone: "bad", sub: "instrumentation gap" },
 };
 
+/**
+ * How many routes the diagram draws before folding the rest into one node.
+ * Shared with the unpacking card, so what the fold SAYS it holds and what the
+ * card LISTS can never drift apart.
+ */
+export const ROUTE_MAX = 9;
+
 /** A route node's id IS its journey — stable across model rebuilds, so a
  *  picked route stays ringed when the diagram is re-mined from the cohort. */
 const routeId = (journey: string[]) => "jp-" + journey.join("\u0001");
@@ -195,7 +202,7 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
     links.push({ s: from, t: st.id, v, tone: st.tone });
   };
 
-  const MAX = 9;
+  const MAX = ROUTE_MAX;
   const worst = mine.filter((s) => abandons(s.journey)).sort((a, b) => b.sessions - a.sessions)[0];
   let covered = 0;
   mine.slice(0, MAX).forEach((s) => {
@@ -471,6 +478,12 @@ export function FlowSankey({
   }>(null);
   /* "No page telemetry", unpacked on click: what those sessions are made of
    * and which pages their stray beacons name. null = closed. */
+  /** The folded remainder, unpacked by DESTINATION — opened from the band
+   *  while the "N other paths" node is selected. Measured on this tenant:
+   *  162 folded routes ended at just 10 views, one of them the conversion
+   *  page — 392 real completions the reader could not see, let alone teach
+   *  a goal from. Computed in memory: the journeys are already here. */
+  const [rest, setRest] = useState<null | Array<{ view: string; sessions: number }>>(null);
   const [ntel, setNtel] = useState<null | "loading" | {
     sessions: number; real: number; robots: number; oneEvent: number;
     reqOnly: number; p50dur: number; pages: Array<{ pg: string; n: number }>;
@@ -943,6 +956,12 @@ export function FlowSankey({
   useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId, mode]);
   /* the no-telemetry card closes on Esc, like every overlay here */
   useEffect(() => {
+    if (rest === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRest(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rest]);
+  useEffect(() => {
     if (ntel === null) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNtel(null); };
     window.addEventListener("keydown", onKey);
@@ -1113,6 +1132,25 @@ export function FlowSankey({
             {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
                 narrowed one; the reader's rule: characteristics refer to
                 everything the screen currently shows */}
+            {sel === "j-rest" && appId && (
+              <button className="flow-sel__b"
+                onClick={() => {
+                  const app0 = apps.find((a) => a.appId === appId);
+                  if (!app0) return;
+                  const mine = seqs.filter((q) => q.appId === app0.appId && q.journey.length > 0)
+                    .sort((a, b) => b.sessions - a.sessions);
+                  const by = new Map<string, number>();
+                  for (const q of mine.slice(ROUTE_MAX)) {
+                    const dest = q.journey[q.journey.length - 1];
+                    if (dest) by.set(dest, (by.get(dest) ?? 0) + q.sessions);
+                  }
+                  setRest([...by.entries()].map(([view, sessions]) => ({ view, sessions }))
+                    .sort((a, b) => b.sessions - a.sessions));
+                }}
+                title="The folded routes are many, but they END at few views — see which, and teach a goal from any of them">
+                where do they end? ↗
+              </button>
+            )}
             {sel === "j-none" && (
               <button className="flow-sel__b"
                 onClick={openNoTelemetry} disabled={ntel === "loading"}
@@ -1170,6 +1208,55 @@ export function FlowSankey({
                 {mode === "steps" ? "clear path" : "clear selection"} ✕
               </button>
             )}
+          </div>
+        );
+      })()}
+
+      {/* The fold, unpacked BY DESTINATION — a box holding 44% of the
+          sessions must not be opaque, and the endings inside are few enough
+          to name. Each one teaches a goal in place, which is what the fold
+          was blocking. Esc or a click outside closes. */}
+      {rest !== null && (() => {
+        const app0 = appId ? apps.find((a) => a.appId === appId) : undefined;
+        const tot = rest.reduce((a, r) => a + r.sessions, 0) || 1;
+        const max = Math.max(...rest.map((r) => r.sessions), 1);
+        return (
+          <div className="ovl" onClick={() => setRest(null)} role="dialog" aria-modal="true"
+            aria-label="Where the folded routes end">
+            <div className="ntel" onClick={(e) => e.stopPropagation()}>
+              <header className="rinfo__hd">
+                <span className="rinfo__eyebrow">WHERE THE FOLDED ROUTES END · {app0?.name ?? ""}</span>
+                <h2 className="rinfo__path"><span>Many routes, few endings</span></h2>
+                <div className="rinfo__cohort">
+                  <b className="num">{fmtN(rest.length)}</b>
+                  <span>destinations across {fmtN(tot)} sessions the diagram folds away</span>
+                </div>
+                <button className="drawer__x" onClick={() => setRest(null)} aria-label="Close">✕</button>
+              </header>
+              <section className="ntel__pages">
+                <h3>where those sessions ended</h3>
+                {rest.map((r) => (
+                  <div className="rinfo__bar" key={r.view} title={`${fmtN(r.sessions)} sessions`}>
+                    <span className="rinfo__bar-l">{r.view}</span>
+                    <span className="rinfo__bar-t">
+                      <i className="rinfo__bar-fill" style={{ width: `${(r.sessions / max) * 100}%` }} />
+                    </span>
+                    <b className="rinfo__bar-v">{fmtN(r.sessions)}</b>
+                    {onDefineOutcome && !r.view.includes("*") && (
+                      <button className="flow-sel__b flow-sel__b--teach rest__teach"
+                        onClick={() => { onDefineOutcome([r.view]); setRest(null); setPicks([]); }}
+                        title={`Teach the app: reaching ${r.view} IS this application's conversion`}>
+                        conversion ✓
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </section>
+              <footer className="rinfo__ft">
+                the diagram draws the {ROUTE_MAX} busiest routes and folds the rest — folded
+                sessions are still counted in every figure on screen, they simply share one node
+              </footer>
+            </div>
           </div>
         );
       })()}
