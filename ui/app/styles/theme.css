@@ -563,6 +563,44 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .rest__teach { margin-left: 10px; padding: 1px 8px; font-size: 9px; }
 .ntel__pages h3 { margin: 0 0 8px; font: 700 10px var(--mono); letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--ink-3); }
+/* the technical reading of the same anatomy — chain and journeys */
+.tech { margin-top: 14px; }
+.tech__body { display: flex; flex-direction: column; gap: 12px; }
+.tech__bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden;
+  background: var(--panel); }
+.tech__bar i { display: block; min-width: 2px; }
+.tech__leg { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline;
+  font: 500 11px var(--mono); color: var(--ink-2); }
+.tech__leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 5px; }
+.tech__leg b { color: var(--ink); }
+.tech__cov { margin-left: auto; font: 600 10px var(--mono); color: var(--ink-3);
+  border: 1px dashed var(--border-2); border-radius: 999px; padding: 1px 8px; }
+.tech__vitals { display: flex; gap: 10px; flex-wrap: wrap; }
+.tech__v { display: flex; flex-direction: column; gap: 1px; padding: 8px 14px;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--vt, var(--border-2)); min-width: 96px; }
+.tech__v b { font-size: 19px; line-height: 1.1; color: var(--ink-hi); }
+.tech__v span { font: 700 9px var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-2); }
+.tech__v em { font: 400 9px var(--mono); color: var(--ink-3); font-style: normal; }
+.tech__novitals { display: flex; flex-direction: column; gap: 8px; }
+.tech__nv-l { font: 500 11px var(--mono); color: var(--ink-3); }
+.tech__errs { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border);
+  padding-top: 10px; }
+.tech__e { font: 500 11px var(--mono); color: var(--ink-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 10px; }
+.tech__e b { color: var(--ink-hi); margin-right: 4px; }
+.tech__e em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 10px; }
+.tech__views { border-top: 1px solid var(--border); padding-top: 10px; }
+.tech__vh, .tech__vr { display: grid; grid-template-columns: 2fr repeat(4, minmax(70px, 1fr));
+  gap: 10px; padding: 4px 0; align-items: baseline; }
+.tech__vh { font: 700 9px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); }
+.tech__vr { font: 500 11px var(--mono); color: var(--ink-2);
+  border-top: 1px solid var(--border); }
+.tech__vn { color: var(--ink); overflow-wrap: anywhere; }
+@media (max-width: 720px) { .tech__vh, .tech__vr { grid-template-columns: 1fr 1fr; } }
 /* where the difficulty lives */
 .bc__diff { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px;
   padding: 16px 18px; border-radius: 14px; background: var(--panel-2);
