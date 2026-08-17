@@ -143,6 +143,13 @@ export function App() {
           ))}
         </AppHeader.Navigation>
         <AppHeader.ActionItems>
+          {/* WHAT THIS WINDOW COST, beside how fresh it is — the two halves of
+              the same question: where these numbers came from, and what
+              reading them charged. Grail bills by bytes scanned and the window
+              is linear (24 hours costs about 12× two), which makes the
+              timeframe the biggest cost control in the product; measured,
+              never estimated. */}
+          <ScanBadge tf={tf} />
           {/* app-wide action: how old the numbers are, and how to refresh them */}
           <AppHeader.ActionButton
             onClick={d.refresh}
@@ -219,12 +226,6 @@ export function App() {
                   </Select.Content>
                 </Select>
               )}
-              {/* WHAT THIS WINDOW COSTS. Grail bills by bytes scanned and the
-                  window is linear — twenty-four hours costs about twelve times
-                  two — which makes this selector the biggest cost control in
-                  the product and the one nobody could see. Measured, never
-                  estimated: every query reports what it read. */}
-              <ScanBadge tf={tf} />
               {/* the platform's own selector: presets, custom range, stepper */}
               <TimeframeSelector
                 value={{ from: state.from || TF0.from, to: state.to || TF0.to }}
