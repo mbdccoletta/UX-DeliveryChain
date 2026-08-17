@@ -560,6 +560,8 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__diff-bar i { display: block; min-width: 2px; }
 .bc__diff-leg { display: flex; gap: 16px; flex-wrap: wrap; font: 500 11px var(--mono);
   color: var(--ink-2); }
+.bc__diff-cov { font: 600 10px var(--mono); color: var(--ink-3);
+  border: 1px dashed var(--border-2); border-radius: 999px; padding: 1px 8px; }
 .bc__diff-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
   margin-right: 5px; }
 .bc__diff-errs { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
