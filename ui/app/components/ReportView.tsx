@@ -18,7 +18,7 @@ import { useBizForecast } from "../hooks/useBizForecast";
 import { useBizBreakdown } from "../hooks/useBizBreakdown";
 import { useDifficulty } from "../hooks/useDifficulty";
 import { useAppScope } from "../hooks/useAppScope";
-import { fmtN } from "../utils/dql";
+import { fmtN, type OutcomeDefs } from "../utils/dql";
 
 type Dir = "good" | "bad" | "flat";
 const pct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
@@ -41,7 +41,7 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, onGo }: {
+export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, outcomeDefs, onGo }: {
   data: ChainData;
   /** The application this board reads — the header's own selector drives it,
    *  the same element every page uses. */
@@ -54,11 +54,14 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
    *  link carries the same extrapolated figures. */
   cov: string;
   onCov: (cov: string) => void;
+  /** Customer-taught conversion definitions — they replace the keyword
+   *  heuristic per application, and the hero says so. */
+  outcomeDefs?: OutcomeDefs;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
-  const kpis = useBizKpis(data.tf);
-  const fc = useBizForecast(data.tf, scopeApp || null);
-  const breakdown = useBizBreakdown(data.tf);
+  const kpis = useBizKpis(data.tf, outcomeDefs);
+  const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs);
+  const breakdown = useBizBreakdown(data.tf, outcomeDefs);
   const difficulty = useDifficulty(data.tf);
   // the SAME closure the delivery chain resolves — so "incidents in your
   // systems" counts exactly what a click on the button will show lit
@@ -122,9 +125,11 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
     const fmt = isBrand
       ? (tv ? fmtMoney : fmtCount)
       : (tv ? fmtMoney : pct);
+    const customDef = !!outcomeDefs?.[scopeApp]?.length;
     const sub = isBrand
       ? `${fmtCount(c.customersAtRisk)} customers met a failure · ${pct(1 - c.reputationIndex)} of the base`
-      : `${fmtCount(c.converted)} of ${fmtCount(c.customers)} customers reached the goal`;
+      : `${fmtCount(c.converted)} of ${fmtCount(c.customers)} customers reached the goal`
+        + (customDef ? " · your definition" : "");
     return (
       <div className="bc__hero" style={{ ["--ht" as string]: TONE[t.dir] }}>
         <span className="bc__hero-l">{label}</span>

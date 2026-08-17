@@ -4,7 +4,7 @@
 // does the deltas. Memoised per window — the panel is opened by a click and
 // re-read only when the window changes.
 import { useEffect, useState } from "react";
-import { qBizKpis, runDql, type Timeframe } from "../utils/dql";
+import { qBizKpis, runDql, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 export interface BizPeriod {
   sessions: number; realSessions: number; converted: number; convertedReal: number;
@@ -32,8 +32,8 @@ const add = (a: BizPeriod, b: BizPeriod): BizPeriod => ({
 
 const memo = new Map<string, BizKpis>();
 
-export function useBizKpis(tf: Timeframe): BizKpis | null {
-  const key = `${tf.from}|${tf.to}`;
+export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs): BizKpis | null {
+  const key = `${tf.from}|${tf.to}|${JSON.stringify(defs ?? {})}`;
   const [out, setOut] = useState<BizKpis | null>(memo.get(key) ?? null);
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export function useBizKpis(tf: Timeframe): BizKpis | null {
     let live = true;
     (async () => {
       try {
-        const rows = await runDql<Record<string, unknown>>(qBizKpis(tf), 200);
+        const rows = await runDql<Record<string, unknown>>(qBizKpis(tf, defs), 200);
         const byApp = new Map<string, { cur: BizPeriod; prev: BizPeriod }>();
         let ec = ZERO, ep = ZERO;
         for (const r of rows) {
