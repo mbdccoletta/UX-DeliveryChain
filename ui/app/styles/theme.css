@@ -271,6 +271,9 @@ svg { shape-rendering: geometricPrecision; }
                border: 1px solid var(--border-2); padding: 4px 10px; cursor: pointer;
                white-space: nowrap; }
 .flow-sel__b:hover { border-color: var(--accent); }
+.flow-sel__b--teach { border-color: color-mix(in srgb, var(--good) 60%, var(--border));
+  color: var(--good); }
+.flow-sel__b--teach:hover { background: color-mix(in srgb, var(--good) 12%, transparent); }
 .flow-sel__b--on { background: var(--accent); color: var(--bg, #0b0b12); }
 
 /* two-column layout: canvas on the left, detail docked on the right */

@@ -2,8 +2,18 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, qNoTelemetry, qPathSessions,
-  qCohortSessions, reachesOutcome, runDql, type Timeframe } from "../utils/dql";
+import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
+  qNoTelemetry, qPathSessions, qCohortSessions, runDql,
+  type OutcomeDefs, type Timeframe } from "../utils/dql";
+
+/**
+ * The ACTIVE outcome test. One FlowSankey shows one application; the
+ * component sets this before its models build (and its memo deps carry the
+ * definition key), so a customer-taught conversion changes stages, matchers,
+ * summary and poster in one move. Default: the measured keyword heuristic.
+ */
+let activeDone: (v: string) => boolean = (v) => DONE.test(v);
+const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor, priorities } from "../utils/friction";
@@ -32,7 +42,7 @@ type Stage = { id: string; nm: string; tone: Tone; sub: string };
 function stageIdOf(path: string[], outcomes: boolean, deepest: number): string {
   if (!path.length) return "st-none";
   if (outcomes) {
-    if (path.some((v) => DONE.test(v))) return "st-order";
+    if (path.some((v) => activeDone(v))) return "st-order";
     if (path.some((v) => INTENT.test(v))) return "st-cart";
     return path.length > 1 ? "st-prod" : "st-home";
   }
@@ -97,7 +107,7 @@ export function buildModel(apps: AppRow[], seqs: SeqRow[]) {
   // Decided once for the whole environment: the stage map is shared, so per-app
   // vocabularies would overwrite each other's labels and the column would mix
   // "Completed" with "Reached the deepest journey".
-  const envOutcomes = seqs.some((s) => reachesOutcome(s.journey));
+  const envOutcomes = seqs.some((s) => doneOf(s.journey));
   const envDeepest = deepestOf(seqs);
 
   for (const a of apps) {
@@ -145,7 +155,7 @@ const fmtPct = (v: number) => `${v.toFixed(v < 10 ? 1 : 0)}%`;
 
 /** True when a mined path never reaches an instrumented checkout view. */
 const abandons = (journey: string[]) =>
-  journey.length > 0 && !reachesOutcome(journey);
+  journey.length > 0 && !doneOf(journey);
 
 /**
  * Single-application mode: one ribbon per discovered navigation path, sized by
@@ -175,7 +185,7 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
       + (fragments > 0 ? ` · ${fmtN(fragments)} window fragments excluded` : ""),
     appId: app.appId });
 
-  const outcomes = vocab?.outcomes ?? mine.some((s) => reachesOutcome(s.journey));
+  const outcomes = vocab?.outcomes ?? mine.some((s) => doneOf(s.journey));
   const deepest = vocab?.deepest ?? deepestOf(mine);
   const stageTot = new Map<string, { nm: string; tone: Tone; sub: string; v: number }>();
   const addStage = (path: string[], v: number, from: string) => {
@@ -257,7 +267,7 @@ export function buildStepModel(app: AppRow, seqs: SeqRow[], trans: TransitionRow
         bump(linkVol, `${here}>>${i + 1}|${j[i + 1]}`, s.sessions);
       } else {
         // the session ends here: converted if the last view is a checkout
-        const done = DONE.test(j[i]);
+        const done = activeDone(j[i]);
         const end = `${done ? "done" : "exit"}-${i + 1}`;
         bump(endVol, end, s.sessions);
         bump(linkVol, `${here}>>${end}`, s.sessions);
@@ -275,7 +285,7 @@ export function buildStepModel(app: AppRow, seqs: SeqRow[], trans: TransitionRow
     nodes.push({
       id, c: step, v, nm: view.length > 26 ? "…" + view.slice(-25) : view,
       full: view.length > 26 ? view : undefined,
-      tone: DONE.test(view) ? "good" : INTENT.test(view) ? "warn" : "info",
+      tone: activeDone(view) ? "good" : INTENT.test(view) ? "warn" : "info",
       sub: `${pctOf(v)} of sessions`,
     });
   }
@@ -361,17 +371,17 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
   const scope = appId ? seqs.filter((s) => s.appId === appId) : seqs;
   if (!scope.length) return null;
   const measured = scope.reduce((a, s) => a + s.sessions, 0);
-  const done = scope.filter((s) => reachesOutcome(s.journey))
+  const done = scope.filter((s) => doneOf(s.journey))
     .reduce((a, s) => a + s.sessions, 0);
   // where the biggest group of unfinished sessions gave up
   const byLast = new Map<string, number>();
   for (const s of scope) {
-    if (reachesOutcome(s.journey) || !s.journey.length) continue;
+    if (doneOf(s.journey) || !s.journey.length) continue;
     const last = s.journey[s.journey.length - 1];
     byLast.set(last, (byLast.get(last) ?? 0) + s.sessions);
   }
   const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
-  const outcomes = scope.some((s) => reachesOutcome(s.journey));
+  const outcomes = scope.some((s) => doneOf(s.journey));
   return {
     measured, done, outcomes,
     pct: measured ? (done / measured) * 100 : 0,
@@ -383,7 +393,8 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 
 export function FlowSankey({
   apps, seqs, appId, transitions = [], friction = [], views = [], ux, tf,
-  cohort, onCohortConsumed, ticket = null, sym = "$", onPickApp, onOpen,
+  cohort, onCohortConsumed, ticket = null, sym = "$",
+  outcomeDefs, onDefineOutcome, onClearOutcome, onPickApp, onOpen,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
@@ -396,6 +407,11 @@ export function FlowSankey({
    *  turns the route economics into money. null = customers only. */
   ticket?: number | null;
   sym?: string;
+  /** Customer-taught conversion definitions, per application. */
+  outcomeDefs?: OutcomeDefs;
+  /** Save the picked views as THIS application's conversion definition. */
+  onDefineOutcome?: (views: string[]) => void;
+  onClearOutcome?: () => void;
   transitions?: TransitionRow[]; friction?: FrictionRow[];
   /** Per-app UX aggregate — the funnel reads window-fragment counts from it. */
   ux?: Map<string, { fragments: number }> | null;
@@ -446,6 +462,10 @@ export function FlowSankey({
   // step drop-off is one click away; a custom path or a cohort intent still
   // forces "steps" when it needs the positional columns.
   const [mode, setMode] = useState<"steps" | "paths">("paths");
+  /* the ACTIVE outcome test for this render — set before any model builds,
+   * so stages, matchers, summary and poster all read the same definition */
+  activeDone = outcomeTestFor(appId, outcomeDefs);
+  const defsKey = JSON.stringify(outcomeDefs?.[appId ?? ""] ?? null);
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
   stepModeRef.current = !!appId && mode === "steps";
@@ -464,10 +484,11 @@ export function FlowSankey({
       .sort((a, b) => b.sessions - a.sessions);
     return {
       top: new Set(mine.slice(0, 9).map((q) => routeId(q.journey))),
-      outcomes: mine.some((q) => reachesOutcome(q.journey)),
+      outcomes: mine.some((q) => doneOf(q.journey)),
       deepest: deepestOf(mine),
     };
-  }, [apps, seqs, appId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apps, seqs, appId, defsKey]);
 
   const matchesRoutePicks = (journey: string[], pk: string[]): boolean => {
     if (!pk.length) return true;
@@ -496,7 +517,7 @@ export function FlowSankey({
       const end = /^(done|exit)-(\d+)$/.exec(id);
       if (end) {
         if (j.length !== Number(end[2])) return false;
-        const done = DONE.test(j[j.length - 1] ?? "");
+        const done = activeDone(j[j.length - 1] ?? "");
         if ((end[1] === "done") !== done) return false;
         continue;
       }
@@ -735,7 +756,8 @@ export function FlowSankey({
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks, pathCtx]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks, pathCtx, defsKey]);
 
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
@@ -793,7 +815,8 @@ export function FlowSankey({
     setInfo("loading");
     try {
       // ONE per-session scan: attributes, whether it reached a goal, outcomes.
-      const rows = await runDql<Record<string, unknown>>(qCohortSessions(tf, appId), 10000);
+      const rows = await runDql<Record<string, unknown>>(
+        qCohortSessions(tf, appId, outcomeDefs), 10000);
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
       // used, so the cohort is provably the ribbon's.
@@ -968,7 +991,8 @@ export function FlowSankey({
     if (!app) return buildModel(apps, seqs);
     return mode === "steps" ? buildStepModel(app, seqs, transitions)
       : buildAppModel(app, seqs, ux?.get(app.appId)?.fragments ?? 0);
-  }, [apps, seqs, appId, mode, transitions, ux]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apps, seqs, appId, mode, transitions, ux, defsKey]);
 
   /** Selects a node from outside the canvas, exactly as a click would. */
   const pick = (n: Node) => {
@@ -1084,6 +1108,30 @@ export function FlowSankey({
               title="Draw the portrait of everything on screen — who these users are, on what, from where, with what outcome">
               {info === "loading" ? "drawing…" : "infographic ↗"}
             </button>
+            {(() => {
+              // the picked VIEWS (positions dropped, folded/starred names
+              // excluded) — the customer's "this is what converted means"
+              const pickedViews = [...new Set(picks
+                .map((id) => /^n\d+-([\s\S]*)$/.exec(id)?.[1])
+                .filter((v): v is string => !!v && !v.includes("*")))];
+              const hasDef = !!outcomeDefs?.[appId ?? ""]?.length;
+              return (<>
+                {mode === "steps" && pickedViews.length > 0 && onDefineOutcome && (
+                  <button className="flow-sel__b flow-sel__b--teach"
+                    onClick={() => { onDefineOutcome(pickedViews); setPicks([]); }}
+                    title={`Teach the app: reaching ${pickedViews.join(", ")} IS this application's conversion. Replaces the keyword heuristic everywhere — stages, Business Control, forecast, infographic.`}>
+                    define conversion = {pickedViews.length} view{pickedViews.length > 1 ? "s" : ""} ✓
+                  </button>
+                )}
+                {hasDef && onClearOutcome && (
+                  <button className="flow-sel__b"
+                    onClick={onClearOutcome}
+                    title={`Your definition: ${(outcomeDefs?.[appId ?? ""] ?? []).join(", ")} — click to return to the automatic vocabulary`}>
+                    conversion: yours ({outcomeDefs?.[appId ?? ""]?.length}) ✕
+                  </button>
+                )}
+              </>);
+            })()}
             {picks.length > 0 && (
               <button className="flow-sel__b" onClick={() => setPicks([])}>
                 {mode === "steps" ? "clear path" : "clear selection"} ✕

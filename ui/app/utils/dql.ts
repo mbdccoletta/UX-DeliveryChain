@@ -496,10 +496,43 @@ data record(kind = "", bucket = "", sessions = 0, real = 0, robots = 0,
 const OUTCOME_WORDS = ["checkout", "purchase", "confirm", "success",
   "complete", "booked", "receipt", "thank", "finish", "deposit", "withdraw",
   "credit-card/order"];
-/** The DQL contains-any over a lowercased view-name variable. */
+/**
+ * CUSTOMER-DEFINED OUTCOMES — the intelligence rule, the reader's design:
+ * a customer who has defined nothing teaches the app by picking views on the
+ * Journeys page ("define conversion here"); the definition is stored per
+ * application and REPLACES the keyword heuristic for that application, in
+ * every query and screen at once. Apps without a definition keep the
+ * measured keyword fallback (and its honest zero).
+ */
+export type OutcomeDefs = Record<string, string[]>;
+const esc = (x: string) => x.replace(/["\\]/g, "");
+/** The DQL contains-any over a lowercased view-name variable (fallback). */
 const outcomeDql = (v: string) =>
   OUTCOME_WORDS.map((w) => `contains(${v}, "${w}")`).join(" or ")
   + ` or endsWith(${v}, "/book")`;
+/**
+ * Outcome predicate for ONE known application: its custom view list when the
+ * customer defined one, the keyword heuristic otherwise.
+ */
+export const outcomeDqlForApp = (v: string, appId: string, defs?: OutcomeDefs) => {
+  const custom = defs?.[appId];
+  return custom?.length
+    ? `in(${v}, {${custom.map((n) => `"${esc(n.toLowerCase())}"`).join(", ")}})`
+    : `(${outcomeDql(v)})`;
+};
+/**
+ * Outcome predicate for ESTATE queries, where the row's app decides: each
+ * customised application matches its own list, everyone else the fallback.
+ */
+export const outcomeDqlByApp = (v: string, appVar: string, defs?: OutcomeDefs) => {
+  const entries = Object.entries(defs ?? {}).filter(([, l]) => l.length);
+  if (!entries.length) return `(${outcomeDql(v)})`;
+  const customIds = entries.map(([id]) => `"${esc(id)}"`).join(", ");
+  const perApp = entries.map(([id, list]) =>
+    `(${appVar} == "${esc(id)}" and in(${v}, {${list.map((n) => `"${esc(n.toLowerCase())}"`).join(", ")}}))`)
+    .join(" or ");
+  return `(${perApp} or (not(in(${appVar}, {${customIds}})) and (${outcomeDql(v)})))`;
+};
 const DONE_DQL = outcomeDql("_vn");
 
 /**
@@ -511,6 +544,7 @@ const DONE_DQL = outcomeDql("_vn");
  */
 export const qBizSeries = (
   tf: Timeframe, metric: "sessions" | "conversions", rumAppId?: string | null,
+  defs?: OutcomeDefs,
 ) => {
   const span = Math.max(tf.minutes, 30);
   const history = `now()-${span * 6}m`;
@@ -520,7 +554,7 @@ export const qBizSeries = (
   const agg = metric === "sessions" ? "sessions = count()" : "conversions = sum(reached)";
   return `fetch user.events, from: ${history}${appFilter}
 | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
-| fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
+| fieldsAdd _done = if(${rumAppId ? outcomeDqlForApp("_vn", rumAppId, defs) : outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
 | summarize reached = max(_done), t = takeMin(start_time), by: { sid = dt.rum.session.id }
 | makeTimeseries ${agg}, time: t, interval: ${interval}m`;
 };
@@ -532,7 +566,7 @@ export const qBizSeries = (
  * { d, bucket, appId, sessions, conv, realN, realConv }, per application so
  * the board's scope filter cuts it client-side.
  */
-export const qBizBreakdown = (tf: Timeframe) => {
+export const qBizBreakdown = (tf: Timeframe, defs?: OutcomeDefs) => {
   const dims: Array<[string, string]> = [
     ["country", "geo.country.iso_code"],
     ["os", "os.name"],
@@ -543,7 +577,7 @@ export const qBizBreakdown = (tf: Timeframe) => {
   const leg = (name: string, expr: string) => `
 | append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
   | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
-  | fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
+  | fieldsAdd _done = if(${outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
   | summarize v = takeAny(${expr}), reached = max(_done),
       errs = countIf(characteristics.classifier == "error"),
       // deterministic like qBizKpis/qUxByApp — takeAny flipped a coin on the
@@ -562,7 +596,7 @@ export const qBizBreakdown = (tf: Timeframe) => {
   const errLeg = `
 | append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
   | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
-  | fieldsAdd _done = if(${DONE_DQL}, 1, else: 0)
+  | fieldsAdd _done = if(${outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
   | summarize reached = max(_done),
       errs = countIf(characteristics.classifier == "error"),
       // deterministic like qBizKpis/qUxByApp — takeAny flipped a coin on the
@@ -581,9 +615,9 @@ data record(d = "", bucket = "", appId = "", sessions = 0, conv = 0, realN = 0, 
 | limit 500`;
 };
 
-export const qCohortSessions = (tf: Timeframe, rumAppId: string) => {
+export const qCohortSessions = (tf: Timeframe, rumAppId: string, defs?: OutcomeDefs) => {
   const app = rumAppId.replace(/["\\]/g, "");
-  const DONE = outcomeDql("_vn");
+  const DONE = outcomeDqlForApp("_vn", rumAppId, defs).replace(/^\(|\)$/g, "");
   const field = (id: string, expr: string) => `${id} = takeAny(${expr})`;
   const cols = INFO_DIMS.filter((d) => d.expr).map((d) => field(d.id, d.expr)).join(",\n      ");
   return `
@@ -627,11 +661,11 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * carry the RUM app id so per-application tiles and the estate tile come
  * from one scan.
  */
-export const qBizKpis = (tf: Timeframe) => {
+export const qBizKpis = (tf: Timeframe, defs?: OutcomeDefs) => {
   const span = `${Math.max(1, Math.round(tf.minutes))}m`;
   // a session "converted" if any of its views names an outcome — the ONE
   // vocabulary (OUTCOME_WORDS) reachesOutcome() also uses
-  const DONE_MATCH = outcomeDql("vn");
+  const DONE_MATCH = outcomeDqlByApp("vn", "dt.rum.application.id", defs);
   const both = (label: string, from: string, to: string) => `
 | append [ fetch user.events, from: ${from}, to: ${to}
   | fieldsAdd real = not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
@@ -692,6 +726,17 @@ export const INTENT =
 
 /** True when this journey reaches a recognisable final step. */
 export const reachesOutcome = (journey: string[]) => journey.some((v) => DONE.test(v));
+
+/** The per-view outcome test for ONE application — custom list first. */
+export const outcomeTestFor = (appId?: string | null, defs?: OutcomeDefs):
+  ((v: string) => boolean) => {
+  const custom = appId ? defs?.[appId] : undefined;
+  if (custom?.length) {
+    const set = new Set(custom.map((n) => n.toLowerCase()));
+    return (v: string) => set.has(v.toLowerCase());
+  }
+  return (v: string) => DONE.test(v);
+};
 
 export function normalizeView(name: string): string {
   return name
@@ -1675,6 +1720,6 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | summarize sessions = count(), views = sum(views),
     profiles = countDistinct(res),
   by: { appId, agent, utype }
-| filter not(startsWith(dt.rum.application.id, "APPLICATION-")) and isNotNull(appId) and appId != ""
+| filter not(startsWith(appId, "APPLICATION-")) and isNotNull(appId) and appId != ""
 | sort sessions desc
 | limit 200`;

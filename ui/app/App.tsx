@@ -19,6 +19,7 @@ import { ReportView } from "./components/ReportView";
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
 import { useUrlState } from "./hooks/useUrlState";
 import { useUxOverview } from "./hooks/useUxOverview";
+import { useOutcomeDefs } from "./hooks/useOutcomeDefs";
 import { usePageTitle } from "./hooks/usePageTitle";
 import { Boundary } from "./components/Boundary";
 
@@ -96,6 +97,9 @@ export function App() {
   const d = useChainData(tf, state.session);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   const uxMap = useUxOverview(tf);
+  // the customer's own conversion definitions — taught on Journeys, read by
+  // every screen that speaks of conversion
+  const outcome = useOutcomeDefs();
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
 
   const current = appId ?? d.apps[0]?.appId ?? "";
@@ -261,6 +265,9 @@ export function App() {
                 onCohortConsumed={() => set({ coh: null }, false)}
                 ticket={Number(state.tkt) > 0 ? Number(state.tkt) : null}
                 sym={state.cur ?? "$"}
+                outcomeDefs={outcome.defs}
+                onDefineOutcome={(views) => { if (current) void outcome.save(current, views); }}
+                onClearOutcome={() => { if (current) void outcome.clear(current); }}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
             </div>
@@ -276,7 +283,7 @@ export function App() {
           )}
           {tab === "report" && (
             <Boundary label="Report">
-              <ReportView data={d} scopeApp={current}
+              <ReportView data={d} scopeApp={current} outcomeDefs={outcome.defs}
                 ticket={state.tkt ?? ""} sym={state.cur ?? "$"}
                 onTicket={(t, cu) => set({ tkt: t || null, cur: cu === "$" ? null : cu }, false)}
                 cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}

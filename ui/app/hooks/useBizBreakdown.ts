@@ -1,7 +1,7 @@
 // Business Control's breakdown: what failure costs, and where conversion
 // lives — one query (qBizBreakdown), cut client-side by the board's scope.
 import { useEffect, useState } from "react";
-import { qBizBreakdown, runDql, type Timeframe } from "../utils/dql";
+import { qBizBreakdown, runDql, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 export interface BreakRow {
   d: string; bucket: string; appId: string;
@@ -12,8 +12,8 @@ export interface BreakRow {
 
 const memo = new Map<string, BreakRow[]>();
 
-export function useBizBreakdown(tf: Timeframe): BreakRow[] | null {
-  const key = `${tf.from}|${tf.to}`;
+export function useBizBreakdown(tf: Timeframe, defs?: OutcomeDefs): BreakRow[] | null {
+  const key = `${tf.from}|${tf.to}|${JSON.stringify(defs ?? {})}`;
   const [out, setOut] = useState<BreakRow[] | null>(memo.get(key) ?? null);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export function useBizBreakdown(tf: Timeframe): BreakRow[] | null {
     let live = true;
     (async () => {
       try {
-        const rows = await runDql<Record<string, unknown>>(qBizBreakdown(tf), 500);
+        const rows = await runDql<Record<string, unknown>>(qBizBreakdown(tf, defs), 500);
         const res = rows.map((r) => ({
           d: String(r.d ?? ""), bucket: String(r.bucket ?? ""), appId: String(r.appId ?? ""),
           sessions: Number(r.sessions) || 0, conv: Number(r.conv) || 0,

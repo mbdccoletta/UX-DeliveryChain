@@ -7,7 +7,7 @@
 // nature: the board labels it Davis forecast, never mixing it with measured
 // figures. Memoised per (window, scope).
 import { useEffect, useState } from "react";
-import { qBizSeries, type Timeframe } from "../utils/dql";
+import { qBizSeries, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 export interface Projection { point: number; lower: number; upper: number; quality: string }
 export interface BizForecast { sessions: Projection | null; conversions: Projection | null }
@@ -22,6 +22,7 @@ const memo = new Map<string, BizForecast>();
  */
 async function forecastOne(
   tf: Timeframe, metric: "sessions" | "conversions", appId: string | null,
+  defs?: OutcomeDefs,
 ): Promise<Projection | null> {
   try {
     const horizon = 8; // one window ahead: the series bins the window into 8
@@ -29,7 +30,7 @@ async function forecastOne(
     let res = await (await fetch(`${base}:execute`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        timeSeriesData: qBizSeries(tf, metric, appId), forecastHorizon: horizon }),
+        timeSeriesData: qBizSeries(tf, metric, appId, defs), forecastHorizon: horizon }),
     })).json() as Record<string, unknown>;
     let hops = 0;
     while (res.requestToken && !res.result && hops++ < 30) {
@@ -56,8 +57,9 @@ async function forecastOne(
   } catch { return null; }
 }
 
-export function useBizForecast(tf: Timeframe, appId: string | null): BizForecast | null {
-  const key = `${tf.from}|${tf.to}|${appId ?? ""}`;
+export function useBizForecast(tf: Timeframe, appId: string | null,
+  defs?: OutcomeDefs): BizForecast | null {
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs?.[appId ?? ""] ?? null)}`;
   const [out, setOut] = useState<BizForecast | null>(memo.get(key) ?? null);
 
   useEffect(() => {
@@ -67,8 +69,8 @@ export function useBizForecast(tf: Timeframe, appId: string | null): BizForecast
     let live = true;
     (async () => {
       const [sessions, conversions] = await Promise.all([
-        forecastOne(tf, "sessions", appId),
-        forecastOne(tf, "conversions", appId),
+        forecastOne(tf, "sessions", appId, defs),
+        forecastOne(tf, "conversions", appId, defs),
       ]);
       const res = { sessions, conversions };
       memo.set(key, res);
