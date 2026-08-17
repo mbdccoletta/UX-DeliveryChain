@@ -51,7 +51,8 @@ const money = (v: number, sym: string) =>
   : v >= 1e3 ? `${sym}${(v / 1e3).toFixed(0)}k`
   : `${sym}${Math.round(v)}`;
 
-export function RouteInfographic({ rows, path, appName, cohort, total, biz, ticket, sym, approx, onClose }: {
+export function RouteInfographic({ rows, path, appName, cohort, total, biz, vitals,
+  ticket, sym, approx, onClose }: {
   rows: InfoRow[] | "loading";
   /** The picked waypoints, in order, in words. */
   path: string[];
@@ -64,6 +65,12 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, tick
   /** Business Control's value-of-one-conversion, shared via url state. */
   ticket?: number | null;
   sym?: string;
+  /** HOW THIS ROUTE LOADS — the technical vitals of the cohort beside
+   *  everyone else's, p75 over each session's worst measured load. Null when
+   *  the platform timed none of these sessions (a route made only of soft
+   *  navigations carries no first byte and no paint). */
+  vitals?: null | { n: number; rest: number; lcp: number; lcpRest: number;
+    ttfb: number; ttfbRest: number; fcp: number; fcpRest: number };
   /** Figures were scaled from capped samples — worn as ≈ and said in the foot. */
   approx?: boolean;
   onClose: () => void;
@@ -151,6 +158,46 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, tick
                       <em>set a conversion value in Business Control for money</em>
                     </div>
                   )}
+                </div>
+              </section>
+            )}
+
+            {/* HOW IT LOADS — the same cohort-vs-rest grammar, in the
+                engineer's units. The reader asked for the technical reading
+                here, where the filters already scope everything; the panels
+                on the chain and the flow describe the whole application,
+                this describes the route on screen. p75 is the Web Vitals
+                standard's own percentile, applied to each session's worst
+                measured load; sessions the platform never timed are left out
+                rather than counted as zero. */}
+            {vitals && vitals.n > 0 && (
+              <section className="rinfo__worth rinfo__vit">
+                <span className="rinfo__worth-l">HOW THIS ROUTE LOADS</span>
+                <div className="rinfo__worth-row">
+                  {([["LCP", vitals.lcp, vitals.lcpRest, "largest contentful paint"],
+                     ["TTFB", vitals.ttfb, vitals.ttfbRest, "time to first byte"],
+                     ["FCP", vitals.fcp, vitals.fcpRest, "first contentful paint"]] as const)
+                    .filter(([, v]) => v > 0)
+                    .map(([k, v, r, why]) => {
+                      const l = r > 0 ? v / r : 1;
+                      const worse = l >= 1.15, better = l <= 0.87;
+                      return (
+                        <div className={`rinfo__kpi rinfo__kpi--worth${worse ? " rinfo__kpi--bad" : better ? " rinfo__kpi--good" : ""}`}
+                          key={k} title={`${why} · p75 over ${fmtN(vitals.n)} timed sessions on this route`}>
+                          <b className="num">{v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${Math.round(v)}ms`}</b>
+                          <span className="rinfo__kpi-l">{k} p75</span>
+                          <em>{r <= 0 ? "no comparison"
+                            : worse ? `${l.toFixed(1)}× slower than the rest`
+                            : better ? `${(1 / l).toFixed(1)}× faster than the rest`
+                            : "same as everyone"}</em>
+                        </div>
+                      );
+                    })}
+                  <div className="rinfo__kpi rinfo__kpi--worth">
+                    <b className="num">{fmtN(vitals.n)}</b>
+                    <span className="rinfo__kpi-l">timed sessions</span>
+                    <em>{vitals.rest > 0 ? `${fmtN(vitals.rest)} elsewhere` : "the only ones timed"}</em>
+                  </div>
                 </div>
               </section>
             )}

@@ -696,6 +696,14 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
       entry = takeFirst(if(characteristics.classifier == "navigation"
         or characteristics.classifier == "view_summary", coalesce(view.name, view.detected_name), else: null)),
       reached = max(_done),
+      // the session's WORST measured load — for a SPA that is simply the app
+      // load, the only hard navigation it has (measured: 1,880 of 1,881
+      // sessions carry exactly one); for a multi-page app it is the worst of
+      // its ~5 timed views. Milliseconds: ttfb.* arrive in ms, vitals in ns.
+      measured = countIf(isNotNull(ttfb.value)),
+      ttfbMs = takeMax(toDouble(ttfb.value)),
+      lcpMs = takeMax(toDouble(web_vitals.largest_contentful_paint) / 1000000),
+      fcpMs = takeMax(toDouble(web_vitals.first_contentful_paint) / 1000000),
       errs = countIf(characteristics.classifier == "error"),
       crash = countIf(error.type == "crash" or error.type == "anr"),
       views = countIf(characteristics.classifier == "view_summary"),
@@ -703,6 +711,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
       isReal = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
     by: { sid = dt.rum.session.id }
 | fields sid, reached, errs, crash, views, dur, isReal, entry,
+    measured, ttfbMs, lcpMs, fcpMs,
     ${INFO_DIMS.filter((d) => d.expr).map((d) => d.id).join(", ")}
 | limit 10000`;
 };
