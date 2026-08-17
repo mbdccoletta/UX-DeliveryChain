@@ -165,6 +165,25 @@ interface Edge { s: [number, number]; t: [number, number]; v: number; label: str
 const problemIds = (p: { entityIds: string[] | null }) => p.entityIds ?? [];
 
 /** Builds the 7 layers from the loaded live data. */
+/**
+ * Does this classic-only service earn its own card? The same database must
+ * not be drawn twice: when a classic DATABASE service's significant name
+ * tokens appear in a store card's namespace or address (measured: derby @
+ * ls-ub-lb4ac00v vs "MF easyTravelBusiness", one physical DB as two boxes),
+ * the store card — which carries measured calls and latency — keeps it.
+ * Shared by the tier builder AND the backend row's "N topology-mapped" sub,
+ * so the count can never disagree with the cards (it once said 2 over 0).
+ */
+function gen2CardKept(g: Gen2Service, stores: DataStore[] | null): boolean {
+  if (!/DATABASE|DATASTORE/.test(g.kind) || !stores?.length) return true;
+  const gt = g.name.toLowerCase().replace(/[^a-z0-9]+/g, " ")
+    .split(" ").filter((t) => t.length >= 4);
+  return !stores.some((st) => {
+    const hay = ` ${(st.ns ?? "")} ${st.store} `.toLowerCase();
+    return gt.length > 0 && gt.some((t) => hay.includes(t));
+  });
+}
+
 function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecast | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
   stores: DataStore[] | null, gen2: Gen2Service[] | null,
@@ -210,8 +229,14 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     reqs: number; p50: number; err: number; bytes: number }>();
   for (const r of domains) {
     const cur = domAgg.get(r.domain);
-    if (cur) { cur.reqs += r.reqs; cur.err += r.err; cur.bytes += r.bytes;
-      cur.p50 = Math.max(cur.p50, r.p50); }
+    if (cur) {
+      // the DOMINANT segment's p50 names the domain — max() once let a
+      // 39-request synthetic sliver (4.9ms) caption 922k real requests (~0ms);
+      // per-segment p50s cannot be merged into a true p50, so the honest
+      // approximation is the one that describes almost all of the traffic
+      if (r.reqs > cur.reqs) cur.p50 = r.p50;
+      cur.reqs += r.reqs; cur.err += r.err; cur.bytes += r.bytes;
+    }
     else domAgg.set(r.domain, { domain: r.domain, provider: r.provider,
       reqs: r.reqs, p50: r.p50, err: r.err, bytes: r.bytes });
   }
@@ -393,20 +418,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * the Serve layer room for at least two of its own services while letting
    * a classic-only chain arrive whole. */
   const gen2Cards: Elo[] = (gen2 ?? [])
-    // the same database must not be drawn twice: when a classic DATABASE
-    // service's significant name tokens appear in a store card's namespace or
-    // address (measured: derby @ ls-ub-lb4ac00v vs "MF easyTravelBusiness",
-    // one physical DB as two boxes), the store card — which carries measured
-    // calls and latency — keeps it and the topology-only card yields
-    .filter((g) => {
-      if (!/DATABASE|DATASTORE/.test(g.kind) || !stores?.length) return true;
-      const gt = g.name.toLowerCase().replace(/[^a-z0-9]+/g, " ")
-        .split(" ").filter((t) => t.length >= 4);
-      return !stores.some((st) => {
-        const hay = ` ${(st.ns ?? "")} ${st.store} `.toLowerCase();
-        return gt.length > 0 && gt.some((t) => hay.includes(t));
-      });
-    })
+    .filter((g) => gen2CardKept(g, stores))
     .slice(0, 10).map<Elo>((g) => ({
     nm: g.name, mt: `${KIND_LABEL(g.kind)} · topology-mapped`,
     v: String(g.callers.length || "·"), tone: "info",
@@ -503,7 +515,10 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
         det: [["Provider", x.provider ?? "—"], ["Requests", fmtN(x.reqs)], ["p50", fmtMs(x.p50)],
               ["4xx/5xx errors", fmtN(x.err)],
               ["Transferred", x.bytes ? fmtK(Math.round(x.bytes / 1024)) + " KB" : "—"]] })) : [noData],
-      domList.length, fmtK(domList.reduce((a, x) => a + x.reqs, 0)), "requests"),
+      // third parties only: this column's cards ARE the non-first-party
+      // domains, and its header once said "922.5k requests" over a single
+      // "No coverage" card because every request was first-party (audit)
+      others.length, fmtK(others.reduce((a, x) => a + x.reqs, 0)), "requests"),
 
     L([{ nm: app?.name ?? "—", mt: `FRONTEND · ${fmtN(app?.views ?? 0)} views`, v: fmtK(app?.errors ?? 0),
         tone: "info", vol: app?.views ?? 0,
@@ -948,7 +963,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     const from: [number, number] =
       built.layers[3]?.items[0]?.miss ? [2, 0] : [3, 0];
     const vol = [...scope.traces.values()].reduce((a, v) => a + v, 0);
-    if (!built.layers[4]?.items[0]?.miss || scope.resolved) {
+    // only when the Serve layer holds a REAL card: `miss` covers noData,
+    // noLink and noPlace, and drawing "reaches the backend" into a card that
+    // says "no trace reaches a service" contradicted it (audit)
+    if (!built.layers[4]?.items[0]?.miss) {
       kept.push({ s: from, t: [4, 0], v: Math.max(vol, 1),
         label: vol > 0 ? "traces" : "reaches the backend" });
     }
@@ -1222,36 +1240,41 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const stats = () => {
     if (selTier === null) return null;
     if (selTier === 0) {
-      const tot = data.devices.reduce((a, r) => a + r.sessions, 0) || 1;
+      // the pillar header is this application's — so is the drawer now
+      const devices = data.devices.filter((r) => r.appId === appId);
+      const tot = devices.reduce((a, r) => a + r.sessions, 0) || 1;
       return (<>
         <div className="dd">
           <Kpi l="Sessions" v={fmtN(tot)} t="info" />
-          <Kpi l="Distinct profiles" v={String(data.devices.length)} t="good" />
-          <Kpi l="Views" v={fmtK(data.devices.reduce((a, r) => a + r.views, 0))} t="warn" />
+          <Kpi l="Distinct profiles" v={String(devices.length)} t="good" />
+          <Kpi l="Views" v={fmtK(devices.reduce((a, r) => a + r.views, 0))} t="warn" />
         </div>
         <div className="dd__h">Screen resolution <em>device.screen · measured</em></div>
-        {bar(Object.entries(data.devices.reduce<Record<string, number>>((a, r) => {
+        {bar(Object.entries(devices.reduce<Record<string, number>>((a, r) => {
           a[r.res] = (a[r.res] ?? 0) + r.sessions; return a;
         }, {})).sort((a, b) => b[1] - a[1]), (k) => (Number(k.split("×")[0]) < 800 ? "info" : "good"))}
-        <div className="dd__h">Device profiles <em>{data.devices.length} combinations</em></div>
+        <div className="dd__h">Device profiles <em>{devices.length} combinations</em></div>
         <Table cols={["Resolution", "DPR", "Orientation", "Agent", "Type", "Sessions", "Views"]}
-          rows={data.devices.map((r) => [r.res, r.dpr ?? "—", r.orient ?? "—", r.agent ?? "—",
+          rows={devices.map((r) => [r.res, r.dpr ?? "—", r.orient ?? "—", r.agent ?? "—",
             r.utype ?? "—", fmtN(r.sessions), fmtN(r.views)])} />
       </>);
     }
     if (selTier === 1 || selTier === 3) {
+      // the pillar header is this application's — so is the drawer now
+      const doms = data.domains.filter((r) => r.appId === appId);
+      const pths = data.paths.filter((r) => r.appId === appId);
       return (<>
         <div className="dd">
-          <Kpi l="Domains" v={String(data.domains.length)} t="good" />
-          <Kpi l="Requests" v={fmtK(data.domains.reduce((a, r) => a + r.reqs, 0))} t="good" />
-          <Kpi l="4xx/5xx errors" v={fmtN(data.domains.reduce((a, r) => a + r.err, 0))} t="good" />
+          <Kpi l="Domains" v={String(new Set(doms.map((r) => r.domain)).size)} t="good" />
+          <Kpi l="Requests" v={fmtK(doms.reduce((a, r) => a + r.reqs, 0))} t="good" />
+          <Kpi l="4xx/5xx errors" v={fmtN(doms.reduce((a, r) => a + r.err, 0))} t="good" />
         </div>
-        <div className="dd__h">Contacted domains <em>url.domain · measured</em></div>
+        <div className="dd__h">Contacted domains <em>url.domain · this application</em></div>
         <Table cols={["Domain", "Provider", "Req", "p50", "Errors"]}
-          rows={data.domains.map((r) => [r.domain, r.provider ?? "—", fmtN(r.reqs), fmtMs(r.p50), fmtN(r.err)])} />
-        <div className="dd__h">Most requested paths <em>url.path · measured</em></div>
+          rows={doms.map((r) => [r.domain, r.provider ?? "—", fmtN(r.reqs), fmtMs(r.p50), fmtN(r.err)])} />
+        <div className="dd__h">Most requested paths <em>url.path · this application</em></div>
         <Table cols={["Path", "Method", "Status", "Req", "p50", "p90"]}
-          rows={data.paths.slice(0, 8).map((r) => [r.path, r.method ?? "—", r.status ?? "—",
+          rows={pths.slice(0, 8).map((r) => [r.path, r.method ?? "—", r.status ?? "—",
             fmtN(r.reqs), fmtMs(r.p50), fmtMs(r.p90)])} />
       </>);
     }
@@ -1325,11 +1348,18 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
             {highlight && (
               <button className="hlbar" onClick={() => onHighlightClear?.()}
                 title="Clear the spotlight">
-                ⚠ {fmtN(data.signals.filter((sg) => sg.provider === "BASELINING"
-                    && [...(scope.services ?? new Set()), ...(scope.runtime ?? new Set()),
-                      ...(data.apps.find((a) => a.appId === appId)?.entity
-                        ? [data.apps.find((a) => a.appId === appId)!.entity!] : [])]
-                      .includes(sg.entityId)).length)} anomalies spotlighted —
+                ⚠ {fmtN((() => {
+                  // distinct anomalies matched to DRAWN cards — the banner
+                  // once counted a scope-set the cards did not share, and
+                  // "each lit card wears its count" could disagree with it
+                  const lit = new Set<string>();
+                  for (const t of tiers) for (const n of t.items) {
+                    if (n.miss) continue;
+                    for (const sg of signalsFor(n.ids ?? []))
+                      if (sg.provider === "BASELINING") lit.add(`${sg.entityId}|${sg.name}`);
+                  }
+                  return lit.size;
+                })())} anomalies spotlighted —
                 each lit card wears its count · click anywhere to dismiss ✕
               </button>
             )}
@@ -1537,9 +1567,9 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     {scope.loading
                       ? <div className="bsum__row"><em className="bsum__s">resolving the scope…</em></div>
                       : (<>
-                        {row(4, "Services", fmtN(tiers[4]?.total ?? 0), "services",
-                          (gen2?.length ?? 0) > 0
-                            ? `${gen2!.length} topology-mapped` : undefined)}
+                        {row(4, "Services", fmtN(Math.max(0, (tiers[4]?.total ?? 0) - storeCount)), "services",
+                          (() => { const n = (gen2 ?? []).filter((g) => gen2CardKept(g, stores)).length;
+                            return n > 0 ? `${n} topology-mapped` : undefined; })())}
                         {storeCount > 0 && row(4, "Data stores", fmtN(storeCount), "databases")}
                         {row(5, "Runtime", fmtN(tiers[5]?.total ?? 0),
                           isK8s ? "kubernetes" : "hosts",

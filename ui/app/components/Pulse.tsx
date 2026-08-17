@@ -132,7 +132,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   // Problems anywhere in this application's delivery scope count against it —
   // the same set the chain rolls up into its layer captions.
   const scopeProbs = data.problems.filter((pr) =>
-    (pr.entityIds ?? []).some((id) => scope.services.has(id)));
+    (pr.entityIds ?? []).some((id) => scope.services.has(id) || scope.runtime.has(id)));
   const scopeProblems = scopeProbs.length;
   /* Anomalies, counted by the SAME rule that turns a chain card amber:
    * BASELINING signals bound to this application's entity or anything in its
