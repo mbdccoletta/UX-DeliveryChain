@@ -20,6 +20,8 @@ import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/link
 import { useUrlState } from "./hooks/useUrlState";
 import { useUxOverview } from "./hooks/useUxOverview";
 import { useOutcomeDefs } from "./hooks/useOutcomeDefs";
+import { useTechVitals } from "./hooks/useTechVitals";
+import { TechPanel } from "./components/TechPanel";
 import { usePageTitle } from "./hooks/usePageTitle";
 import { Boundary } from "./components/Boundary";
 
@@ -103,6 +105,10 @@ export function App() {
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
 
   const current = appId ?? d.apps[0]?.appId ?? "";
+  // the engineer's reading of the same anatomy Business Control speaks in
+  // business words — shown on the two technical pages, one scan shared
+  const tech = useTechVitals(tf, (tab === "chain" || tab === "flow") ? current : null);
+
   // The header quotes the same per-session scan the pages quote, so the title
   // bar and the card below it can never state two different session counts.
   const totalSessions = uxMap
@@ -270,6 +276,13 @@ export function App() {
                 onClearOutcome={() => { if (current) void outcome.clear(current); }}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
+              {/* which SCREEN is slow, and why — a journey is made of views */}
+              <Boundary label="Vitals">
+                <TechPanel rows={tech} withViews
+                  appName={d.apps.find((a) => a.appId === current)?.name ?? ""}
+                  isMobile={d.apps.find((a) => a.appId === current)?.entity
+                    ?.startsWith("MOBILE_APPLICATION-")} />
+              </Boundary>
             </div>
           )}
 
@@ -279,6 +292,12 @@ export function App() {
                 sel={state.sel} onSel={(v) => set({ sel: v })}
                 highlight={state.hl === "anomalies" ? "anomalies" : null}
                 onHighlightClear={() => set({ hl: null }, false)} />
+              {/* the chain draws WHERE the request goes; this says where its
+                  TIME goes, in the same technical vocabulary */}
+              <TechPanel rows={tech}
+                appName={d.apps.find((a) => a.appId === current)?.name ?? ""}
+                isMobile={d.apps.find((a) => a.appId === current)?.entity
+                  ?.startsWith("MOBILE_APPLICATION-")} />
             </Boundary>
           )}
           {tab === "report" && (

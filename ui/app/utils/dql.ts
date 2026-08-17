@@ -400,6 +400,71 @@ export const INFO_DIMS: Array<{ id: string; label: string; expr: string }> = [
  * crash/anr is the device; exception is frontend code; csp a third party or
  * the user's own browser policy. Sessions counted per bucket.
  */
+/**
+ * THE TECHNICAL READING of the same anatomy Business Control states in
+ * business words — for the engineers who work the Delivery Chain and the
+ * Journeys pages. Four legs, one scan each, all scoped to one application:
+ *
+ *   "app"   totals: the TTFB anatomy (cache · dns · connection · request ·
+ *           waiting — measured: they sum to ttfb.value), the Core Web Vitals
+ *           at p75 (the standard's own percentile, not p50) and long tasks.
+ *   "view"  the same per view, so the engineer sees WHICH screen and why.
+ *   "dur"   user-action and app-start durations — the technical story of an
+ *           application that carries no vitals at all (measured on Astroshop
+ *           Android: zero ttfb, zero LCP, zero foreground_time).
+ *   "err"   error counts by their platform names, not business phrasing.
+ *
+ * UNITS, measured: ttfb.* arrive in float MILLISECONDS, web_vitals.* and
+ * duration in NANOSECONDS. Everything here is normalised to milliseconds.
+ */
+export const qTechVitals = (tf: Timeframe, rumAppId: string) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const vitals = `
+  | summarize n = count(), meas = countIf(isNotNull(ttfb.value)),
+      cacheMs = percentile(toDouble(ttfb.cache_duration), 75),
+      dnsMs = percentile(toDouble(ttfb.dns_duration), 75),
+      connMs = percentile(toDouble(ttfb.connection_duration), 75),
+      reqMs = percentile(toDouble(ttfb.request_duration), 75),
+      waitMs = percentile(toDouble(ttfb.waiting_duration), 75),
+      ttfbMs = percentile(toDouble(ttfb.value), 75),
+      lcpMs = percentile(toDouble(web_vitals.largest_contentful_paint) / 1000000, 75),
+      fcpMs = percentile(toDouble(web_vitals.first_contentful_paint) / 1000000, 75),
+      cls = percentile(toDouble(web_vitals.cumulative_layout_shift), 75),
+      inpMs = percentile(toDouble(web_vitals.interaction_to_next_paint) / 1000000, 75),
+      longMs = percentile(toDouble(long_task.all.avg_duration) / 1000000, 75),
+      durMs = percentile(toLong(duration) / 1000000, 75)`;
+  return `
+data record(kind = "", bucket = "", n = 0, meas = 0, cacheMs = 0.0, dnsMs = 0.0,
+  connMs = 0.0, reqMs = 0.0, waitMs = 0.0, ttfbMs = 0.0, lcpMs = 0.0, fcpMs = 0.0,
+  cls = 0.0, inpMs = 0.0, longMs = 0.0, durMs = 0.0, sessions = 0)
+| filter false
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}" and characteristics.classifier == "view_summary"${vitals},
+    by: { kind = "app", bucket = "" } ]
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}" and characteristics.classifier == "view_summary"
+  | fieldsAdd vn = ${VIEW_NAME}
+  | filter isNotNull(vn) and vn != ""${vitals},
+    by: { kind = "view", bucket = vn }
+  | sort n desc | limit 8 ]
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}"
+      and in(characteristics.classifier, { "user_action", "app_start" })
+  | summarize n = count(), durMs = percentile(toLong(duration) / 1000000, 75),
+    by: { kind = "dur", bucket = characteristics.classifier } ]
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}" and characteristics.classifier == "error"
+  | fieldsAdd bucket = if(error.type == "crash", "crash",
+      else: if(error.type == "anr", "anr",
+      else: if(error.type == "csp", "csp",
+      else: if(error.type == "exception", "exception",
+      else: if(error.type == "request" and http.response.status_code >= 500, "http5xx",
+      else: if(error.type == "request" and http.response.status_code >= 400, "http4xx",
+      else: if(error.type == "request", "noresponse", else: "other")))))))
+  | summarize n = count(), sessions = countDistinct(dt.rum.session.id), by: { kind = "err", bucket } ]
+| limit 40`;
+};
+
 export const qDifficulty = (tf: Timeframe) => {
   const span = `${tf.minutes}m`;
   // UNITS, measured on the tenant: ttfb.* come in MILLISECONDS (floats —
