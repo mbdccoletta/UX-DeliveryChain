@@ -1,6 +1,11 @@
-// Turns measured user actions into the four answers the flow has to give:
-// which routes users take, where they leave and why, which routes are slow or
-// failing, and what to fix first.
+// Turns measured user actions into the health of one move between two views,
+// and the friction behind it.
+//
+// The ranked "Fix first" list this file also built is gone: the reader called
+// it out as useless, and it was — its rows fragmented one finding across every
+// product id ("/product/*puk6v6ev0 · 66% of interactions respond poorly", five
+// times over), which is noise, not a priority. What it tried to say is said
+// better by the per-view technical table and the drop-off diagram.
 //
 // Every figure comes from a user action the browser reported. Nothing here is
 // modelled or estimated — where a cause cannot be named, the finding says so
@@ -43,71 +48,6 @@ export function edgeHealth(t: TransitionRow): EdgeHealth {
   }
   return { health: "ok", note: `p50 ${fmtMs(t.p50)}` };
 }
-
-export interface Priority {
-  rank: number;
-  /** Which application owns this, so a consolidated list stays actionable. */
-  app: string | null;
-  /** The move or view this is about. */
-  where: string;
-  /** What is happening, stated as measured fact. */
-  what: string;
-  /** The named cause, when the data attributes one. */
-  cause: string | null;
-  /** Sessions this costs in the window — the ranking key. */
-  cost: number;
-  health: Health;
-}
-
-/**
- * What to fix first, ranked by the sessions it costs.
- *
- * Lost sessions outrank slow ones: a session that left is gone, a slow one may
- * still convert. Within each, volume decides.
- */
-export function priorities(
-  transitions: TransitionRow[], friction: FrictionRow[], appId?: string | null,
-  apps: AppRow[] = [],
-): Priority[] {
-  // in the consolidated view every row must name its application, or the list
-  // says what to fix without saying where
-  const nameOf = (id: string) => apps.find((a) => a.appId === id)?.name ?? null;
-  const t = appId ? transitions.filter((x) => x.appId === appId) : transitions;
-  const f = appId ? friction.filter((x) => x.appId === appId) : friction;
-  const out: Array<Omit<Priority, "rank">> = [];
-
-  for (const x of t) {
-    const lost = x.abandoned + x.timeouts;
-    const h = edgeHealth(x);
-    if (h.health === "ok") continue;
-    // the element the platform blamed on the destination view, if any
-    const elem = f
-      .filter((y) => y.appId === x.appId && y.view === x.dst && (y.tag || y.xpath))
-      .sort((a, b) => b.abandoned + b.timeouts - (a.abandoned + a.timeouts))[0];
-    const cause = elem
-      ? `<${elem.tag}> ${elem.xpath}` +
-        (elem.cls > 0.1 ? ` — shifts the layout by ${elem.cls.toFixed(2)}` : "")
-      : null;
-    out.push({
-      app: appId ? null : nameOf(x.appId),
-      where: `${x.src} → ${x.dst}`,
-      what: h.note,
-      cause,
-      cost: lost > 0 ? lost : Math.round(x.sessions * 0.1),
-      health: h.health,
-    });
-  }
-
-  return out
-    .sort((a, b) => {
-      if (a.health !== b.health) return a.health === "losing" ? -1 : 1;
-      return b.cost - a.cost;
-    })
-    .slice(0, 6)
-    .map((p, i) => ({ ...p, rank: i + 1 }));
-}
-
-/** The friction attributed to one view, for the drill-down. */
 export function frictionFor(
   friction: FrictionRow[], view: string, appId?: string | null,
 ): FrictionRow[] {
