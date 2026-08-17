@@ -9,7 +9,7 @@ import { qBizKpis, runDql, type Timeframe } from "../utils/dql";
 export interface BizPeriod {
   sessions: number; realSessions: number; converted: number; convertedReal: number;
   hitReal: number; fatalSessions: number;
-  engaged: number; actions: number; abandoned: number;
+  engaged: number; realEngaged: number; actions: number; abandoned: number;
   satisfied: number; tolerating: number; frustrated: number;
 }
 export interface BizKpis {
@@ -19,13 +19,14 @@ export interface BizKpis {
 }
 
 const ZERO: BizPeriod = { sessions: 0, realSessions: 0, converted: 0, convertedReal: 0,
-  hitReal: 0, fatalSessions: 0, engaged: 0, actions: 0, abandoned: 0,
+  hitReal: 0, fatalSessions: 0, engaged: 0, realEngaged: 0, actions: 0, abandoned: 0,
   satisfied: 0, tolerating: 0, frustrated: 0 };
 const add = (a: BizPeriod, b: BizPeriod): BizPeriod => ({
   sessions: a.sessions + b.sessions, realSessions: a.realSessions + b.realSessions,
   converted: a.converted + b.converted, convertedReal: a.convertedReal + b.convertedReal,
   hitReal: a.hitReal + b.hitReal, fatalSessions: a.fatalSessions + b.fatalSessions,
-  engaged: a.engaged + b.engaged, actions: a.actions + b.actions,
+  engaged: a.engaged + b.engaged, realEngaged: a.realEngaged + b.realEngaged,
+  actions: a.actions + b.actions,
   abandoned: a.abandoned + b.abandoned, satisfied: a.satisfied + b.satisfied,
   tolerating: a.tolerating + b.tolerating, frustrated: a.frustrated + b.frustrated });
 
@@ -52,7 +53,8 @@ export function useBizKpis(tf: Timeframe): BizKpis | null {
             sessions: Number(r.sessions) || 0, realSessions: Number(r.realSessions) || 0,
             converted: Number(r.converted) || 0, convertedReal: Number(r.convertedReal) || 0,
             hitReal: Number(r.hitReal) || 0, fatalSessions: Number(r.fatalSessions) || 0,
-            engaged: Number(r.engaged) || 0, actions: Number(r.actions) || 0,
+            engaged: Number(r.engaged) || 0, realEngaged: Number(r.realEngaged) || 0,
+            actions: Number(r.actions) || 0,
             abandoned: Number(r.abandoned) || 0, satisfied: Number(r.satisfied) || 0,
             tolerating: Number(r.tolerating) || 0, frustrated: Number(r.frustrated) || 0 };
           const slot = byApp.get(id) ?? { cur: ZERO, prev: ZERO };

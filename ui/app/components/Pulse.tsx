@@ -594,7 +594,8 @@ function CleanCard(p: CardProps) {
           spark={<><Bars vals={sess} times={times} label="sessions" fc={p.fcBars?.sessions} />
             <em className="tk-block__sparkv">{p.actionsPerMin}/min<br />user actions</em></>}>
           <div className="tk-row2">
-            <Stat v={fmtK(p.sessions)} l="users (sessions)" />
+            <Stat v={fmtK(p.sessions)} l="sessions"
+              title="All sessions in the window — robots and synthetic included; the error-free figure beside it uses the same base" />
             <Stat v={pct} l="error-free" tone={p.tone === "info" ? undefined : p.tone} />
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
