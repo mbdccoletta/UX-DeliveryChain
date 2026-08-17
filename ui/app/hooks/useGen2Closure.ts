@@ -20,6 +20,8 @@ export interface Gen2Service {
   /** Same id space as Smartscape — the two models join without translation. */
   id: string;
   name: string;
+  /** Classic isExternalService — kept for the twin dedup above. */
+  ext?: boolean;
   /** The classic serviceType: DATABASE_SERVICE, CICS_SERVICE, QUEUE_LISTENER… */
   kind: string;
   /** The host the classic model places it on, when it names one. */
@@ -80,6 +82,7 @@ export function useGen2Closure(serviceIds: string[], active = true): Gen2Service
               : r.host ? String(r.host) : "";
             found.set(id, { id, name: String(r.name ?? id),
               kind: String(r.kind ?? ""), host: host || undefined,
+              ext: r.ext === true || r.ext === "true",
               callers: src ? [src] : [] });
             next.push(id);
           }
@@ -88,7 +91,34 @@ export function useGen2Closure(serviceIds: string[], active = true): Gen2Service
           next.forEach((i) => known.add(i));
           frontier = next;
         }
-        const list = [...found.values()];
+        /* THE TWIN DEDUP, by name, not by type. An EXTERNAL WEB service is
+         * usually the same code seen from its caller ("MF /services/
+         * JourneyService/ on port 8091" beside "MF JourneyService") — but the
+         * old flag+type test also killed real unmonitored endpoints with no
+         * twin at all (measured: CouchDB_ET on 5984, 8,482 spans/2h, gone
+         * from every layer). So an ext WEB row is dropped only when a
+         * monitored row's significant name tokens ALL appear in its name —
+         * the audit's fourteen ext∧WEB services split cleanly: the true
+         * duplicates match a twin, CouchDB matches none and stays. */
+        const all = [...found.values()];
+        const tokens = (nm: string) => nm.toLowerCase().replace(/[^a-z0-9]+/g, " ")
+          .split(" ").filter((t) => t.length >= 4);
+        const monitored = all.filter((g) => !g.ext);
+        const isTwin = (g: Gen2Service & { ext?: boolean }) => {
+          const hay = ` ${tokens(g.name).join(" ")} `;
+          return monitored.some((m) => {
+            const tk = tokens(m.name);
+            return tk.length > 0 && tk.every((t) => hay.includes(` ${t} `));
+          });
+        };
+        // classic AGGREGATION BUCKETS ("Requests to public networks",
+        // "Requests on localhost:8091") are not components either — they are
+        // the classic model's catch-alls, and a box named after one says
+        // nothing a reader can act on
+        const isBucket = (g: Gen2Service) => /^requests (to|on) /i.test(g.name);
+        const list = all.filter((g) =>
+          !(g.ext && /^(WEB_SERVICE|WEB_REQUEST_SERVICE)$/.test(g.kind)
+            && (isTwin(g) || isBucket(g))));
         memo.set(key, list);
         if (live) setOut(list);
       } catch {

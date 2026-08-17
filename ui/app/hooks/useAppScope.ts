@@ -33,7 +33,7 @@ export interface AppScope {
    * run straight on hosts has a full chain too, and reading only pods was what
    * left this layer blank and the machinery below it unattached.
    */
-  placements: Array<{ svc: string; id: string; type: string; name: string }>;
+  placements: Array<{ svc: string; id: string; type: string; name: string; classic?: string }>;
   /** True when membership came from classic topology, not from traces —
    *  volumes are unknown then, and the UI says "linked" instead of counting. */
   topo?: boolean;
@@ -126,9 +126,13 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
           resolved: true, loading: false };
         if (services.size) {
           try {
-            const rt = await runDql<{ src: string; id: string; type: string; name: string }>(
+            const rt = await runDql<{ src: string; id: string; type: string;
+              name: string; classic?: string }>(
               qServiceRuntime([...services]), 800);
-            out.runtime = new Set(rt.map((r) => String(r.id)).filter(Boolean));
+            // both id forms enter the scope set: Davis names k8s entities in
+            // classic form, and a set without them can never match its events
+            out.runtime = new Set(rt.flatMap((r) => [String(r.id), r.classic ? String(r.classic) : ""])
+              .filter(Boolean));
             // The NAME travels with the placement now. The runtime layer used
             // to be drawn from a pod-centric query and named from there, which
             // left it empty wherever services do not run on pods — measured on
@@ -138,6 +142,7 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
             out.placements = rt.map((r) => ({
               svc: String(r.src), id: String(r.id), type: String(r.type),
               name: r.name ? String(r.name) : String(r.id),
+              classic: r.classic ? String(r.classic) : undefined,
             }));
           } catch {
             /* Smartscape unavailable — services still narrow, runtime does not */
