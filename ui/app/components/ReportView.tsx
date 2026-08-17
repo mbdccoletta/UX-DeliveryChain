@@ -397,6 +397,8 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
         const ERR_LBL: Array<[string, string, string, boolean]> = [
           ["backend", "let down by your service", "server errors (HTTP 5xx)", true],
           ["frontend", "hit a defect in the app", "JavaScript exceptions in your frontend code", false],
+          ["policy", "blocked by your own security policy",
+            "CSP violations on first-party resources — a configuration fix, not a code fix", true],
           ["third_party", "hit a partner's service", "content-security violations naming the third party", false],
           ["device", "let down by their own phone", "app crashes and freezes (crash / ANR)", false],
           ["connection", "lost their own connection", "requests that never got a response (status 0)", false],
@@ -427,6 +429,12 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
                   <i style={{ width: `${where.cur.rend * 100}%`, background: "var(--warn, #e8b04b)" }} />
                 </div>
                 <div className="bc__diff-leg">
+                  {where.d.slow.cur.views > 0 && (
+                    <span className="bc__diff-cov"
+                      title="TTFB decomposition exists only on hard navigations — SPA soft routes and mobile screens carry none">
+                      measured on {pct(where.d.slow.cur.meas / Math.max(1, where.d.slow.cur.views))} of screens
+                    </span>
+                  )}
                   <span title="Server processing — time to first byte, waiting portion">
                     <i style={{ background: "var(--bad)" }} />your systems · {ms(where.per(where.d.slow.cur.srv))} per screen</span>
                   <span title="The customer's network — DNS lookup + connection time">

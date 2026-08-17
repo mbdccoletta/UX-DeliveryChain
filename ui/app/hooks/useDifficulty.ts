@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { qDifficulty, runDql, type Timeframe } from "../utils/dql";
 
 export interface SlowSplit { views: number; meas: number; net: number; srv: number; rend: number }
-export type ErrBucket = "backend" | "frontend" | "third_party" | "device" | "connection" | "request_4xx" | "other";
+export type ErrBucket = "backend" | "frontend" | "policy" | "third_party" | "device" | "connection" | "request_4xx" | "other";
 export interface DifficultyApp {
   slow: { cur: SlowSplit; prev: SlowSplit };
   err: { cur: Map<ErrBucket, number>; prev: Map<ErrBucket, number> };

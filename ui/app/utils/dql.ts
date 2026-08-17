@@ -413,6 +413,8 @@ export const qDifficulty = (tf: Timeframe) => {
   | fieldsAdd _lcp = coalesce(toDouble(web_vitals.largest_contentful_paint), 0.0)
   | fieldsAdd _ttfb = coalesce(toDouble(ttfb.value), 0.0) * 1000000
   | fieldsAdd _rend = if(_lcp > _ttfb, _lcp - _ttfb, else: 0.0)
+  | filter isNotNull(dt.rum.application.id) and dt.rum.application.id != ""
+      and not(startsWith(dt.rum.application.id, "APPLICATION-"))
   | summarize views = count(), meas = countIf(isNotNull(ttfb.value)),
       net = sum(_net), srv = sum(_srv), rend = sum(_rend),
     by: { appId = dt.rum.application.id, period = "${label}", kind = "slow", bucket = "" } ]`;
@@ -420,12 +422,16 @@ export const qDifficulty = (tf: Timeframe) => {
 | append [ fetch user.events, from: ${from}, to: ${to}
   | filter characteristics.classifier == "error"
   | fieldsAdd bucket = if(error.type == "crash" or error.type == "anr", "device",
-      else: if(error.type == "csp", "third_party",
+      else: if(error.type == "csp",
+        if(isNotNull(csp.blocked_uri.provider) and csp.blocked_uri.provider != "first_party",
+          "third_party", else: "policy"),
       else: if(error.type == "exception", "frontend",
       else: if(error.type == "request" and http.response.status_code >= 500, "backend",
       else: if(error.type == "request" and (http.response.status_code == 0
           or isNull(http.response.status_code)), "connection",
       else: if(error.type == "request", "request_4xx", else: "other"))))))
+  | filter isNotNull(dt.rum.application.id) and dt.rum.application.id != ""
+      and not(startsWith(dt.rum.application.id, "APPLICATION-"))
   | summarize sessions = countDistinct(dt.rum.session.id),
     by: { appId = dt.rum.application.id, period = "${label}", kind = "err", bucket } ]`;
   return `
@@ -542,7 +548,8 @@ export const qBizBreakdown = (tf: Timeframe) => {
       errs = countIf(characteristics.classifier == "error"),
       real = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
     by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
-  | filter isNotNull(v)
+  | filter isNotNull(v) and isNotNull(appId) and appId != ""
+      and not(startsWith(appId, "APPLICATION-"))
   | summarize sessions = count(), conv = countIf(reached == 1),
       realN = countIf(real), realConv = countIf(real and reached == 1),
       realHit = countIf(real and errs > 0),
@@ -557,6 +564,7 @@ export const qBizBreakdown = (tf: Timeframe) => {
       errs = countIf(characteristics.classifier == "error"),
       real = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
     by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
+  | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
   | summarize sessions = count(), conv = countIf(reached == 1),
       realN = countIf(real), realConv = countIf(real and reached == 1),
       realHit = countIf(real and errs > 0),
@@ -623,20 +631,23 @@ export const qBizKpis = (tf: Timeframe) => {
   | fieldsAdd real = not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
   | fieldsAdd vn = lower(coalesce(view.name, view.detected_name, ""))
   | fieldsAdd done1 = if(${DONE_MATCH}, 1, else: 0)
-  | summarize isReal = takeAny(real), conv = max(done1),
+  | summarize isReal = min(if(real, 1, else: 0)), conv = max(done1),
       errs = countIf(characteristics.classifier == "error"),
       fatal = countIf(error.type == "crash" or error.type == "anr"),
       views = countIf(characteristics.classifier == "view_summary"),
       acts = countIf(characteristics.classifier == "user_action"),
+      // WEB-ONLY by construction: the mobile agent never emits page_hide
+      // (measured — its complete_reason is always "completed"), so a mobile
+      // application's abandonment is structurally zero, not measured-zero
       aband = countIf(characteristics.classifier == "user_action" and user_action.complete_reason == "page_hide"),
       sat = countIf(characteristics.classifier == "user_action" and toLong(duration) <= ${APDEX_T_NS}),
       tol = countIf(characteristics.classifier == "user_action" and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
       fru = countIf(characteristics.classifier == "user_action" and toLong(duration) > ${APDEX_4T_NS}),
     by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
-  | filter isNotNull(appId) and appId != ""
-  | summarize sessions = count(), realSessions = countIf(isReal),
-      converted = countIf(conv == 1), convertedReal = countIf(isReal and conv == 1),
-      hitReal = countIf(isReal and errs > 0), fatalSessions = countIf(fatal > 0),
+  | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
+  | summarize sessions = count(), realSessions = countIf(isReal == 1),
+      converted = countIf(conv == 1), convertedReal = countIf(isReal == 1 and conv == 1),
+      hitReal = countIf(isReal == 1 and errs > 0), fatalSessions = countIf(fatal > 0),
       engaged = countIf(views > 1), actions = sum(acts), abandoned = sum(aband),
       satisfied = sum(sat), tolerating = sum(tol), frustrated = sum(fru),
     by: { appId, period = "${label}" } ]`;
@@ -809,17 +820,20 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
 | summarize errs = countIf(characteristics.classifier == "error"),
     st = min(start_time), inst = takeAny(dt.rum.instance.id),
-    utype = takeAny(dt.rum.user_type),
+    // deterministic, not takeAny: 157 sessions (measured) carry two
+    // user_type values across their events and takeAny flipped a coin —
+    // one robot-marked event now marks the session, every run the same
+    robotEv = countIf(dt.rum.user_type == "robot"),
+    synthEv = countIf(dt.rum.user_type == "synthetic"),
     synth = countIf(isNotNull(dt.synthetic.monitor.id)),
   by: { sid = dt.rum.session.id }
 | sort errs desc
 | summarize sessions = count(), hit = countIf(errs > 0),
     // same "real" rule as qUxByApp — see the note there
-    realSessions = countIf(not(utype == "robot") and not(utype == "synthetic") and synth == 0),
-    hitReal = countIf(errs > 0 and not(utype == "robot")
-      and not(utype == "synthetic") and synth == 0),
-    hitRobot = countIf(errs > 0 and utype == "robot"),
-    hitSynth = countIf(errs > 0 and (utype == "synthetic" or synth > 0)),
+    realSessions = countIf(robotEv == 0 and synthEv == 0 and synth == 0),
+    hitReal = countIf(errs > 0 and robotEv == 0 and synthEv == 0 and synth == 0),
+    hitRobot = countIf(errs > 0 and robotEv > 0),
+    hitSynth = countIf(errs > 0 and (synthEv > 0 or synth > 0)),
     exSid = takeFirst(sid), exStart = takeFirst(st),
     exInst = takeFirst(inst), exErrs = takeFirst(errs)`;
 
@@ -837,15 +851,27 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // second kind: 404s on its own /credit-card-order-service endpoints.
     // Third party is claimed only when the data SAYS so; unattributed counts
     // as our own, so nothing hides behind a null.
+    // http.request.provider and exception.file.provider are null on 100% of
+    // this tenant's events (measured); the only third-party attribution the
+    // data actually carries is the CSP blocked-uri provider — counted when it
+    // names anyone but first_party. Unattributed still counts as our own.
     errsThird = countIf(characteristics.classifier == "error"
-      and (isNotNull(http.request.provider) or exception.file.provider == "third_party")),
+      and (isNotNull(http.request.provider) or exception.file.provider == "third_party"
+        or (error.type == "csp" and isNotNull(csp.blocked_uri.provider)
+          and csp.blocked_uri.provider != "first_party"))),
     // Errors that reached a person, split the same way.
     views = countIf(characteristics.classifier == "view_summary"),
     acts = countIf(characteristics.classifier == "user_action"),
     aband = countIf(user_action.complete_reason == "page_hide"),
     navs = countIf(characteristics.classifier == "navigation"),
+    mob = countIf(characteristics.classifier == "app_start"
+      or characteristics.classifier == "user_interaction"),
     reqs = countIf(characteristics.classifier == "request"),
-    utype = takeAny(dt.rum.user_type),
+    // deterministic, not takeAny: 157 sessions (measured) carry two
+    // user_type values across their events and takeAny flipped a coin —
+    // one robot-marked event now marks the session, every run the same
+    robotEv = countIf(dt.rum.user_type == "robot"),
+    synthEv = countIf(dt.rum.user_type == "synthetic"),
     synth = countIf(isNotNull(dt.synthetic.monitor.id)),
   by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
 | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
@@ -853,18 +879,18 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // "Real" is anything not positively identified as a robot or a monitor —
     // an unlabelled session counts as a person, so an unknown never buys the
     // application a quieter verdict than it deserves.
-    realSessions = countIf(not(utype == "robot") and not(utype == "synthetic") and synth == 0),
-    hitReal = countIf(errs > 0 and not(utype == "robot")
-      and not(utype == "synthetic") and synth == 0),
-    hitRobot = countIf(errs > 0 and utype == "robot"),
-    hitSynth = countIf(errs > 0 and (utype == "synthetic" or synth > 0)),
+    realSessions = countIf(robotEv == 0 and synthEv == 0 and synth == 0),
+    hitReal = countIf(errs > 0 and robotEv == 0 and synthEv == 0 and synth == 0),
+    hitRobot = countIf(errs > 0 and robotEv > 0),
+    hitSynth = countIf(errs > 0 and (synthEv > 0 or synth > 0)),
     engaged = countIf(views >= 2),
     actions = sum(acts), abandoned = sum(aband),
     errors = sum(errs), errorsThird = sum(errsThird),
     // errors carried by sessions belonging to real people
-    realErrors = sum(if(not(utype == "robot") and not(utype == "synthetic")
-      and synth == 0, errs, else: 0)),
-    fragments = countIf(navs == 0 and views == 0 and acts == 0 and reqs == 0),
+    realErrors = sum(if(robotEv == 0 and synthEv == 0 and synth == 0, errs, else: 0)),
+    // app_start/user_interaction are activity too — without them 20 of the
+    // mobile app's 27 "fragments" were real users who launched and tapped
+    fragments = countIf(navs == 0 and views == 0 and acts == 0 and reqs == 0 and mob == 0),
   by: { appId }
 // APDEX, in its own leg at VIEW-INSTANCE grain, because Dynatrace's rule —
 // "user actions with reported errors are rated as Frustrated" — needs the
@@ -874,8 +900,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 // actions. An error without a view instance frustrates nothing — the rule
 // only fires where the data actually links.
 | append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
-  | filter characteristics.classifier == "user_action"
-      or characteristics.classifier == "error"
+  | filter (characteristics.classifier == "user_action"
+      or characteristics.classifier == "error")
+    // real people only — 35% of the estate's rated actions were synthetic or
+    // robot traffic, and no session metric beside the score counts those
+    and not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
+    and isNull(dt.synthetic.monitor.id)
   | summarize verrs = countIf(characteristics.classifier == "error"),
       sat0 = countIf(characteristics.classifier == "user_action"
         and toLong(duration) <= ${APDEX_T_NS}),
@@ -1031,9 +1061,14 @@ fetch user.events, from: now()-10m
 
 /**
  * Bridge #2, for classic RUM. A OneAgent-instrumented application carries
- * trace ids that are PurePaths — they exist in the classic engine and NOT in
- * Grail's spans table, so the trace join above finds nothing (measured: 88k
- * events with trace.id, zero span matches). The classic entity model still
+ * trace ids that are PurePaths — they lived only in the classic engine when
+ * this was written (measured then: 88k events with trace.id, zero span
+ * matches). RE-MEASURED 2026-08-16: that invariant is GONE — 1,108 of 78,619
+ * RUM events now carry trace ids that DO join Grail spans, and the 10-minute
+ * join alone returns 7 services. The chain still renders correctly because
+ * the trace join and this classic walk AGREE on this tenant; if they ever
+ * diverge, useAppScope's union would double-source volumes. Watch it.
+ * The classic entity model still
  * knows the truth: `calls[dt.entity.service]` is the same relationship the
  * Service Flow screen draws. No volume comes with it, only membership.
  */
