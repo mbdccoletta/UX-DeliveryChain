@@ -215,6 +215,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
     "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
 | fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
 | fieldsAdd v = replacePattern(v, "'/' INT", "/*")
+// servlet session ids ride the PATH (";jsessionid=<hex>.route") and dodge all
+// three shapes above — measured: hundreds of one-session rows, each burning a
+// row of the limit before the client-side merge could collapse them
+| fieldsAdd v = splitString(v, ";jsessionid")[0]
 // Hard cap on depth. The patterns above recognise ids by shape, and any shape
 // rule can be dodged by an id that does not look like one. Truncating past the
 // third segment bounds the cardinality no matter what the ids look like, which
@@ -225,7 +229,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | sort start_time asc
 | summarize path = collectArray(v), by: { appId = dt.rum.application.id, session = dt.rum.session.id }
 | summarize sessions = count(), by: { appId, journey = path }
-| sort sessions desc | limit 200`;
+// 1000, not 200: the budget is shared by every application, and at 200 the
+// audit measured 866 vmware + 28 Astroshop sessions with full journeys
+// falling off the end — then being counted as "No page telemetry"
+| sort sessions desc | limit 1000`;
 
 /**
  * The SESSIONS behind a mined path — same pipeline as qSequences, stopped one
@@ -252,6 +259,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
 | fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
 | fieldsAdd v = replacePattern(v, "'/' INT", "/*")
+// servlet session ids ride the PATH (";jsessionid=<hex>.route") and dodge all
+// three shapes above — measured: hundreds of one-session rows, each burning a
+// row of the limit before the client-side merge could collapse them
+| fieldsAdd v = splitString(v, ";jsessionid")[0]
 | fieldsAdd seg = splitString(v, "/")
 | fieldsAdd v = if(arraySize(seg) > 3, concat("/", seg[1], "/", seg[2], "/*"), else: v)
 | fieldsRemove seg
@@ -1060,9 +1071,12 @@ smartscapeEdges "runs_on"
   // `in (…)` rejects function calls, so membership is spelled out
   .map((s) => `source_id == toSmartscapeId("${s.replace(/["\\]/g, "")}")`).join(" or ")}
 | fieldsAdd target = target_id
-| join [ smartscapeNodes "*" | fields id, nm = name, tp = type ],
-    on: { left[target] == right[id] }, fields: { nm, tp }
-| fields src = source_id, id = target, name = nm, type = tp
+// id_classic travels too — Davis attributes k8s events to the CLASSIC forms
+// (CLOUD_APPLICATION_INSTANCE-, KUBERNETES_NODE-), and the audit measured 11
+// active events that could never light a card keyed by Smartscape id alone
+| join [ smartscapeNodes "*" | fields id, nm = name, tp = type, idc = id_classic ],
+    on: { left[target] == right[id] }, fields: { nm, tp, idc }
+| fields src = source_id, id = target, name = nm, type = tp, classic = idc
 | limit 800`;
 
 /**
@@ -1499,8 +1513,12 @@ fetch dt.entity.service, from: now()-2h
  * PROCESS_GROUP_INSTANCE, so "same process" would have collapsed the whole
  * business tier into one box. Tried, measured, discarded.
  */
-| filter ext != true or not(in(st, { "WEB_SERVICE", "WEB_REQUEST_SERVICE" }))
-| fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host]
+// The ext∧WEB dedup no longer happens here: the flag+type test also killed
+// real unmonitored endpoints with no monitored twin (measured: CouchDB_ET,
+// 8,482 spans/2h, invisible in every layer). The rows arrive whole and
+// useGen2Closure drops only the ones whose monitored twin it can NAME.
+| fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host],
+    ext, stype = st
 | limit 80`;
 
 /**

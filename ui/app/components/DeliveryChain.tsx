@@ -392,7 +392,22 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * hop, the one the whole walk exists to find, fell off the end. Ten leaves
    * the Serve layer room for at least two of its own services while letting
    * a classic-only chain arrive whole. */
-  const gen2Cards: Elo[] = (gen2 ?? []).slice(0, 10).map<Elo>((g) => ({
+  const gen2Cards: Elo[] = (gen2 ?? [])
+    // the same database must not be drawn twice: when a classic DATABASE
+    // service's significant name tokens appear in a store card's namespace or
+    // address (measured: derby @ ls-ub-lb4ac00v vs "MF easyTravelBusiness",
+    // one physical DB as two boxes), the store card — which carries measured
+    // calls and latency — keeps it and the topology-only card yields
+    .filter((g) => {
+      if (!/DATABASE|DATASTORE/.test(g.kind) || !stores?.length) return true;
+      const gt = g.name.toLowerCase().replace(/[^a-z0-9]+/g, " ")
+        .split(" ").filter((t) => t.length >= 4);
+      return !stores.some((st) => {
+        const hay = ` ${(st.ns ?? "")} ${st.store} `.toLowerCase();
+        return gt.length > 0 && gt.some((t) => hay.includes(t));
+      });
+    })
+    .slice(0, 10).map<Elo>((g) => ({
     nm: g.name, mt: `${KIND_LABEL(g.kind)} · topology-mapped`,
     v: String(g.callers.length || "·"), tone: "info",
     vol: Math.max(g.callers.length * 40, 1),
@@ -556,14 +571,16 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           return uniq.length <= 4
             ? uniq.map<Elo>((p) => ({
                 nm: p.name, mt: `${type} · runs_on`, v: label, tone: "info",
-                ids: [p.id],
+                // both id forms: Davis k8s events carry the classic one
+                ids: [p.id, ...(p.classic ? [p.classic] : [])],
                 det: [["Smartscape", `SERVICE runs_on ${type}`],
                       ["Serves", String(rows.filter((r) => r.id === p.id).length)
                         + " service(s)"]] }))
             : [{
                 nm: `${uniq.length} ${label}s`, mt: `${type} · runs_on`,
                 v: `×${uniq.length}`, tone: "info" as Tone,
-                vol: uniq.length * 40, ids: uniq.map((p) => p.id),
+                vol: uniq.length * 40,
+                ids: uniq.flatMap((p) => [p.id, ...(p.classic ? [p.classic] : [])]),
                 det: [["Type", type], ["Count", String(uniq.length)],
                       ["Names", uniq.map((p) => p.name).slice(0, 6).join(" · ")]] }];
         })
