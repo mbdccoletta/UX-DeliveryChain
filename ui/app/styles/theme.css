@@ -93,6 +93,12 @@ svg { shape-rendering: geometricPrecision; }
 .wrap { max-width: none; margin: 0; padding: 4px clamp(12px, 1.4vw, 28px) 40px; }
 /* A row of controls sitting in a title bar or above a view: same rhythm as the
    platform's own toolbars, without inventing a second header. */
+/* what the window on screen has cost so far, in bytes Grail actually read */
+.scanb { font: 600 10px var(--mono); letter-spacing: 0.04em; color: var(--ink-3);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+  white-space: nowrap; cursor: help; }
+.scanb--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.scanb--bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); }
 .ctl { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .ctl--apps { margin: 2px 0 12px; }
 

@@ -5,13 +5,13 @@
 // is what makes an app feel like it belongs rather than like a page that
 // happens to be hosted here — so the header, the navigation and the title bar
 // are Strato components, while everything they frame stays exactly as it was.
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { AppHeader, HelpMenu, PageLayout, TitleBar } from "@dynatrace/strato-components/layouts";
 import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
-import { fmtN, tfFrom } from "./utils/dql";
+import { fmtN, tfFrom, type Timeframe } from "./utils/dql";
 import { FlowSankey } from "./components/FlowSankey";
 import { DeliveryChain } from "./components/DeliveryChain";
 import { Pulse } from "./components/Pulse";
@@ -21,6 +21,7 @@ import { useUrlState } from "./hooks/useUrlState";
 import { useUxOverview } from "./hooks/useUxOverview";
 import { useOutcomeDefs } from "./hooks/useOutcomeDefs";
 import { useTechVitals } from "./hooks/useTechVitals";
+import { fmtBytes, fmtMoney, resetScan, scanTotals, subscribeScan } from "./utils/cost";
 import { TechPanel } from "./components/TechPanel";
 import { usePageTitle } from "./hooks/usePageTitle";
 import { Boundary } from "./components/Boundary";
@@ -218,6 +219,12 @@ export function App() {
                   </Select.Content>
                 </Select>
               )}
+              {/* WHAT THIS WINDOW COSTS. Grail bills by bytes scanned and the
+                  window is linear — twenty-four hours costs about twelve times
+                  two — which makes this selector the biggest cost control in
+                  the product and the one nobody could see. Measured, never
+                  estimated: every query reports what it read. */}
+              <ScanBadge tf={tf} />
               {/* the platform's own selector: presets, custom range, stepper */}
               <TimeframeSelector
                 value={{ from: state.from || TF0.from, to: state.to || TF0.to }}
@@ -318,5 +325,34 @@ export function App() {
       </PageLayout.Content>
       </PageLayout>
     </>
+  );
+}
+
+/**
+ * The running scan cost of the window on screen.
+ *
+ * It counts what the app actually read, so a revisit that hits the cache adds
+ * nothing and says so. The money is an aside, not the headline: the bytes are
+ * the measured fact, the rate belongs to a contract.
+ */
+function ScanBadge({ tf }: { tf: Timeframe }) {
+  const [, force] = useState(0);
+  useEffect(() => subscribeScan(() => force((n) => n + 1)), []);
+  useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
+  const { bytes, queries } = scanTotals();
+  if (!queries) return null;
+  // 100 GB is roughly two cold tours of this tenant's two-hour window; past
+  // that the reader is usually in a long window and should know it
+  const tone = bytes >= 2.5e11 ? "bad" : bytes >= 1e11 ? "warn" : "ok";
+  return (
+    <span className={`scanb scanb--${tone}`}
+      title={`This window has scanned ${fmtBytes(bytes)} of Grail across ${queries} `
+        + `quer${queries === 1 ? "y" : "ies"} — about ${fmtMoney(bytes)} at the DPS list `
+        + "rate for querying Grail ($0.0035 per GiB; your contract may differ).\n\n"
+        + "Grail charges what a query READS, and the window is linear: a 24-hour "
+        + "window costs about 12× a 2-hour one, whatever the filters. Revisiting a "
+        + "screen in the same window is free — it reads the cache, not Grail."}>
+      ⛁ {fmtBytes(bytes)}
+    </span>
   );
 }
