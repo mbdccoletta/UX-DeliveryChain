@@ -1,6 +1,7 @@
 // Data layer — every query here was validated against tenant bwm98081
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
+import { noteScan } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
 /**
@@ -124,6 +125,10 @@ export async function runDql<T = Record<string, unknown>>(
     res = await queryExecutionClient.queryPoll({ requestToken: res.requestToken! });
   }
   if (res.state !== "SUCCEEDED") throw new Error(`DQL ${res.state}`);
+  // what this query actually cost, straight from the platform's own metadata
+  noteScan(Number(
+    (res.result as unknown as { metadata?: { grail?: { scannedBytes?: number } } })
+      ?.metadata?.grail?.scannedBytes ?? 0));
   return (res.result?.records ?? []) as T[];
 }
 
