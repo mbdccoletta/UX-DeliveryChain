@@ -555,6 +555,9 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .rinfo__worth-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px; }
 .rinfo__kpi--worth { border: none; background: none; padding: 0; }
+.rinfo__vit { border-color: color-mix(in srgb, var(--t-violet) 40%, var(--border));
+  background: color-mix(in srgb, var(--t-violet) 7%, transparent); }
+.rinfo__vit .rinfo__worth-l { color: var(--t-violet); }
 /* "no page telemetry", unpacked */
 .ntel { width: min(660px, 92vw); max-height: 86vh; overflow-y: auto; margin: auto;
   background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px;

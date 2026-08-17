@@ -472,6 +472,13 @@ export function FlowSankey({
   /* WHAT THE ROUTE IS WORTH: the cohort's conversion beside everyone else's,
    * customers, and — with the ticket set — the money the route carries. All
    * from the same per-session scan the poster already runs. */
+  /** HOW THIS ROUTE LOADS — the technical vitals of the cohort beside
+   *  everyone else's, in the poster's own cohort-vs-rest grammar. */
+  const [infoVitals, setInfoVitals] = useState<null | {
+    n: number; rest: number;
+    lcp: number; lcpRest: number; ttfb: number; ttfbRest: number;
+    fcp: number; fcpRest: number;
+  }>(null);
   const [infoBiz, setInfoBiz] = useState<null | {
     customers: number; converted: number; conv: number;
     restConv: number; hit: number;
@@ -903,6 +910,27 @@ export function FlowSankey({
           conv: real.length ? conv / real.length : 0,
           hit: real.filter((r) => Number(r.errs) > 0).length };
       };
+      /* the cohort's LOAD, beside everyone else's — p75 across sessions, the
+       * Web Vitals standard's percentile applied to each session's worst
+       * measured load. Sessions the platform never timed (soft routes only)
+       * are excluded rather than counted as zero. */
+      const p75 = (xs: number[]) => {
+        if (!xs.length) return 0;
+        const t = [...xs].sort((a, b) => a - b);
+        return t[Math.min(t.length - 1, Math.ceil(t.length * 0.75) - 1)];
+      };
+      const timed = (rs: Array<Record<string, unknown>>, k: string) =>
+        rs.filter((r) => Number(r.measured) > 0 && Number(r[k]) > 0)
+          .map((r) => Number(r[k]));
+      const inRows = rows.filter(inCohortOf);
+      const outRows = rows.filter((r) => !inCohortOf(r));
+      const inTimed = inRows.filter((r) => Number(r.measured) > 0).length;
+      setInfoVitals(inTimed > 0 ? {
+        n: inTimed, rest: outRows.filter((r) => Number(r.measured) > 0).length,
+        lcp: p75(timed(inRows, "lcpMs")), lcpRest: p75(timed(outRows, "lcpMs")),
+        ttfb: p75(timed(inRows, "ttfbMs")), ttfbRest: p75(timed(outRows, "ttfbMs")),
+        fcp: p75(timed(inRows, "fcpMs")), fcpRest: p75(timed(outRows, "fcpMs")),
+      } : null);
       const inB = bizOf(rows.filter(inCohortOf));
       const outB = bizOf(rows.filter((r) => !inCohortOf(r)));
       // counts scale with the same factor the headline count used; RATES
@@ -1358,7 +1386,7 @@ export function FlowSankey({
               : ["every journey on screen"]}
             key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
-            biz={infoBiz} ticket={ticket} sym={sym} approx={infoApprox}
+            biz={infoBiz} vitals={infoVitals} ticket={ticket} sym={sym} approx={infoApprox}
             onClose={() => { setInfo(null);
               // closing re-arms the cohort intent: a fresh click on the
               // board's "who they are" fires again (it was dead before)
