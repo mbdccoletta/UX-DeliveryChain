@@ -1387,7 +1387,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     <b>{TIERS[ti][2]}</b>
                     <span className="gcol__n">{fmtN(layer.total)}</span>
                     {probs > 0 && (
-                      <span className="pb" title={` active problem(s)`}>⚠ {probs}</span>
+                      <span className="pb" title={`${probs} active problem${probs > 1 ? "s" : ""}`}>⚠ {probs}</span>
                     )}
                     {(() => {
                       const nSig = tierIds.length ? signalsFor(tierIds)
@@ -1968,31 +1968,6 @@ function Routes({ list, mode = "incident" }: {
 }
 
 /** Only what the data actually supports — an empty list says so plainly. */
-function Insights({ list }: { list: Insight[] }) {
-  if (!list.length) {
-    return (
-      <p className="ins__none">
-        Nothing stands out for this element: its numbers sit within the range of its peers and no
-        problem, alert or extension event is attributed to it.
-      </p>
-    );
-  }
-  return (
-    <div className="ins">
-      {list.map((i, k) => (
-        <div className="ins__c" key={k} style={{ ["--sv" as string]: SEV_COLOR[i.severity] }}>
-          <div className="ins__h">
-            <span className="ins__s">{SEV_LABEL[i.severity]}</span>
-            <span className="ins__t">{i.title}</span>
-          </div>
-          <div className="ins__b">{i.body}</div>
-          <div className="ins__e">{i.evidence}</div>
-          {i.action && <div className="ins__a">{i.action}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function Kpi({ l, v, t }: { l: string; v: string; t: Tone }) {
   return (

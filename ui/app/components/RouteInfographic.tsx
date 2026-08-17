@@ -51,7 +51,7 @@ const money = (v: number, sym: string) =>
   : v >= 1e3 ? `${sym}${(v / 1e3).toFixed(0)}k`
   : `${sym}${Math.round(v)}`;
 
-export function RouteInfographic({ rows, path, appName, cohort, total, biz, ticket, sym, onClose }: {
+export function RouteInfographic({ rows, path, appName, cohort, total, biz, ticket, sym, approx, onClose }: {
   rows: InfoRow[] | "loading";
   /** The picked waypoints, in order, in words. */
   path: string[];
@@ -64,6 +64,8 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, tick
   /** Business Control's value-of-one-conversion, shared via url state. */
   ticket?: number | null;
   sym?: string;
+  /** Figures were scaled from capped samples — worn as ≈ and said in the foot. */
+  approx?: boolean;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -95,8 +97,8 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, tick
             ))}
           </h2>
           <div className="rinfo__cohort">
-            <b className="num">{fmtN(cohort)}</b>
-            <span>{cohort === total ? "sessions — the whole flow"
+            <b className="num">{approx ? "≈ " : ""}{fmtN(cohort)}</b>
+            <span>{cohort >= total ? "sessions — the whole flow"
               : `sessions on this route · ${total ? fmtPct(cohort / total) : "—"} of ${fmtN(total)}`}</span>
           </div>
           <button className="drawer__x" onClick={onClose} aria-label="Close">✕</button>
@@ -223,7 +225,9 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, tick
             </section>
             <footer className="rinfo__ft">
               solid bar = share of the route&apos;s sessions · ghost bar = share of everyone else
-              · lift compares the two · click outside or press Esc to close
+              · lift compares the two
+              {approx && <> · counts scaled from a capped sample (rates are the sample&apos;s own)</>}
+              {" "}· click outside or press Esc to close
             </footer>
           </>
         )}

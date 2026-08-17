@@ -11,7 +11,7 @@
 // of the traffic, the reader states the monitored share and every VOLUME is
 // extrapolated to the whole (marked with an approx sign and a bar notice);
 // RATES are untouched — a representative sample carries them as they are.
-import React, { useState } from "react";
+import React from "react";
 import type { ChainData } from "../hooks/useChainData";
 import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
 import { useBizForecast } from "../hooks/useBizForecast";
@@ -41,7 +41,7 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
+export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, onGo }: {
   data: ChainData;
   /** The application this board reads — the header's own selector drives it,
    *  the same element every page uses. */
@@ -50,11 +50,12 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
    *  the Journeys route economics, so both pages read the same money. */
   ticket: string; sym: string;
   onTicket: (ticket: string, sym: string) => void;
+  /** Monitored share (coverage %) — url state, like the ticket, so a shared
+   *  link carries the same extrapolated figures. */
+  cov: string;
+  onCov: (cov: string) => void;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
-  // the share of traffic Dynatrace monitors, per the reader; volumes are
-  // extrapolated by 100/cov, rates never are
-  const [cov, setCov] = useState<string>("");
   const kpis = useBizKpis(data.tf);
   const fc = useBizForecast(data.tf, scopeApp || null);
   const breakdown = useBizBreakdown(data.tf);
@@ -281,7 +282,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
         <label className="bc__ticket bc__cov"
           title="Share of your traffic Dynatrace monitors. Below 100, every volume on the board is extrapolated to the whole (marked with an approx sign); rates stay as measured — a representative sample carries them unchanged.">
           <input inputMode="numeric" placeholder="100"
-            value={cov} onChange={(e) => setCov(e.target.value.replace(/[^\d]/g, "").slice(0, 3))} />
+            value={cov} onChange={(e) => onCov(e.target.value.replace(/[^\d]/g, "").slice(0, 3))} />
           <span>% monitored</span>
         </label>
         <label className="bc__ticket" title="Value of one conversion — turns customers into revenue. Blank = customers only.">
