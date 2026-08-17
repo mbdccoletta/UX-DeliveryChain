@@ -93,12 +93,40 @@ svg { shape-rendering: geometricPrecision; }
 .wrap { max-width: none; margin: 0; padding: 4px clamp(12px, 1.4vw, 28px) 40px; }
 /* A row of controls sitting in a title bar or above a view: same rhythm as the
    platform's own toolbars, without inventing a second header. */
-/* what the window on screen has cost so far, in bytes Grail actually read */
-.scanb { font: 600 10px var(--mono); letter-spacing: 0.04em; color: var(--ink-3);
-  border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
-  white-space: nowrap; cursor: help; }
-.scanb--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
-.scanb--bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); }
+/* THE SCAN READOUT — an instrument, not a label. One bar per query, its
+   height what that query read; a red bar is one Grail cut short. The LED
+   breathes while queries are in flight and settles when the window is paid. */
+.scanb { display: inline-flex; align-items: center; gap: 7px; height: 26px;
+  padding: 0 10px 0 8px; border-radius: 999px; cursor: help;
+  font: 600 10px var(--mono); letter-spacing: 0.04em; color: var(--ink-2);
+  border: 1px solid var(--border-2);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--ink-hi) 5%, transparent),
+    color-mix(in srgb, var(--ink-hi) 2%, transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 7%, transparent); }
+.scanb__led { width: 5px; height: 5px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--t-teal); box-shadow: 0 0 6px var(--t-teal); }
+.scanb--live .scanb__led { animation: scanpulse 1.1s ease-in-out infinite; }
+@keyframes scanpulse { 0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); } }
+/* the trace: every query of this window, in the order it ran */
+.scanb__trace { display: flex; align-items: flex-end; gap: 1px; height: 13px;
+  min-width: 2px; }
+.scanb__b { width: 2px; border-radius: 1px; background: var(--t-teal);
+  opacity: 0.75; }
+.scanb__b--cut { background: var(--bad); opacity: 1;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--bad) 70%, transparent); }
+.scanb__n { color: var(--ink); font-size: 11px; letter-spacing: 0; }
+.scanb__cut { font: 700 9px var(--mono); font-style: normal; color: var(--bad);
+  text-transform: uppercase; letter-spacing: 0.08em; }
+.scanb--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.scanb--warn .scanb__led { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.scanb--warn .scanb__b { background: var(--warn); }
+.scanb--bad { border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); }
+.scanb--bad .scanb__led { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
+@media (prefers-reduced-motion: reduce) {
+  .scanb--live .scanb__led { animation: none; }
+}
 .ctl { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .ctl--apps { margin: 2px 0 12px; }
 
