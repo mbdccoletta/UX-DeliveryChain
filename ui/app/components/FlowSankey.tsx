@@ -99,6 +99,37 @@ const OUTCOME: Record<string, { id: string; nm: string; tone: Tone; sub: string 
  */
 export const ROUTE_MAX = 9;
 
+/**
+ * The route-pick predicate, exported so BUSINESS CONTROL can reproduce the
+ * exact cohort a reader picked on Journeys — same ids, same rule, one
+ * definition. `ctx` is the full mine's vocabulary (which routes are drawn,
+ * and the stage words), so a cohort means the same thing on both pages.
+ */
+export interface RouteCtx { top: Set<string>; outcomes: boolean; deepest: number }
+export const routeCtxOf = (seqs: SeqRow[], appId: string): RouteCtx => {
+  const mine = seqs.filter((q) => q.appId === appId).sort((a, b) => b.sessions - a.sessions);
+  return {
+    top: new Set(mine.slice(0, ROUTE_MAX).map((q) => routeId(q.journey))),
+    outcomes: mine.some((q) => doneOf(q.journey)),
+    deepest: deepestOf(mine),
+  };
+};
+export function matchesRoutes(journey: string[], pk: string[], ctx: RouteCtx | null): boolean {
+  if (!pk.length) return true;
+  const routes = pk.filter((id) => id.startsWith("jp-") || id === "j-rest");
+  const stages = pk.filter((id) => id.startsWith("st-"));
+  if (routes.length) {
+    const key = routeId(journey);
+    const inTop = ctx?.top.has(key) ?? false;
+    if (!routes.some((id) => (id === "j-rest" ? !inTop : id === key))) return false;
+  }
+  if (stages.length) {
+    const st = stageOf(journey, ctx?.outcomes ?? true, ctx?.deepest ?? 0).id;
+    if (!stages.includes(st)) return false;
+  }
+  return true;
+}
+
 /** A route node's id IS its journey — stable across model rebuilds, so a
  *  picked route stays ringed when the diagram is re-mined from the cohort. */
 const routeId = (journey: string[]) => "jp-" + journey.join("\u0001");
@@ -401,7 +432,7 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 export function FlowSankey({
   apps, seqs, appId, transitions = [], friction = [], views = [], ux, tf,
   cohort, onCohortConsumed, ticket = null, sym = "$",
-  outcomeDefs, onDefineOutcome, onClearOutcome, onPickApp, onOpen,
+  outcomeDefs, onDefineOutcome, onClearOutcome, onBizScope, onPickApp, onOpen,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
@@ -419,6 +450,9 @@ export function FlowSankey({
   /** Save the picked views as THIS application's conversion definition. */
   onDefineOutcome?: (views: string[]) => void;
   onClearOutcome?: () => void;
+  /** Hand the current selection to Business Control, which recomputes its
+   *  journey front for exactly these routes. */
+  onBizScope?: (picks: string[]) => void;
   transitions?: TransitionRow[]; friction?: FrictionRow[];
   /** Per-app UX aggregate — the funnel reads window-fragment counts from it. */
   ux?: Map<string, { fragments: number }> | null;
@@ -527,21 +561,9 @@ export function FlowSankey({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apps, seqs, appId, defsKey]);
 
-  const matchesRoutePicks = (journey: string[], pk: string[]): boolean => {
-    if (!pk.length) return true;
-    const routes = pk.filter((id) => id.startsWith("jp-") || id === "j-rest");
-    const stages = pk.filter((id) => id.startsWith("st-"));
-    if (routes.length) {
-      const key = routeId(journey);
-      const inTop = pathCtx?.top.has(key) ?? false;
-      if (!routes.some((id) => (id === "j-rest" ? !inTop : id === key))) return false;
-    }
-    if (stages.length) {
-      const st = stageOf(journey, pathCtx?.outcomes ?? true, pathCtx?.deepest ?? 0).id;
-      if (!stages.includes(st)) return false;
-    }
-    return true;
-  };
+  const matchesRoutePicks = (journey: string[], pk: string[]): boolean =>
+    matchesRoutes(journey, pk, pathCtx);
+;
 
   /** The pick predicate of whichever view is on screen. */
   const matchesMode = (journey: string[], pk: string[]): boolean =>
@@ -1184,6 +1206,13 @@ export function FlowSankey({
                 onClick={openNoTelemetry} disabled={ntel === "loading"}
                 title="What the sessions without a recorded view are made of — measured, not guessed">
                 {ntel === "loading" ? "unpacking…" : "what are these? ↗"}
+              </button>
+            )}
+            {picks.length > 0 && onBizScope && (
+              <button className="flow-sel__b"
+                onClick={() => onBizScope(picks)}
+                title="Take this selection to Business Control — it recomputes conversion, customers and what failure costs for exactly these routes">
+                business control ↗
               </button>
             )}
             <button className="flow-sel__b flow-sel__b--on"

@@ -73,7 +73,10 @@ export function App() {
     /** Monitored-share (coverage %) — url state for the same reason as tkt:
      *  a shared link must carry the same figures. */
     cov: string | null;
-  }>({ ...URL_DEFAULTS, hl: null, coh: null, tkt: null, cur: null, cov: null });
+    /** Routes picked on Journeys, handed to Business Control so its journey
+     *  front recomputes for exactly them. Pick ids, tab-separated. */
+    rt: string | null;
+  }>({ ...URL_DEFAULTS, hl: null, coh: null, tkt: null, cur: null, cov: null, rt: null });
 
   // old ?tab=journey links keep working: they land on the merged page,
   // already switched to the journey view
@@ -107,7 +110,9 @@ export function App() {
   const current = appId ?? d.apps[0]?.appId ?? "";
   // the engineer's reading of the same anatomy Business Control speaks in
   // business words — shown on the two technical pages, one scan shared
-  const tech = useTechVitals(tf, (tab === "chain" || tab === "flow") ? current : null);
+  // the flow page reads its technical vitals from the INFOGRAPHIC now, where
+  // they answer the filtered question; only the chain needs this scan
+  const tech = useTechVitals(tf, tab === "chain" ? current : null);
 
   // The header quotes the same per-session scan the pages quote, so the title
   // bar and the card below it can never state two different session counts.
@@ -274,15 +279,9 @@ export function App() {
                 outcomeDefs={outcome.defs}
                 onDefineOutcome={(views) => { if (current) void outcome.save(current, views); }}
                 onClearOutcome={() => { if (current) void outcome.clear(current); }}
+                onBizScope={(picks) => set({ tab: "report", rt: picks.join("\t") })}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
-              {/* which SCREEN is slow, and why — a journey is made of views */}
-              <Boundary label="Vitals">
-                <TechPanel rows={tech} withViews
-                  appName={d.apps.find((a) => a.appId === current)?.name ?? ""}
-                  isMobile={d.apps.find((a) => a.appId === current)?.entity
-                    ?.startsWith("MOBILE_APPLICATION-")} />
-              </Boundary>
             </div>
           )}
 
@@ -303,6 +302,8 @@ export function App() {
           {tab === "report" && (
             <Boundary label="Report">
               <ReportView data={d} scopeApp={current} outcomeDefs={outcome.defs}
+                routePicks={state.rt ? state.rt.split("\t").filter(Boolean) : null}
+                onClearRoutes={() => set({ rt: null }, false)}
                 ticket={state.tkt ?? ""} sym={state.cur ?? "$"}
                 onTicket={(t, cu) => set({ tkt: t || null, cur: cu === "$" ? null : cu }, false)}
                 cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}

@@ -18,6 +18,8 @@ import { useBizForecast } from "../hooks/useBizForecast";
 import { useBizBreakdown } from "../hooks/useBizBreakdown";
 import { useDifficulty } from "../hooks/useDifficulty";
 import { useAppScope } from "../hooks/useAppScope";
+import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
+import { routeCtxOf } from "./FlowSankey";
 import { fmtN, type OutcomeDefs } from "../utils/dql";
 
 type Dir = "good" | "bad" | "flat";
@@ -41,7 +43,8 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, outcomeDefs, onGo }: {
+export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, outcomeDefs,
+  routePicks, onClearRoutes, onGo }: {
   data: ChainData;
   /** The application this board reads — the header's own selector drives it,
    *  the same element every page uses. */
@@ -57,6 +60,10 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   /** Customer-taught conversion definitions — they replace the keyword
    *  heuristic per application, and the hero says so. */
   outcomeDefs?: OutcomeDefs;
+  /** Routes picked on Journeys — the board recomputes its journey and brand
+   *  figures for exactly those sessions. */
+  routePicks?: string[] | null;
+  onClearRoutes?: () => void;
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
   const kpis = useBizKpis(data.tf, outcomeDefs);
@@ -80,6 +87,15 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   })();
   const nameOf = (id: string) =>
     data.apps.find((x) => x.appId === id)?.name ?? id.slice(0, 8);
+  /* ROUTE SCOPE — the reader picked routes on Journeys and asked this board
+   * to calculate on them. The cohort is reproduced with the same rule that
+   * drew it there (matchesRoutes over the same mined journeys), for this
+   * window and the previous one, so the trends survive the narrowing. */
+  const routeCtx = React.useMemo(
+    () => (routePicks?.length && scopeApp ? routeCtxOf(data.sequences, scopeApp) : null),
+    [data.sequences, scopeApp, routePicks]);
+  const cohort = useRouteCohort(data.tf, scopeApp, routePicks ?? null, routeCtx, outcomeDefs);
+  const scoped = !!routePicks?.length;
   const tv = Number(ticket) > 0 ? Number(ticket) : null;
   const covN = Number(cov);
   const factor = covN >= 1 && covN < 100 ? 100 / covN : 1;
@@ -105,10 +121,21 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
     };
   };
   // scope: one application's own two periods, or the estate's
-  const scoped = scopeApp ? kpis?.byApp.get(scopeApp) : undefined;
-  const curP = scopeApp ? scoped?.cur : kpis?.estate.cur;
-  const prevP = scopeApp ? scoped?.prev : kpis?.estate.prev;
-  const c = f(curP), p = f(prevP);
+  const appPeriods = scopeApp ? kpis?.byApp.get(scopeApp) : undefined;
+  const curP = scopeApp ? appPeriods?.cur : kpis?.estate.cur;
+  const prevP = scopeApp ? appPeriods?.prev : kpis?.estate.prev;
+  /** The route cohort wears the same shape the app figures do. */
+  const asFacts = (x?: CohortFacts) => ({
+    customersAtRisk: x?.hit ?? 0, crashed: x?.crashed ?? 0,
+    reputationIndex: x?.customers ? 1 - (x.hit / x.customers) : 1,
+    customers: x?.customers ?? 0,
+    conversion: x?.customers ? (x.converted / x.customers) : 0,
+    converted: x?.converted ?? 0,
+    realEngaged: x?.engaged ?? 0,
+    engagedShare: x?.customers ? (x.engaged / x.customers) : 0,
+  });
+  const c = scoped ? asFacts(cohort?.cur) : f(curP);
+  const p = scoped ? asFacts(cohort?.prev) : f(prevP);
 
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
     if (!kpis) return <div className="bc__hero bc__hero--load" />;
@@ -197,6 +224,15 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   //    rates, stated as such.
   const scopedRows = breakdown?.filter((r) => !scopeApp || r.appId === scopeApp) ?? null;
   const errCost = (() => {
+    // inside a route scope the cost is the cohort's own — the app-wide
+    // breakdown would have contradicted the hero right above it
+    if (scoped) {
+      const k = cohort?.cur;
+      if (!k || !k.cleanN || !k.hit) return null;
+      const rClean = k.cleanConv / k.cleanN, rHit = k.hitConv / k.hit;
+      return { rClean, rHit, hitN: k.hit,
+        lost: Math.max(0, Math.round(k.hit * (rClean - rHit))) };
+    }
     if (!scopedRows) return null;
     const leg = scopedRows.filter((r) => r.d === "__err");
     const agg = (b: string) => leg.filter((r) => r.bucket === b)
@@ -300,10 +336,28 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
         </label>
       </div>
 
+      {/* THE ROUTE SCOPE, stated. A board quietly narrowed is a board that
+          lies by omission: this says what it is calculating on, how many
+          sessions that is, and hands back the whole application in one click. */}
+      {scoped && (
+        <div className="bc__scoped">
+          <span className="bc__scoped-l">calculating on picked routes</span>
+          <span className="bc__scoped-v">
+            {cohort === null ? "reading the cohort…"
+              : `${fmtN(cohort.cur.sessions)} sessions · ${fmtN(cohort.cur.customers)} customers`}
+            {cohort?.sampled && " · scaled from a capped sample"}
+          </span>
+          <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
+            whole application ✕
+          </button>
+        </div>
+      )}
+
       {/* Davis's projection of the NEXT window — labeled as forecast, never
           mixed with the measured figures above it */}
       <div className="bc__fc" role="note">
-        <span className="bc__fc-l">next {data.tf.label.replace(/^last /i, "")} · Davis forecast</span>
+        <span className="bc__fc-l">next {data.tf.label.replace(/^last /i, "")} · Davis forecast
+          {scoped && " · whole application"}</span>
         {!fc ? <span className="bc__fc-wait">projecting…</span> : (
           <>
             {fc.conversions && (
@@ -532,7 +586,8 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
       {/* where conversion lives and dies — the segments to personalise for */}
       {segments && (segments.best.length > 0 || segments.worst.length > 0) && (
         <section className="bc__front" style={{ ["--fh" as string]: "var(--t-cyan)" }}>
-          <h2 className="bc__ftitle">Where conversion lives — and dies</h2>
+          <h2 className="bc__ftitle">Where conversion lives — and dies
+            {scoped && <em className="bc__ftitle-note"> · whole application</em>}</h2>
           <div className="bc__segs">
             {([["converts above average", segments.best, "good"],
                ["converts below average", segments.worst, "bad"]] as const)

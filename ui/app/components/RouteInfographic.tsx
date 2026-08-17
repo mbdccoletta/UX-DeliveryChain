@@ -11,6 +11,7 @@
 // lift; where nothing differs it says "same as everyone", which is a finding.
 import React, { useEffect } from "react";
 import { fmtMs, fmtN } from "../utils/dql";
+import { vitalTitle } from "../utils/vitals";
 
 export interface InfoRow {
   dim: string; bucket: string; inCohort: boolean;
@@ -174,16 +175,17 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               <section className="rinfo__worth rinfo__vit">
                 <span className="rinfo__worth-l">HOW THIS ROUTE LOADS</span>
                 <div className="rinfo__worth-row">
-                  {([["LCP", vitals.lcp, vitals.lcpRest, "largest contentful paint"],
-                     ["TTFB", vitals.ttfb, vitals.ttfbRest, "time to first byte"],
-                     ["FCP", vitals.fcp, vitals.fcpRest, "first contentful paint"]] as const)
+                  {([["LCP", vitals.lcp, vitals.lcpRest],
+                     ["TTFB", vitals.ttfb, vitals.ttfbRest],
+                     ["FCP", vitals.fcp, vitals.fcpRest]] as const)
                     .filter(([, v]) => v > 0)
-                    .map(([k, v, r, why]) => {
+                    .map(([k, v, r]) => {
                       const l = r > 0 ? v / r : 1;
                       const worse = l >= 1.15, better = l <= 0.87;
                       return (
                         <div className={`rinfo__kpi rinfo__kpi--worth${worse ? " rinfo__kpi--bad" : better ? " rinfo__kpi--good" : ""}`}
-                          key={k} title={`${why} · p75 over ${fmtN(vitals.n)} timed sessions on this route`}>
+                          key={k}
+                          title={`${vitalTitle(k)}\n\nOver ${fmtN(vitals.n)} timed sessions on this route.`}>
                           <b className="num">{v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${Math.round(v)}ms`}</b>
                           <span className="rinfo__kpi-l">{k} p75</span>
                           <em>{r <= 0 ? "no comparison"
