@@ -1109,7 +1109,13 @@ export function investigationPaths(
        * Precedent: the failure rows' drill-down already falls back to the
        * app-wide Explorer the same way (rowDrilldown, kind "errors"). */
       if (errors && errors > 0 && scopedAppName) {
-        tech.push(errorsLink(tf, scopedAppName, errors));
+        // The reader's rule: the most appropriate app leads, always. A
+        // segment whose sessions are being hit is an ERRORS story — the
+        // inspector goes first and the sessions list becomes the follow-up;
+        // a healthy segment keeps the sessions view in front.
+        const insp = errorsLink(tf, scopedAppName, errors);
+        if (impacted && impacted.hit > 0) tech.unshift(insp);
+        else tech.push(insp);
       }
       break;
     case "domain3p": case "domain1p":
@@ -1166,7 +1172,9 @@ export function investigationPaths(
         proves: "the full topology around this entity — the map this chain no longer draws" }));
   }
   const prob = pLink();
-  if (prob) tech.push(prob);
+  // The reader's rule again: when Davis already holds the computed root
+  // cause, no other app is "most appropriate" — the problem leads the route.
+  if (prob) tech.unshift(prob);
   // An element wearing anomaly flags earns the app that OWNS baselining
   // (dynatrace.davis.anomalydetection, registry-verified): the thresholds and
   // history behind the amber marks, and where to tune them.
