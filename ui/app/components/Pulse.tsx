@@ -519,7 +519,7 @@ function Bars({ vals, times, label, tone = "info", fc }: {
   const lastT = (times ?? []).slice(-keep);
   const max = Math.max(...last, ...ahead, 1);
   const fill = tone === "bad"
-    ? "color-mix(in srgb, var(--bad) 62%, #fff)" : "rgba(255,255,255,0.85)";
+    ? "color-mix(in srgb, var(--bad) 62%, var(--ink-hi))" : "color-mix(in srgb, var(--ink-hi) 85%, transparent)";
   return (
     <span className="cc-bars">
       {last.map((v, i) => (
