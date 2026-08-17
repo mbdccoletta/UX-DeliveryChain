@@ -17,8 +17,9 @@ export interface DifficultyApp {
 
 const Z: SlowSplit = { views: 0, meas: 0, net: 0, srv: 0, rend: 0 };
 
-export function useDifficulty(tf: Timeframe): Map<string, DifficultyApp> | null {
-  const key = `${tf.from}|${tf.to}`;
+export function useDifficulty(tf: Timeframe, appId?: string | null):
+  Map<string, DifficultyApp> | null {
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}`;
   const [out, setOut] = useState<Map<string, DifficultyApp> | null>(null);
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export function useDifficulty(tf: Timeframe): Map<string, DifficultyApp> | null 
     setOut(null);
     (async () => {
       try {
-        const rows = await runDql<Record<string, unknown>>(qDifficulty(tf), 400);
+        const rows = await runDql<Record<string, unknown>>(qDifficulty(tf, appId), 400);
         const m = new Map<string, DifficultyApp>();
         const slot = (id: string) => {
           const s = m.get(id) ?? { slow: { cur: { ...Z }, prev: { ...Z } },
