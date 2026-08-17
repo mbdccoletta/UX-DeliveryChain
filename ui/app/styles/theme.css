@@ -238,19 +238,31 @@ svg { shape-rendering: geometricPrecision; }
 /* the portrait blocks: solid bar = cohort, ghost = everyone else */
 .rinfo__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 12px; grid-auto-flow: dense; }
+.rinfo__grid > * { min-width: 0; }
 .rinfo__blk--flat { grid-column: span 1; }
 .rinfo__blk { padding: 14px 16px; border-radius: 12px;
   background: color-mix(in srgb, var(--ink-hi) 4.5%, transparent); border: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent);
   display: flex; flex-direction: column; gap: 8px; }
 .rinfo__blk h3 { margin: 0 0 4px; font: 700 10px var(--mono); letter-spacing: 0.14em;
   text-transform: uppercase; color: color-mix(in srgb, var(--ink-hi) 75%, transparent); }
-/* a dimension with one value for everyone: stated once, no bar */
-.rinfo__blk--flat { flex-direction: row; align-items: baseline; gap: 10px; padding: 9px 14px; }
-.rinfo__blk--flat h3 { margin: 0; }
-.rinfo__flat { font: 600 12px var(--mono); color: var(--ink-hi); }
+/* a dimension with one value for everyone: stated once, no bar.
+   A flex row whose children cannot shrink overflows its grid cell and lands
+   on the neighbour — measured with a long page domain
+   ("astroshop.live.demoability.dynatracelabs.com") printing over the next
+   block's label. min-width:0 lets the value wrap inside its own card. */
+.rinfo__blk--flat { flex-direction: row; align-items: baseline; gap: 10px;
+  padding: 9px 14px; min-width: 0; flex-wrap: wrap; }
+.rinfo__blk--flat h3 { margin: 0; flex: 0 0 auto; }
+.rinfo__flat { font: 600 12px var(--mono); color: var(--ink-hi);
+  min-width: 0; overflow-wrap: anywhere; }
 .rinfo__flat em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
-.rinfo__bar { display: grid; grid-template-columns: minmax(70px, 130px) 1fr 44px auto;
-  align-items: center; column-gap: 10px; font: 500 11px var(--mono); }
+.rinfo__bar > * { min-width: 0; }
+/* four columns, all shrinkable: an `auto` lift column pushed 17px past the
+   card on a 311px block and the text was clipped (measured). The lift keeps
+   its own ellipsis and its full text in the title attribute. */
+.rinfo__bar { display: grid;
+  grid-template-columns: minmax(56px, 118px) minmax(24px, 1fr) 42px minmax(0, auto);
+  align-items: center; column-gap: 8px; font: 500 11px var(--mono); }
 .rinfo__bar-l { color: var(--ink-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rinfo__bar-t { position: relative; height: 12px; border-radius: 6px;
   background: color-mix(in srgb, var(--ink-hi) 5%, transparent); overflow: hidden; }
@@ -262,7 +274,7 @@ svg { shape-rendering: geometricPrecision; }
 .rinfo__bar-fill--up { background: var(--warn);
   box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 60%, transparent); }
 .rinfo__bar-v { color: var(--ink-hi); text-align: right; }
-.rinfo__bar-d { color: var(--ink-3); font-style: normal; font-size: 10px; white-space: nowrap; }
+.rinfo__bar-d { color: var(--ink-3); font-style: normal; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rinfo__ft { font: 400 10px var(--mono); color: var(--ink-3); text-align: center;
   padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent); }
 @media (max-width: 760px) {
@@ -475,6 +487,19 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   font: 600 12px var(--mono); outline: none; }
 .bc__ticket select { background: none; border: none; color: var(--ink-2);
   font: 600 12px var(--mono); }
+.bc__scoped { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 8px 14px; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.bc__scoped-l { font: 700 10px var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--accent); }
+.bc__scoped-v { font: 500 11px var(--mono); color: var(--ink-2); }
+.bc__scoped-x { margin-left: auto; font: 600 10px var(--mono); color: var(--ink-2);
+  cursor: pointer; background: none; border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 10px; }
+.bc__scoped-x:hover { border-color: var(--accent); color: var(--ink); }
+.bc__ftitle-note { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  text-transform: none; letter-spacing: 0; }
 .bc__front { --fh: var(--accent); }
 .bc__ftitle { margin: 0 0 10px; font: 700 15px var(--mono); letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--fh); }
@@ -595,24 +620,6 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   border-radius: 999px; padding: 3px 10px; }
 .tech__e b { color: var(--ink-hi); margin-right: 4px; }
 .tech__e em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 10px; }
-.tech__views { border-top: 1px solid var(--border); padding-top: 10px; }
-.tech__toggle { display: flex; align-items: baseline; gap: 10px; width: 100%;
-  background: none; border: none; padding: 2px 0; cursor: pointer; text-align: left;
-  font: 700 10px var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--ink-2); }
-.tech__toggle:hover { color: var(--ink); }
-.tech__toggle em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
-  text-transform: none; letter-spacing: 0; }
-.tech__soft { font: 400 11px var(--mono); color: var(--ink-3); line-height: 1.5;
-  border-top: 1px solid var(--border); padding-top: 10px; }
-.tech__vh, .tech__vr { display: grid; grid-template-columns: 2fr repeat(4, minmax(70px, 1fr));
-  gap: 10px; padding: 4px 0; align-items: baseline; }
-.tech__vh { font: 700 9px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--ink-3); }
-.tech__vr { font: 500 11px var(--mono); color: var(--ink-2);
-  border-top: 1px solid var(--border); }
-.tech__vn { color: var(--ink); overflow-wrap: anywhere; }
-@media (max-width: 720px) { .tech__vh, .tech__vr { grid-template-columns: 1fr 1fr; } }
 /* where the difficulty lives */
 .bc__diff { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px;
   padding: 16px 18px; border-radius: 14px; background: var(--panel-2);
