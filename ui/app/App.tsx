@@ -339,20 +339,25 @@ function ScanBadge({ tf }: { tf: Timeframe }) {
   const [, force] = useState(0);
   useEffect(() => subscribeScan(() => force((n) => n + 1)), []);
   useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
-  const { bytes, queries } = scanTotals();
+  const { bytes, queries, truncated } = scanTotals();
   if (!queries) return null;
-  // 100 GB is roughly two cold tours of this tenant's two-hour window; past
-  // that the reader is usually in a long window and should know it
-  const tone = bytes >= 2.5e11 ? "bad" : bytes >= 1e11 ? "warn" : "ok";
+  // truncation outranks cost: a partial answer is a correctness problem, not
+  // an expense. 100 GB is roughly two cold tours of a two-hour window here.
+  const tone = truncated > 0 || bytes >= 2.5e11 ? "bad" : bytes >= 1e11 ? "warn" : "ok";
   return (
     <span className={`scanb scanb--${tone}`}
       title={`This window has scanned ${fmtBytes(bytes)} of Grail across ${queries} `
         + `quer${queries === 1 ? "y" : "ies"} — about ${fmtMoney(bytes)} at the DPS list `
         + "rate for querying Grail ($0.0035 per GiB; your contract may differ).\n\n"
+        + (truncated > 0
+          ? `INCOMPLETE: Grail stopped ${truncated} of them at its 500 GB scan limit, `
+            + "so figures on this window are computed from part of the data. Narrow the "
+            + "window — or the application — for numbers that are whole.\n\n"
+          : "")
         + "Grail charges what a query READS, and the window is linear: a 24-hour "
         + "window costs about 12× a 2-hour one, whatever the filters. Revisiting a "
         + "screen in the same window is free — it reads the cache, not Grail."}>
-      ⛁ {fmtBytes(bytes)}
+      ⛁ {fmtBytes(bytes)}{truncated > 0 && " · partial"}
     </span>
   );
 }

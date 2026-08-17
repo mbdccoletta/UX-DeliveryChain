@@ -1,7 +1,7 @@
 // Data layer — every query here was validated against tenant bwm98081
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
-import { noteScan } from "./cost";
+import { isScanLimit, noteScan } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
 /**
@@ -125,10 +125,15 @@ export async function runDql<T = Record<string, unknown>>(
     res = await queryExecutionClient.queryPoll({ requestToken: res.requestToken! });
   }
   if (res.state !== "SUCCEEDED") throw new Error(`DQL ${res.state}`);
-  // what this query actually cost, straight from the platform's own metadata
-  noteScan(Number(
-    (res.result as unknown as { metadata?: { grail?: { scannedBytes?: number } } })
-      ?.metadata?.grail?.scannedBytes ?? 0));
+  /* What this query cost — and whether Grail finished it. A fetch stopped at
+   * the 500 GB scan limit still returns SUCCEEDED; the only sign is a WARNING
+   * in the metadata, and a number computed from half the data must never be
+   * presented as a measurement. */
+  const grail = (res.result as unknown as {
+    metadata?: { grail?: { scannedBytes?: number;
+      notifications?: Array<{ message?: string }> } } })?.metadata?.grail;
+  noteScan(Number(grail?.scannedBytes ?? 0),
+    (grail?.notifications ?? []).some((n) => isScanLimit(n?.message)));
   return (res.result?.records ?? []) as T[];
 }
 

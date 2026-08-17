@@ -15,17 +15,29 @@
 
 let scanned = 0;
 let queries = 0;
+/**
+ * Queries Grail STOPPED at its scan limit. Measured on a 30-day window: the
+ * platform caps a fetch at 500 GB, returns state SUCCEEDED, and puts a WARNING
+ * in the metadata — so a wide window quietly answers from a PARTIAL scan. This
+ * app does not print a partial number as a measured one, so the count travels
+ * to the header and the badge says so.
+ */
+let truncated = 0;
 let windowKey = "";
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 
 /** Every completed query reports what Grail actually read for it. */
-export function noteScan(bytes: number): void {
-  if (!Number.isFinite(bytes) || bytes <= 0) { queries += 1; emit(); return; }
-  scanned += bytes;
+export function noteScan(bytes: number, wasTruncated = false): void {
   queries += 1;
+  if (wasTruncated) truncated += 1;
+  if (Number.isFinite(bytes) && bytes > 0) scanned += bytes;
   emit();
 }
+
+/** Does this notification mean the scan was cut short? */
+export const isScanLimit = (message?: string | null) =>
+  /scanLimitGBytes|gigabytes of data were scanned/i.test(message ?? "");
 
 /** A new window is a new bill: the counter belongs to the timeframe on screen. */
 export function resetScan(key: string): void {
@@ -33,10 +45,11 @@ export function resetScan(key: string): void {
   windowKey = key;
   scanned = 0;
   queries = 0;
+  truncated = 0;
   emit();
 }
 
-export const scanTotals = () => ({ bytes: scanned, queries });
+export const scanTotals = () => ({ bytes: scanned, queries, truncated });
 
 export function subscribeScan(f: () => void): () => void {
   subs.add(f);
