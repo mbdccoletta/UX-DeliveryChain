@@ -16,7 +16,7 @@
 // Astroshop Android there is no TTFB, no LCP, no foreground time — its
 // technical story is view, action and app-start duration, so that is what
 // the panel shows, with the absence stated rather than left blank.
-import React from "react";
+import React, { useState } from "react";
 import type { TechRow } from "../hooks/useTechVitals";
 import { fmtN } from "../utils/dql";
 
@@ -53,6 +53,10 @@ export function TechPanel({ rows, appName, isMobile, withViews }: {
   /** Journeys shows the per-view table; the chain shows totals only. */
   withViews?: boolean;
 }) {
+  /* The per-view table loads FOLDED: it is the long part, and on a
+   * single-page application it is also the thin one — the reader asked for
+   * both, and the measurement agreed. */
+  const [openViews, setOpenViews] = useState(false);
   if (rows === null) {
     return (
       <div className="panel tech">
@@ -173,27 +177,55 @@ export function TechPanel({ rows, appName, isMobile, withViews }: {
           </div>
         )}
 
-        {/* per view — the engineer's next question is always "which screen" */}
-        {withViews && views.length > 0 && hasVitals && (
-          <div className="tech__views">
-            <div className="tech__vh">
-              <span>view</span><span>views</span><span>TTFB p75</span>
-              <span>render p75</span><span>LCP p75</span>
-            </div>
-            {views.map((v) => {
-              const render = Math.max(0, v.lcpMs - v.ttfbMs);
-              return (
-                <div className="tech__vr" key={v.bucket}>
-                  <span className="tech__vn">{v.bucket}</span>
-                  <span className="num">{fmtN(v.n)}</span>
-                  <span className="num" style={{ color: TONE[band("TTFB", v.ttfbMs)] }}>{ms(v.ttfbMs)}</span>
-                  <span className="num">{ms(render)}</span>
-                  <span className="num" style={{ color: TONE[band("LCP", v.lcpMs)] }}>{ms(v.lcpMs)}</span>
+        {/* per view — the engineer's next question is always "which screen".
+            ONLY the views the platform actually timed: a single-page
+            application navigates soft, and soft routes carry no first byte
+            and no paint (measured on Astroshop web: 1,920 hard navigations
+            on "/" and zero on every other view), so listing them printed
+            rows of 0ms that no one could act on. What is dropped says so. */}
+        {(() => {
+          if (!withViews || !hasVitals) return null;
+          const measured = views.filter((v) => v.meas > 0 && v.ttfbMs > 0);
+          const soft = views.length - measured.length;
+          if (measured.length < 2) {
+            return soft > 0 ? (
+              <div className="tech__soft">
+                {fmtN(soft)} of this application&apos;s views are soft navigations — the
+                platform records no first-byte or paint timing for them, so there is no
+                per-view breakdown to show.
+              </div>
+            ) : null;
+          }
+          const slowest = [...measured].sort((a, b) => b.lcpMs - a.lcpMs)[0];
+          return (
+            <div className="tech__views">
+              <button className="tech__toggle" onClick={() => setOpenViews((v) => !v)}
+                aria-expanded={openViews}>
+                <span>{openViews ? "▾" : "▸"} per view · {fmtN(measured.length)} timed</span>
+                <em>slowest {slowest.bucket} · LCP {ms(slowest.lcpMs)}
+                  {soft > 0 && ` · ${fmtN(soft)} soft routes carry no timing`}</em>
+              </button>
+              {openViews && (<>
+                <div className="tech__vh">
+                  <span>view</span><span>views</span><span>TTFB p75</span>
+                  <span>render p75</span><span>LCP p75</span>
                 </div>
-              );
-            })}
-          </div>
-        )}
+                {measured.map((v) => {
+                  const render = Math.max(0, v.lcpMs - v.ttfbMs);
+                  return (
+                    <div className="tech__vr" key={v.bucket}>
+                      <span className="tech__vn">{v.bucket}</span>
+                      <span className="num">{fmtN(v.n)}</span>
+                      <span className="num" style={{ color: TONE[band("TTFB", v.ttfbMs)] }}>{ms(v.ttfbMs)}</span>
+                      <span className="num">{ms(render)}</span>
+                      <span className="num" style={{ color: TONE[band("LCP", v.lcpMs)] }}>{ms(v.lcpMs)}</span>
+                    </div>
+                  );
+                })}
+              </>)}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

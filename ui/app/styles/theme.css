@@ -593,6 +593,15 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .tech__e b { color: var(--ink-hi); margin-right: 4px; }
 .tech__e em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 10px; }
 .tech__views { border-top: 1px solid var(--border); padding-top: 10px; }
+.tech__toggle { display: flex; align-items: baseline; gap: 10px; width: 100%;
+  background: none; border: none; padding: 2px 0; cursor: pointer; text-align: left;
+  font: 700 10px var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--ink-2); }
+.tech__toggle:hover { color: var(--ink); }
+.tech__toggle em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  text-transform: none; letter-spacing: 0; }
+.tech__soft { font: 400 11px var(--mono); color: var(--ink-3); line-height: 1.5;
+  border-top: 1px solid var(--border); padding-top: 10px; }
 .tech__vh, .tech__vr { display: grid; grid-template-columns: 2fr repeat(4, minmax(70px, 1fr));
   gap: 10px; padding: 4px 0; align-items: baseline; }
 .tech__vh { font: 700 9px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
