@@ -1109,18 +1109,33 @@ export function FlowSankey({
               {info === "loading" ? "drawing…" : "infographic ↗"}
             </button>
             {(() => {
-              // the picked VIEWS (positions dropped, folded/starred names
-              // excluded) — the customer's "this is what converted means"
-              const pickedViews = [...new Set(picks
-                .map((id) => /^n\d+-([\s\S]*)$/.exec(id)?.[1])
-                .filter((v): v is string => !!v && !v.includes("*")))];
+              /* The customer's "this is what converted means", read from
+               * whichever sankey they are on. The reader's design: a GOAL is
+               * where the customer ARRIVES, and its natural home is the
+               * routes view — pick the successful route(s) and the app
+               * learns their DESTINATION as the conversion. The step view
+               * keeps its per-view teaching for surgical definitions.
+               * Folded/starred names are excluded (they cannot equality-
+               * match raw view names). */
+              const pickedViews = mode === "steps"
+                ? [...new Set(picks
+                    .map((id) => /^n\d+-([\s\S]*)$/.exec(id)?.[1])
+                    .filter((v): v is string => !!v && !v.includes("*")))]
+                : [...new Set(picks
+                    .filter((id) => id.startsWith("jp-"))
+                    .map((id) => id.replace(/^jp-/, "").split("\u0001").pop() ?? "")
+                    .filter((v) => !!v && !v.includes("*")))];
               const hasDef = !!outcomeDefs?.[appId ?? ""]?.length;
               return (<>
-                {mode === "steps" && pickedViews.length > 0 && onDefineOutcome && (
+                {pickedViews.length > 0 && onDefineOutcome && (
                   <button className="flow-sel__b flow-sel__b--teach"
                     onClick={() => { onDefineOutcome(pickedViews); setPicks([]); }}
-                    title={`Teach the app: reaching ${pickedViews.join(", ")} IS this application's conversion. Replaces the keyword heuristic everywhere — stages, Business Control, forecast, infographic.`}>
-                    define conversion = {pickedViews.length} view{pickedViews.length > 1 ? "s" : ""} ✓
+                    title={mode === "steps"
+                      ? `Teach the app: reaching ${pickedViews.join(", ")} IS this application's conversion. Replaces the keyword heuristic everywhere — stages, Business Control, forecast, infographic.`
+                      : `Teach the app: these routes END at ${pickedViews.join(", ")} — reaching there IS this application's conversion. Replaces the keyword heuristic everywhere.`}>
+                    {mode === "steps"
+                      ? `define conversion = ${pickedViews.length} view${pickedViews.length > 1 ? "s" : ""} ✓`
+                      : `define conversion = where ${picks.filter((id) => id.startsWith("jp-")).length > 1 ? "these routes end" : "this route ends"} ✓`}
                   </button>
                 )}
                 {hasDef && onClearOutcome && (
