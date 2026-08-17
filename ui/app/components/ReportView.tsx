@@ -17,6 +17,7 @@ import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
 import { useBizForecast } from "../hooks/useBizForecast";
 import { useBizBreakdown } from "../hooks/useBizBreakdown";
 import { useDifficulty } from "../hooks/useDifficulty";
+import { useAppScope } from "../hooks/useAppScope";
 import { fmtN } from "../utils/dql";
 
 type Dir = "good" | "bad" | "flat";
@@ -58,6 +59,10 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
   const fc = useBizForecast(data.tf, scopeApp || null);
   const breakdown = useBizBreakdown(data.tf);
   const difficulty = useDifficulty(data.tf);
+  // the SAME closure the delivery chain resolves — so "incidents in your
+  // systems" counts exactly what a click on the button will show lit
+  const chainScope = useAppScope(scopeApp || undefined,
+    data.apps.find((a) => a.appId === scopeApp)?.entity ?? undefined);
   const nameOf = (id: string) =>
     data.apps.find((x) => x.appId === id)?.name ?? id.slice(0, 8);
   const tv = Number(ticket) > 0 ? Number(ticket) : null;
@@ -234,9 +239,21 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
         }
       }
     }
-    const backendProblems = data.problems.filter((pr) => (pr.entityIds ?? [])
-      .some((e) => /^(SERVICE-|HOST-|PROCESS_GROUP|KUBERNETES|CLOUD_APPLICATION|RELATIONAL_|QUEUE-|CUSTOM_DEVICE-)/.test(e))).length;
-    return { cur, prev, per, d, errN, outErr, conc, backendProblems };
+    // Scoped to THIS application's chain, not the environment: the button
+    // opens the chain, and the reader clicked once on "10 live incidents"
+    // that lit nothing there — the count was estate-wide backend problems
+    // while every other figure on the board is the application's own. Now a
+    // problem counts only when it touches an entity the chain resolves
+    // (services, their runtime, or the application itself).
+    const inChain = (e: string) =>
+      chainScope.services.has(e) || chainScope.runtime.has(e)
+      || e === (data.apps.find((a) => a.appId === scopeApp)?.entity ?? "");
+    const backendProblems = chainScope.resolved
+      ? data.problems.filter((pr) => (pr.entityIds ?? []).some(inChain)).length
+      : null;
+    const errTotal = ["backend", "frontend", "policy", "third_party", "device",
+      "connection", "request_4xx", "other"].reduce((a, b) => a + errN(b), 0);
+    return { cur, prev, per, d, errN, outErr, errTotal, conc, backendProblems };
   })();
 
   const range = (pj: { lower: number; upper: number }) =>
@@ -389,8 +406,14 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
       )}
 
       {/* where the difficulty lives — inside the backend, or outside it */}
-      {where && where.cur && (() => {
-        const t = trend(where.cur.srv, where.prev?.srv ?? where.cur.srv, false);
+      {/* the section stands on EITHER evidence: mobile screens carry no TTFB
+          (measured: 100% null), and hiding the whole section hid the error
+          origins and the Davis corroboration exactly where crash/device
+          evidence matters most */}
+      {where && (where.cur || where.errTotal > 0) && (() => {
+        const t = where.cur
+          ? trend(where.cur.srv, where.prev?.srv ?? where.cur.srv, false)
+          : trend(0, 0, false);
         const ms = (ns: number) => ns >= 1e9 ? `${(ns / 1e9).toFixed(1)}s` : `${Math.round(ns / 1e6)}ms`;
         // what the reader sees is business language; the measurement behind
         // each phrase stays one hover away in the tooltip
@@ -408,6 +431,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
           <section className="bc__front" style={{ ["--fh" as string]: "var(--t-violet, var(--accent))" }}>
             <h2 className="bc__ftitle">Where the difficulty lives</h2>
             <div className="bc__diff">
+              {where.cur ? (
               <div className="bc__diff-hero">
                 <b className="num">{pct(where.cur.srv)}</b>
                 <span className="bc__diff-hl">of your customers&apos; waiting is caused by your systems</span>
@@ -420,14 +444,26 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
                   wait happens on the customer&apos;s side.
                 </span>
               </div>
+              ) : (
+              <div className="bc__diff-hero">
+                <span className="bc__diff-hl">no time decomposition on these screens</span>
+                <span className="bc__diff-money">
+                  Mobile screens carry no first-byte breakdown — the verdict below
+                  reads from the errors alone.
+                </span>
+              </div>
+              )}
               <div className="bc__diff-body">
-                {/* time evidence: the split bar */}
+                {/* time evidence: the split bar (only where it was measured) */}
+                {where.cur && (
                 <div className="bc__diff-bar" role="img"
                   aria-label={`server ${pct(where.cur.srv)}, network ${pct(where.cur.net)}, download and render ${pct(where.cur.rend)}`}>
                   <i style={{ width: `${where.cur.srv * 100}%`, background: "var(--bad)" }} />
                   <i style={{ width: `${where.cur.net * 100}%`, background: "var(--t-cyan)" }} />
                   <i style={{ width: `${where.cur.rend * 100}%`, background: "var(--warn, #e8b04b)" }} />
                 </div>
+                )}
+                {where.cur && (
                 <div className="bc__diff-leg">
                   {where.d.slow.cur.views > 0 && (
                     <span className="bc__diff-cov"
@@ -442,6 +478,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
                   <span title="After the first byte: downloading and drawing the screen on the customer's device">
                     <i style={{ background: "var(--warn, #e8b04b)" }} />the customer&apos;s device · {ms(where.per(where.d.slow.cur.rend))} per screen</span>
                 </div>
+                )}
                 {/* error evidence: origin chips */}
                 <div className="bc__diff-errs">
                   <span className="bc__diff-el">customers who…</span>
@@ -463,10 +500,12 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, onGo }: {
                           is usually on <b>your side</b></>}
                   </span>
                   <button className="bc__diff-dv" onClick={() => onGo?.("chain", scopeApp)}
-                    title="Davis AI's open problems on backend entities — opens the delivery chain">
-                    {where.backendProblems
-                      ? `AI monitoring confirms ${fmtN(where.backendProblems)} live incident${where.backendProblems > 1 ? "s" : ""} in your systems ↗`
-                      : "AI monitoring sees no live incident in your systems ↗"}
+                    title="Davis AI's open problems on THIS application's chain — opens the delivery chain, where each one is lit on its component">
+                    {where.backendProblems === null
+                      ? "AI monitoring · resolving this application's chain… ↗"
+                      : where.backendProblems
+                        ? `AI monitoring confirms ${fmtN(where.backendProblems)} live incident${where.backendProblems > 1 ? "s" : ""} in this application's chain ↗`
+                        : "AI monitoring sees no live incident in this application's chain ↗"}
                   </button>
                 </div>
               </div>
