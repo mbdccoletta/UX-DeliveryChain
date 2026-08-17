@@ -426,6 +426,23 @@ export function FlowSankey({
   const [sel, setSel] = useState<string | null>(null);
   const [selNode, setSelNode] = useState<Node | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  /* The canvas paints from CSS variables at DRAW time. The DOM and the SVG
+   * follow a platform theme switch by themselves; a painted bitmap keeps the
+   * old palette until something redraws it — measured: switching to light
+   * left dark label plates on a white page. The shell flips
+   * document.documentElement[data-theme], so watching that attribute is the
+   * signal, and this counter is a draw dependency. */
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    const el = document.documentElement;
+    const mo = new MutationObserver(() => setThemeTick((t) => t + 1));
+    mo.observe(el, { attributes: true, attributeFilter: ["data-theme", "class"] });
+    // the OS-level preference too, for shells that follow it without an attribute
+    const mq = window.matchMedia?.("(prefers-color-scheme: light)");
+    const onMq = () => setThemeTick((t) => t + 1);
+    mq?.addEventListener?.("change", onMq);
+    return () => { mo.disconnect(); mq?.removeEventListener?.("change", onMq); };
+  }, []);
   const [focus, setFocus] = useState(false);
   /* THE CUSTOM PATH: node ids picked across arbitrary columns of step mode.
    * Each id already encodes its meaning — `n<step>-<view>` is "this view at
@@ -757,7 +774,8 @@ export function FlowSankey({
     ro.observe(c);
     return () => ro.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks, pathCtx, defsKey]);
+  }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks, pathCtx,
+      defsKey, themeTick]);
 
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
