@@ -23,15 +23,29 @@ let queries = 0;
  * to the header and the badge says so.
  */
 let truncated = 0;
+/** Every query of this window, in order: what it read and whether it finished.
+ *  The header draws one bar per entry, which is the readout AND the evidence —
+ *  a truncated query is a red bar you can point at. */
+let trace: Array<{ bytes: number; cut: boolean }> = [];
+/** Queries in flight right now, so the readout can show it is still working. */
+let inFlight = 0;
 let windowKey = "";
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 
+/** A query left for Grail. */
+export function noteScanStart(): void { inFlight += 1; emit(); }
+
 /** Every completed query reports what Grail actually read for it. */
 export function noteScan(bytes: number, wasTruncated = false): void {
   queries += 1;
+  inFlight = Math.max(0, inFlight - 1);
   if (wasTruncated) truncated += 1;
-  if (Number.isFinite(bytes) && bytes > 0) scanned += bytes;
+  const b = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+  scanned += b;
+  // the readout holds the last 48 — enough to show the shape of a page load
+  trace.push({ bytes: b, cut: wasTruncated });
+  if (trace.length > 48) trace = trace.slice(-48);
   emit();
 }
 
@@ -46,10 +60,11 @@ export function resetScan(key: string): void {
   scanned = 0;
   queries = 0;
   truncated = 0;
+  trace = [];
   emit();
 }
 
-export const scanTotals = () => ({ bytes: scanned, queries, truncated });
+export const scanTotals = () => ({ bytes: scanned, queries, truncated, trace, inFlight });
 
 export function subscribeScan(f: () => void): () => void {
   subs.add(f);

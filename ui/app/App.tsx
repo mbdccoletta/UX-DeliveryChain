@@ -339,13 +339,18 @@ function ScanBadge({ tf }: { tf: Timeframe }) {
   const [, force] = useState(0);
   useEffect(() => subscribeScan(() => force((n) => n + 1)), []);
   useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
-  const { bytes, queries, truncated } = scanTotals();
-  if (!queries) return null;
+  const { bytes, queries, truncated, trace, inFlight } = scanTotals();
+  if (!queries && !inFlight) return null;
   // truncation outranks cost: a partial answer is a correctness problem, not
   // an expense. 100 GB is roughly two cold tours of a two-hour window here.
   const tone = truncated > 0 || bytes >= 2.5e11 ? "bad" : bytes >= 1e11 ? "warn" : "ok";
+  /* THE READOUT. One bar per query, its height what that query read — square
+   * roots, because a page load mixes 40 GB scans with 40 MB ones and a linear
+   * scale would draw the small ones as nothing. A truncated query is red: the
+   * bar IS the evidence, pointable. */
+  const peak = Math.max(...trace.map((t) => t.bytes), 1);
   return (
-    <span className={`scanb scanb--${tone}`}
+    <span className={`scanb scanb--${tone}${inFlight ? " scanb--live" : ""}`}
       title={`This window has scanned ${fmtBytes(bytes)} of Grail across ${queries} `
         + `quer${queries === 1 ? "y" : "ies"} — about ${fmtMoney(bytes)} at the DPS list `
         + "rate for querying Grail ($0.0035 per GiB; your contract may differ).\n\n"
@@ -354,10 +359,19 @@ function ScanBadge({ tf }: { tf: Timeframe }) {
             + "so figures on this window are computed from part of the data. Narrow the "
             + "window — or the application — for numbers that are whole.\n\n"
           : "")
+        + "Each bar is one query, its height what that query read.\n\n"
         + "Grail charges what a query READS, and the window is linear: a 24-hour "
         + "window costs about 12× a 2-hour one, whatever the filters. Revisiting a "
         + "screen in the same window is free — it reads the cache, not Grail."}>
-      ⛁ {fmtBytes(bytes)}{truncated > 0 && " · partial"}
+      <i className="scanb__led" aria-hidden="true" />
+      <span className="scanb__trace" aria-hidden="true">
+        {trace.map((t, i) => (
+          <i key={i} className={t.cut ? "scanb__b scanb__b--cut" : "scanb__b"}
+            style={{ height: `${Math.max(12, Math.sqrt(t.bytes / peak) * 100)}%` }} />
+        ))}
+      </span>
+      <b className="scanb__n num">{fmtBytes(bytes)}</b>
+      {truncated > 0 && <em className="scanb__cut">partial</em>}
     </span>
   );
 }

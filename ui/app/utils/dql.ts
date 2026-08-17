@@ -1,7 +1,7 @@
 // Data layer — every query here was validated against tenant bwm98081
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
-import { isScanLimit, noteScan } from "./cost";
+import { isScanLimit, noteScan, noteScanStart } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
 /**
@@ -117,6 +117,7 @@ export async function runDql<T = Record<string, unknown>>(
   query: string,
   maxResultRecords = 200,
 ): Promise<T[]> {
+  noteScanStart();
   let res = await queryExecutionClient.queryExecute({
     body: { query, requestTimeoutMilliseconds: 30000, maxResultRecords },
   });
@@ -124,7 +125,7 @@ export async function runDql<T = Record<string, unknown>>(
     await new Promise((r) => setTimeout(r, 400));
     res = await queryExecutionClient.queryPoll({ requestToken: res.requestToken! });
   }
-  if (res.state !== "SUCCEEDED") throw new Error(`DQL ${res.state}`);
+  if (res.state !== "SUCCEEDED") { noteScan(0); throw new Error(`DQL ${res.state}`); }
   /* What this query cost — and whether Grail finished it. A fetch stopped at
    * the 500 GB scan limit still returns SUCCEEDED; the only sign is a WARNING
    * in the metadata, and a number computed from half the data must never be
