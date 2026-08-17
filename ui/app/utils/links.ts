@@ -980,7 +980,10 @@ export function investigationPaths(
       break;
     case "pod": case "node": {
       const k = pod ?? node!;
-      if (appStart) tech.unshift(appStart);
+      // Healthy machinery leads with its OWN app — the reader opened a pod to
+      // see the pod. "Start where it surfaces" is an incident move: it leads
+      // only when users are actually feeling something.
+      if (appStart && !healthy) tech.unshift(appStart);
       tech.push(
         eLink(pod ? "Open the pod" : "Open the node",
           "Its workload, placement and resource pressure.",
@@ -995,10 +998,11 @@ export function investigationPaths(
           `fetch logs | filter ${pod ? "k8s.pod.name" : "k8s.node.name"} == "${shortName(name)}"`
           + " | sort timestamp desc", "logs"),
       );
+      if (appStart && healthy) tech.push(appStart);
       break;
     }
     case "host":
-      if (appStart) tech.push(appStart);
+      if (appStart && !healthy) tech.push(appStart);
       tech.push(
         eLink("Open the host", "The machine's processes, saturation and events.",
           "dt.entity.host", host!, "hosts"),
@@ -1006,6 +1010,7 @@ export function investigationPaths(
           "newest first", `fetch logs | filter dt.entity.host == "${host}"`
           + " | sort timestamp desc", "logs"),
       );
+      if (appStart && healthy) tech.push(appStart);
       break;
     case "webApp": case "mobileApp":
       tech.push(
@@ -1022,7 +1027,10 @@ export function investigationPaths(
        * ranking them by users affected. It leads the route when the element is
        * failing — the errors ARE the root cause evidence — and stays available
        * behind the overview when it is not. */
-      if (errors && errors > 0) {
+      // One inspector per route: when the mobile crash step is present it
+      // leads and SUBSUMES the generic errors step — the same app twice with
+      // different filters reads as a doubt, and the rule is that there is none.
+      if (errors && errors > 0 && !(kind === "mobileApp" && crashes && crashes > 0)) {
         const insp = errorsLink(tf, name, errors);
         /* The hints regex only saw Davis problems — an application with a
          * third of its sessions hit but no active problem still filed its
@@ -1045,9 +1053,10 @@ export function investigationPaths(
       }
       break;
     case "process":
-      if (appStart) tech.push(appStart);
+      if (appStart && !healthy) tech.push(appStart);
       tech.push(eLink("Open the process", "The running process, its host and technology.",
         "dt.entity.process_group_instance", pgi!, "processes"));
+      if (appStart && healthy) tech.push(appStart);
       break;
     case "origin":
       /* Gen3-first, and an ENTITY app before a query app. The route used to
