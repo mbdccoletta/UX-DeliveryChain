@@ -2,7 +2,7 @@
   "environmentUrl": "https://bwm98081.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Smartscape delivery chain crossed with RUM, Davis, alerts and extensions.",
     "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",
@@ -13,7 +13,7 @@
       },
       {
         "name": "storage:user.sessions:read",
-        "comment": "frontend.name per application — the name Users & Sessions filters by (differs from the entity name)"
+        "comment": "frontend.name per application \u2014 the name Users & Sessions filters by (differs from the entity name)"
       },
       {
         "name": "storage:events:read",
