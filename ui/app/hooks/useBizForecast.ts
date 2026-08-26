@@ -68,11 +68,12 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
     setOut(null);
     let live = true;
     (async () => {
-      const [sessions, conversions] = await Promise.all([
-        forecastOne(tf, "sessions", appId, defs),
-        forecastOne(tf, "conversions", appId, defs),
-      ]);
-      const res = { sessions, conversions };
+      /* ONE analyzer run, not two. The conversion leg projected a predicate
+       * the product no longer uses, and each leg is a full Grail scan inside
+       * the analyzer — measured as the heaviest in the app. Volume is what is
+       * directly projectable, so volume is what is projected. */
+      const sessions = await forecastOne(tf, "sessions", appId, defs);
+      const res = { sessions, conversions: null };
       memo.set(key, res);
       if (live) setOut(res);
     })();

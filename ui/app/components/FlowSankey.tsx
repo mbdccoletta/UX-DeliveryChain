@@ -3,8 +3,23 @@
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
 import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
-  qNoTelemetry, qPathSessions, qCohortSessions, runDql,
+  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql,
   type OutcomeDefs, type Timeframe } from "../utils/dql";
+
+/** The poster's scans, shared and remembered: keyed by the query text itself
+ *  (which already carries window, app and definitions), so a re-open costs
+ *  nothing and two callers in flight share one request. A failure forgets
+ *  its key — the next click retries instead of caching the error. */
+const dqlMemo = new Map<string, Promise<Array<Record<string, unknown>>>>();
+function memoDql(q: string, limit: number): Promise<Array<Record<string, unknown>>> {
+  let p = dqlMemo.get(q);
+  if (!p) {
+    p = runDql<Record<string, unknown>>(q, limit)
+      .catch((e) => { dqlMemo.delete(q); throw e; });
+    dqlMemo.set(q, p);
+  }
+  return p;
+}
 
 /**
  * The ACTIVE outcome test. One FlowSankey shows one application; the
@@ -14,7 +29,7 @@ import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
  */
 let activeDone: (v: string) => boolean = (v) => DONE.test(v);
 const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
-import { RouteInfographic, type InfoRow } from "./RouteInfographic";
+import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
 
@@ -41,11 +56,15 @@ type Stage = { id: string; nm: string; tone: Tone; sub: string };
 /** How far a session got, as a stage id. */
 function stageIdOf(path: string[], outcomes: boolean, deepest: number): string {
   if (!path.length) return "st-none";
-  if (outcomes) {
-    if (path.some((v) => activeDone(v))) return "st-order";
-    if (path.some((v) => INTENT.test(v))) return "st-cart";
-    return path.length > 1 ? "st-prod" : "st-home";
-  }
+  /* NO VOCABULARY. Stages used to be read off view NAMES — a screen called
+   * "checkout" meant completed — which is a guess dressed as a measurement:
+   * it fits one demo application and misses every customer whose screens are
+   * named in another language, or whose completion is not a screen at all.
+   * Measured on this tenant, 185 sessions of 970 counted as "converted" on
+   * evidence the journey never showed, so a path that ended could display a
+   * conversion. Depth is the honest signal, and it is defined for every
+   * application without asking anyone anything. */
+  void outcomes; void activeDone; void INTENT;
   if (deepest > 1 && path.length >= deepest) return "st-order";
   if (path.length > 2) return "st-cart";
   return path.length > 1 ? "st-prod" : "st-home";
@@ -65,12 +84,7 @@ function stageMeta(id: string, outcomes: boolean, deepest: number): Stage {
     // which is what the old wording ("without view_summary") implied.
     return { id, nm: "No navigation recorded", tone: "bad", sub: "session with no navigation event" };
   }
-  if (outcomes) {
-    if (id === "st-order") return { id, nm: "Completed", tone: "good", sub: "reached a final step" };
-    if (id === "st-cart") return { id, nm: "Showed intent", tone: "warn", sub: "started but did not finish" };
-    if (id === "st-prod") return { id, nm: "Browsed", tone: "warn", sub: "explored without intent" };
-    return { id, nm: "Entry view only", tone: "warn", sub: "immediate bounce" };
-  }
+  void outcomes;
   if (id === "st-order") return { id, nm: "Reached the deepest journey", tone: "good", sub: `${deepest} views` };
   if (id === "st-cart") return { id, nm: "Went deep", tone: "warn", sub: "3+ views" };
   if (id === "st-prod") return { id, nm: "Two views in", tone: "warn", sub: "2 views" };
@@ -105,23 +119,69 @@ export const ROUTE_MAX = 9;
  * definition. `ctx` is the full mine's vocabulary (which routes are drawn,
  * and the stage words), so a cohort means the same thing on both pages.
  */
-export interface RouteCtx { top: Set<string>; outcomes: boolean; deepest: number }
+/**
+ * How many STARTING POINTS the folded tail is split into before the remainder
+ * becomes a single node. The tail is not noise — measured on easytravel it is
+ * 168 paths carrying 59% of the sessions, the biggest band on the diagram and
+ * the only one that said nothing. It is large because routes are grouped by
+ * EXACT sequence, so one extra step makes a new path: those 168 are mostly
+ * variants of a handful of stories.
+ *
+ * Splitting them by where they BEGIN turns the anonymous 59% into four or five
+ * bands a reader can name, each one pickable like any route. Drawing all 168
+ * would not be expanding it — it would be the same dump, wider.
+ */
+const TAIL_GROUPS = 5;
+/** A tail group's id IS its first step, so a pick survives a re-mine. */
+const groupId = (first: string) => "jg-" + first;
+/**
+ * WHICH STARTING POINTS THE TAIL IS DRAWN AS — one definition, used by the
+ * diagram that draws the bands AND by the predicate that resolves a click into
+ * sessions. Written as a shared function because the first version did not:
+ * the diagram split the tail into groups while `j-rest` still meant "anything
+ * outside the top", so selecting a remainder of 37 paths reported the cohort
+ * of all 168. Measured on easytravel — 303 sessions drawn, 2,057 selected.
+ */
+const tailStartsOf = (tail: SeqRow[]): Set<string> => {
+  const by = new Map<string, number>();
+  for (const s of tail) {
+    const first = s.journey[0] ?? "";
+    if (first) by.set(first, (by.get(first) ?? 0) + s.sessions);
+  }
+  return new Set([...by.entries()].sort((x, y) => y[1] - x[1])
+    .slice(0, TAIL_GROUPS).map(([first]) => first));
+};
+
+export interface RouteCtx {
+  top: Set<string>; outcomes: boolean; deepest: number;
+  /** The first steps drawn as their own tail band. */
+  tailStarts: Set<string>;
+}
 export const routeCtxOf = (seqs: SeqRow[], appId: string): RouteCtx => {
   const mine = seqs.filter((q) => q.appId === appId).sort((a, b) => b.sessions - a.sessions);
   return {
     top: new Set(mine.slice(0, ROUTE_MAX).map((q) => routeId(q.journey))),
     outcomes: mine.some((q) => doneOf(q.journey)),
     deepest: deepestOf(mine),
+    tailStarts: tailStartsOf(mine.slice(ROUTE_MAX)),
   };
 };
 export function matchesRoutes(journey: string[], pk: string[], ctx: RouteCtx | null): boolean {
   if (!pk.length) return true;
-  const routes = pk.filter((id) => id.startsWith("jp-") || id === "j-rest");
+  const routes = pk.filter((id) => id.startsWith("jp-") || id.startsWith("jg-")
+    || id === "j-rest");
   const stages = pk.filter((id) => id.startsWith("st-"));
   if (routes.length) {
     const key = routeId(journey);
     const inTop = ctx?.top.has(key) ?? false;
-    if (!routes.some((id) => (id === "j-rest" ? !inTop : id === key))) return false;
+    /* A tail group means "not one of the drawn routes, AND it starts here" —
+     * the same two facts the diagram used to draw it, so the cohort Business
+     * Control recomputes is provably the band the reader clicked. */
+    const first = journey[0] ?? "";
+    if (!routes.some((id) =>
+      id === "j-rest" ? (!inTop && !(ctx?.tailStarts.has(first) ?? false))
+      : id.startsWith("jg-") ? (!inTop && first === id.slice(3))
+      : id === key)) return false;
   }
   if (stages.length) {
     const st = stageOf(journey, ctx?.outcomes ?? true, ctx?.deepest ?? 0).id;
@@ -248,14 +308,46 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
     addStage(s.journey, s.sessions, id);
     covered += s.sessions;
   });
+  /* THE TAIL, BY WHERE IT BEGINS. One anonymous band holding the majority of
+   * the sessions is the diagram's biggest claim and its emptiest one. Split by
+   * first step it becomes bands that can be named, picked and taken to
+   * Business Control like any route; whatever does not make the top few starts
+   * still folds, but it is now a remainder rather than the headline. */
   const rest = mine.slice(MAX);
   if (rest.length) {
-    const v = rest.reduce((a, s) => a + s.sessions, 0);
-    nodes.push({ id: "j-rest", c: 1, nm: `${rest.length} other paths`, v, tone: "info",
-      sub: `${fmtPct((v / total) * 100)} of sessions` });
-    links.push({ s: "a-" + app.appId, t: "j-rest", v, tone: "info" });
-    for (const s of rest) addStage(s.journey, s.sessions, "j-rest");
-    covered += v;
+    const by = new Map<string, { v: number; n: number }>();
+    for (const s of rest) {
+      const first = s.journey[0] ?? "";
+      const cur = by.get(first) ?? { v: 0, n: 0 };
+      by.set(first, { v: cur.v + s.sessions, n: cur.n + 1 });
+    }
+    const drawnKeys = tailStartsOf(rest);
+    const drawn = [...by.entries()].filter(([first]) => drawnKeys.has(first))
+      .sort((x, y) => y[1].v - x[1].v);
+    for (const [first, g] of drawn) {
+      const id = groupId(first);
+      const nm = first.length > 26 ? first.slice(0, 25) + "\u2026" : first;
+      nodes.push({ id, c: 1, nm: `from ${nm}`, full: `${g.n} paths that begin at ${first}`,
+        v: g.v, tone: "info",
+        sub: `${g.n} paths \u00b7 ${fmtPct((g.v / total) * 100)} of sessions` });
+      links.push({ s: "a-" + app.appId, t: id, v: g.v, tone: "info" });
+      covered += g.v;
+    }
+    for (const s of rest) {
+      const first = s.journey[0] ?? "";
+      if (drawnKeys.has(first)) addStage(s.journey, s.sessions, groupId(first));
+    }
+    const leftovers = rest.filter((s) => !drawnKeys.has(s.journey[0] ?? ""));
+    if (leftovers.length) {
+      const v = leftovers.reduce((a, s) => a + s.sessions, 0);
+      nodes.push({ id: "j-rest", c: 1,
+        nm: `${leftovers.length} other paths`, v, tone: "info",
+        sub: `from ${by.size - drawnKeys.size} more starting points`
+          + ` \u00b7 ${fmtPct((v / total) * 100)} of sessions` });
+      links.push({ s: "a-" + app.appId, t: "j-rest", v, tone: "info" });
+      for (const s of leftovers) addStage(s.journey, s.sessions, "j-rest");
+      covered += v;
+    }
   }
   const orphan = Math.max(0, journeyable - covered);
   if (orphan) {
@@ -431,8 +523,8 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 
 export function FlowSankey({
   apps, seqs, appId, transitions = [], friction = [], views = [], ux, tf,
-  cohort, onCohortConsumed, ticket = null, sym = "$",
-  outcomeDefs, onDefineOutcome, onClearOutcome, onBizScope, onPickApp, onOpen,
+  cohort, onCohortConsumed,
+  outcomeDefs, defsUnreadable, onDefineJourney, savedJourneys, onDropJourney, editJourney, startDefining, onDefineOutcome, onClearOutcome, onBizScope, onPickApp, onOpen,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
@@ -443,10 +535,26 @@ export function FlowSankey({
   onCohortConsumed?: () => void;
   /** The value of one conversion (Business Control's field, via url state) —
    *  turns the route economics into money. null = customers only. */
-  ticket?: number | null;
-  sym?: string;
   /** Customer-taught conversion definitions, per application. */
   outcomeDefs?: OutcomeDefs;
+  /** The store could not be read — the poster says so instead of calling the
+   *  fallback the customer's own rule. */
+  defsUnreadable?: boolean;
+  /** Define ONE journey — its goal becomes the conversion, its path becomes a
+   *  filter Business Control can offer back. */
+  onDefineJourney?: (journeys: string[][]) => void;
+  /** The journeys already defined — shown on the poster, and the flow enters
+   *  its definition mode straight from there. */
+  savedJourneys?: string[][];
+  /** Forget one — the list lives inside the definition flow too, because that
+   *  is where a reader looks for it after pressing "2 saved". */
+  onDropJourney?: (journey: string[]) => void;
+  /** Handed a journey to re-pick: the flow opens in definition mode with it
+   *  already chosen, so editing is done by pointing, not typing. */
+  editJourney?: string[] | null;
+  /** Bumped when the reader pressed "define a conversion journey" elsewhere:
+   *  the flow opens already in definition mode. */
+  startDefining?: number;
   /** Save the picked views as THIS application's conversion definition. */
   onDefineOutcome?: (views: string[]) => void;
   onClearOutcome?: () => void;
@@ -493,10 +601,33 @@ export function FlowSankey({
    * every number on screen is the isolated cohort's own, not a lit subset
    * of the old ones. */
   const [picks, setPicks] = useState<string[]>([]);
+  /* DEFINING THE CONVERSION JOURNEY, as a declared mode rather than a button
+   * that appears once you happen to select something. The mechanism existed —
+   * pick routes, the app learns where they END — but nothing on screen said
+   * so, which is the same as not having it. Entering the mode says what the
+   * app is waiting for, keeps taking picks (more than one journey is the
+   * point), and ends in an explicit save. */
+  const [defining, setDefining] = useState(false);
+  const [defHint, setDefHint] = useState<string | null>(null);
+  const [stepHint, setStepHint] = useState<string | null>(null);
+  /* Leaving the definition — by cancelling, by saving, or by removing what
+   * was being looked at — must hand back the WHOLE diagram. Clearing the
+   * picks alone left the last clicked node still selected, so the flow stayed
+   * dimmed around something the reader had just walked away from. */
+  const wholeFlowAgain = React.useCallback(() => {
+    setPicks([]); setSel(null); setSelNode(null); setFocus(false); setDefHint(null);
+  }, []);
+  /* A refusal explains ONE click. Left standing it reads as a permanent
+   * "you cannot do this" over a screen where the next click works fine —
+   * which is what it looked like. Any change of selection retires it. */
+  useEffect(() => { setDefHint(null); }, [picks.join("|")]);
+  const definingRef = React.useRef(false);
+  useEffect(() => { definingRef.current = defining; }, [defining]);
   /* The route's INFOGRAPHIC — the poster the reader asked for, opened by the
    * button on the path band and laid over the screen. null = closed;
    * "loading" while the two scans run (the cohort's ids, then its portrait). */
   const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
+  const [infoStops, setInfoStops] = useState<null | StopRow[]>(null);
   const [infoCohort, setInfoCohort] = useState(0);
   /** Whether the OPEN poster shows the unconverted cohort (set per open —
    *  the old cohortRef read leaked the label onto later manual posters). */
@@ -524,7 +655,6 @@ export function FlowSankey({
    *  162 folded routes ended at just 10 views, one of them the conversion
    *  page — 392 real completions the reader could not see, let alone teach
    *  a goal from. Computed in memory: the journeys are already here. */
-  const [rest, setRest] = useState<null | Array<{ view: string; sessions: number }>>(null);
   const [ntel, setNtel] = useState<null | "loading" | {
     sessions: number; real: number; robots: number; oneEvent: number;
     reqOnly: number; p50dur: number; pages: Array<{ pg: string; n: number }>;
@@ -548,18 +678,15 @@ export function FlowSankey({
    * route, `j-rest` the folded remainder, `st-*` a furthest-stage — and a
    * session matches when it satisfies every column that has picks: any picked
    * route (union within the column) AND any picked stage. */
-  const pathCtx = React.useMemo(() => {
-    const app = appId ? apps.find((a) => a.appId === appId) : undefined;
-    if (!app) return null;
-    const mine = seqs.filter((q) => q.appId === app.appId)
-      .sort((a, b) => b.sessions - a.sessions);
-    return {
-      top: new Set(mine.slice(0, 9).map((q) => routeId(q.journey))),
-      outcomes: mine.some((q) => doneOf(q.journey)),
-      deepest: deepestOf(mine),
-    };
+  /* ONE definition of the context, not two. This used to rebuild the ctx by
+   * hand — with a hardcoded 9 where the rest of the file reads ROUTE_MAX — so
+   * the page that DRAWS the cohort and the page that RECOMPUTES it could
+   * disagree the moment either constant moved. It calls the exported builder
+   * now, which is the same one Business Control uses. */
+  const pathCtx = React.useMemo(
+    () => (appId && apps.some((a) => a.appId === appId) ? routeCtxOf(seqs, appId) : null),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apps, seqs, appId, defsKey]);
+  [apps, seqs, appId, defsKey]);
 
   const matchesRoutePicks = (journey: string[], pk: string[]): boolean =>
     matchesRoutes(journey, pk, pathCtx);
@@ -593,17 +720,25 @@ export function FlowSankey({
     const app = appId ? apps.find((a) => a.appId === appId) : undefined;
     const fragmentsOf = (id: string) => ux?.get(id)?.fragments ?? 0;
   const stepMode = !!app && mode === "steps";
-    const seqsIn = app && picks.length
-      ? seqs.filter((q) => q.appId !== app.appId ||
-          (stepMode ? matchesPicks(q.journey, picks) : matchesRoutePicks(q.journey, picks)))
+    /* Picking normally ISOLATES the flow to the matching journeys — right for
+     * analysis, wrong while DEFINING: the first pick would collapse the
+     * diagram to itself and there would be nothing left to pick the second
+     * journey from, in a mode whose whole point is that more than one journey
+     * can mean converted. So definition keeps the full flow on screen. */
+    /* ROUTES STAY PICKABLE. Re-mining the flow to the first pick made the
+     * other routes disappear, so a second one could never be clicked — the
+     * diagram answered "this route" when the reader was still asking "these
+     * routes". The count in the bar already states the narrowed cohort, so
+     * nothing is lost by leaving every band on screen. The step view still
+     * narrows, because there the picks ARE the columns. */
+    const seqsIn = app && picks.length && !defining && stepMode
+      ? seqs.filter((q) => q.appId !== app.appId || matchesPicks(q.journey, picks))
       : seqs;
     // route mode + picks: the model is remined from the matching journeys
-    // only, and the application node shrinks to the isolated cohort — no
-    // remainder is invented for the sessions filtered away
-    const isoApp = app && !stepMode && picks.length
-      ? { ...app, sessions: seqsIn.filter((q) => q.appId === app.appId)
-            .reduce((a, q) => a + q.sessions, 0) + fragmentsOf(app.appId) }
-      : app;
+    // The application node no longer shrinks to a pick either: the whole flow
+    // stays on screen so a second and third route can be chosen, and the bar
+    // carries the narrowed cohort in words.
+    const isoApp = app;
     const built = !app ? { ...buildModel(apps, seqs),
                            cols: ["Application", "Furthest stage reached", "Session outcome"] }
       : stepMode ? buildStepModel(app, seqsIn, transitions)
@@ -611,6 +746,16 @@ export function FlowSankey({
             pathCtx ? { outcomes: pathCtx.outcomes, deepest: pathCtx.deepest } : undefined),
           cols: ["Application", "Navigation path", "Furthest stage reached"] };
     const { nodes, links, cols } = built;
+
+    /* THE DIAGRAM SIZES ITSELF. The shell used to be bound to the viewport
+     * alone — clamp(360px, 100vh - 240px, 860px) — so an application with many
+     * routes drew more rows than the box could hold and `overflow: hidden`
+     * simply cut the last ones off. The busiest column decides the height it
+     * needs; the viewport still decides the minimum, so a tall screen is used
+     * and a short one scrolls instead of clipping. */
+    const rowsNeeded = Math.max(
+      ...[0, 1, 2].map((col) => nodes.filter((n) => n.c === col).length), 1);
+    c.parentElement?.style.setProperty("--flow-rows", String(rowsNeeded));
 
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -661,17 +806,30 @@ export function FlowSankey({
       // lit path: ancestors and descendants of the selection, following link
       // direction. An undirected flood would leak through shared nodes (every
       // path touches the application node) and light the whole graph.
-      const down = new Set<string>(), up = new Set<string>();
-      if (sel) {
-        down.add(sel); up.add(sel);
+      const closure = (seed: string) => {
+        const d = new Set<string>([seed]), u = new Set<string>([seed]);
         let changed = true;
         while (changed) {
           changed = false;
           for (const l of links) {
-            if (down.has(l.s) && !down.has(l.t)) { down.add(l.t); changed = true; }
-            if (up.has(l.t) && !up.has(l.s)) { up.add(l.s); changed = true; }
+            if (d.has(l.s) && !d.has(l.t)) { d.add(l.t); changed = true; }
+            if (u.has(l.t) && !u.has(l.s)) { u.add(l.s); changed = true; }
           }
         }
+        return { d, u };
+      };
+      /* THE LIGHT FOLLOWS THE WHOLE SELECTION, not the last thing clicked.
+       * Lighting only the last node's ancestry meant picking a stage lit every
+       * path that drains into it — the chips said one path, the picture showed
+       * five. With more than one pick the lit set is the INTERSECTION of each
+       * pick's ancestry, which is exactly the cohort the numbers describe. */
+      const down = new Set<string>(), up = new Set<string>();
+      const seeds = picks.length ? picks : (sel ? [sel] : []);
+      if (seeds.length) {
+        const cls = seeds.map(closure);
+        for (const id of cls[0].d) if (cls.every((c) => c.d.has(id) || c.u.has(id))) down.add(id);
+        for (const id of cls[0].u) if (cls.every((c) => c.d.has(id) || c.u.has(id))) up.add(id);
+        for (const sd of seeds) { down.add(sd); up.add(sd); }
       }
       const lit = new Set([...down, ...up]);
       const litLink = (l: Link) =>
@@ -684,7 +842,7 @@ export function FlowSankey({
         const sy = s.outY + lw / 2; s.outY += lw;
         const ty = t.inY + lw / 2; t.inY += lw;
         const x0 = s.x + 9, x1 = t.x - 9, mx = (x0 + x1) / 2;
-        const dim = sel && !litLink(l);
+        const dim = (picks.length || sel) && !litLink(l);
         if (dim && focus) continue; // focus mode: unrelated ribbons disappear
         ctx.beginPath();
         ctx.moveTo(x0, sy - lw / 2);
@@ -703,7 +861,10 @@ export function FlowSankey({
       }
 
       for (const n of placed) {
-        const dim = sel && !lit.has(n.id);
+        const dim = ((picks.length || sel) && !lit.has(n.id))
+          // during definition only real routes are candidates, so the rest
+          // stops competing for the click
+          || (definingRef.current && n.c === 1 && !n.id.startsWith("jp-"));
         if (dim && focus) continue; // focus mode hides labels of hidden flows too
         ctx.globalAlpha = dim ? 0.25 : 1;
         ctx.fillStyle = col(n.tone);
@@ -727,8 +888,12 @@ export function FlowSankey({
         ctx.textAlign = stepMode ? "center" : left ? "right" : "left";
         const tx = stepMode ? n.x : left ? n.x - 12 : n.x + 12;
         const subTxt = (n.ab ? "▼ most abandoned · " : "") + `${fmtN(n.v)} · ${n.sub}`;
-        const subCol = n.ab ? cssVar("--bad") : cssVar("--ink-2");
-        const NM_F = "600 12px sans-serif", SUB_F = "500 11px monospace";
+        /* The count is the point of the diagram, so it is written like it:
+         * a heavier face than the name it sits under, and the plate behind it
+         * is nearly opaque. At 0.82 a pink ribbon read straight through the
+         * digits — "614 sessions" over a band is not a number anyone reads. */
+        const subCol = n.ab ? cssVar("--bad") : cssVar("--ink");
+        const NM_F = "600 12px sans-serif", SUB_F = "700 11px monospace";
 
         if (stepMode) {
           // a label needs its own vertical room; below that the tail would
@@ -737,7 +902,7 @@ export function FlowSankey({
           ctx.font = NM_F; const w1 = ctx.measureText(n.nm).width;
           ctx.font = SUB_F; const w2 = ctx.measureText(subTxt).width;
           const bw = Math.max(w1, w2), cy = n.y + n.h / 2;
-          ctx.globalAlpha = dim ? 0.4 : 0.88;
+          ctx.globalAlpha = dim ? 0.55 : 0.97;
           ctx.fillStyle = cssVar("--bg");
           ctx.fillRect(tx - bw / 2 - 6, cy - 14, bw + 12, 31);
           ctx.globalAlpha = dim ? 0.25 : 1;
@@ -752,7 +917,7 @@ export function FlowSankey({
         }
         // backing plate: labels must stay readable over any ribbon behind them
         const plate = (bx: number, by: number, bw: number, bh: number) => {
-          ctx.globalAlpha = dim ? 0.4 : 0.82;
+          ctx.globalAlpha = dim ? 0.55 : 0.97;
           ctx.fillStyle = cssVar("--bg");
           ctx.fillRect(bx, by, bw, bh);
           ctx.globalAlpha = dim ? 0.25 : 1;
@@ -817,11 +982,31 @@ export function FlowSankey({
     return () => ro.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apps, seqs, transitions, sel, appId, hover, focus, mode, ux, picks, pathCtx,
-      defsKey, themeTick]);
+      defsKey, themeTick, defining]);
 
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
-  useEffect(() => { setPicks([]); }, [appId, mode]);
+  useEffect(() => { setPicks([]); setStepHint(null); }, [appId, mode]);
+  useEffect(() => { setStepHint(null); }, [picks.length]);
+  /* Editing arrives from another page, so this runs AFTER the clear above —
+   * effect order is declaration order, and on mount the clear would otherwise
+   * wipe the very journey the reader asked to edit. */
+  useEffect(() => {
+    if (!startDefining) return;
+    /* ONE mechanism, both views. Arriving from the board used to force the
+     * routes view, which made the feature look like two different features:
+     * a whole-route pick here, a step-by-step build there. It is one — the
+     * reader says which journey converts, in whichever language the view on
+     * screen speaks — so the view is left exactly as they had it. */
+    setPicks([]); setDefining(true);
+  }, [startDefining]);
+  useEffect(() => {
+    if (!editJourney?.length) return;
+    // a stored journey is re-picked whole, which only the routes view can do
+    setMode("paths");
+    setDefining(true);
+    setPicks(["jp-" + editJourney.join("\u0001")]);
+  }, [editJourney]);
   // Business Control sends "unconverted": land in step mode and open the
   // portrait of who left without converting, then drop the intent so a manual
   // mode switch does not reopen it.
@@ -874,20 +1059,33 @@ export function FlowSankey({
     const seq = ++infoSeq.current;
     setInfo("loading");
     try {
-      // ONE per-session scan: attributes, whether it reached a goal, outcomes.
-      const rows = await runDql<Record<string, unknown>>(
-        qCohortSessions(tf, appId, outcomeDefs), 10000);
+      /* The poster's two scans are INDEPENDENT and used to run in series —
+       * measured: 9.2s (cohort attributes) then 2.1s (paths) = 11.3s of
+       * "drawing the route's portrait…". Parallel now, and memoised per
+       * window+app: the first open costs the slower scan alone, reopening
+       * costs nothing. */
+      const [rows, pr] = await Promise.all([
+        memoDql(qCohortSessions(tf, appId, outcomeDefs), 10000),
+        mode === "unconverted"
+          ? Promise.resolve(null)
+          : memoDql(qPathSessions(tf, appId), 10000),
+      ]);
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
       // used, so the cohort is provably the ribbon's.
       let prTotal = 0, prMatched = 0;
-      const pickIds = mode === "unconverted" ? null : await (async () => {
-        const pr = await runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000);
+      /* WHERE EACH SESSION STOPPED. The last step of a mined journey — kept
+       * here because the poster's hardest question ("they showed intent and
+       * did not advance: why?") is answered by the screen they stopped on,
+       * and this query is already being run. No extra scan. */
+      const lastOf = new Map<string, string>();
+      const pickIds = pr === null ? null : (() => {
         prTotal = pr.length;
         const set = new Set<string>();
         for (const r of pr) {
           const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
             .map(normalizeView).filter((v, k, a) => k === 0 || v !== a[k - 1]);
+          if (journey.length) lastOf.set(String(r.sid), journey[journey.length - 1]);
           if (journey.length && matchesMode(journey, picks)) set.add(String(r.sid));
         }
         prMatched = set.size;
@@ -912,7 +1110,7 @@ export function FlowSankey({
         cohortN = sampled && rows.length > 0
           ? Math.round((matched / rows.length) * appTotal) : matched;
       } else {
-        sampled = prTotal >= 2000 || rows.length >= 10000;
+        sampled = prTotal >= 10000 || rows.length >= 10000;
         // the match RATE comes from the path sample itself — the one place
         // that knows which journeys satisfy the picks — scaled to the full
         // mined volume the band displays
@@ -944,6 +1142,20 @@ export function FlowSankey({
       const timed = (rs: Array<Record<string, unknown>>, k: string) =>
         rs.filter((r) => Number(r.measured) > 0 && Number(r[k]) > 0)
           .map((r) => Number(r[k]));
+      /* The stop screens, cohort against everyone else, each with the share of
+       * its sessions that met an error — because "they stopped at /cart" and
+       * "a third of them hit an error there" are two halves of one answer. */
+      const stopTally = (rs: Array<Record<string, unknown>>) => {
+        const m = new Map<string, { n: number; err: number }>();
+        for (const r of rs) {
+          const v = lastOf.get(String(r.sid));
+          if (!v) continue;
+          const cur = m.get(v) ?? { n: 0, err: 0 };
+          cur.n += 1; if (Number(r.errs) > 0) cur.err += 1;
+          m.set(v, cur);
+        }
+        return m;
+      };
       const inRows = rows.filter(inCohortOf);
       const outRows = rows.filter((r) => !inCohortOf(r));
       const inTimed = inRows.filter((r) => Number(r.measured) > 0).length;
@@ -953,6 +1165,29 @@ export function FlowSankey({
         ttfb: p75(timed(inRows, "ttfbMs")), ttfbRest: p75(timed(outRows, "ttfbMs")),
         fcp: p75(timed(inRows, "fcpMs")), fcpRest: p75(timed(outRows, "fcpMs")),
       } : null);
+      const inStops = stopTally(inRows), outStops = stopTally(outRows);
+      const inStopN = [...inStops.values()].reduce((a, x) => a + x.n, 0);
+      const outStopN = [...outStops.values()].reduce((a, x) => a + x.n, 0);
+      /* THE JOIN THAT WAS MISSING. The poster already knew where sessions end
+       * and, separately, how the application loads — and never put the two
+       * together, leaving the reader to assume the first is caused by the
+       * second. Measured on this tenant it is not: the four screens where
+       * sessions end most run 386–523ms while the slowest screen in the app
+       * (1,126ms) is barely an ending at all. The per-view timing is already
+       * fetched for the chain, so the join costs nothing. */
+      const vp50 = new Map(views.filter((v) => !appId || v.appId === appId)
+        .map((v) => [v.view, v.p50]));
+      const viewTimes = [...vp50.values()].filter((x) => x > 0).sort((a, b) => a - b);
+      const appP50 = viewTimes.length ? viewTimes[Math.floor(viewTimes.length / 2)] : 0;
+      setInfoStops(inStopN ? [...inStops.entries()]
+        .map(([view, x]) => ({
+          view, n: x.n, share: x.n / inStopN,
+          rest: outStopN ? (outStops.get(view)?.n ?? 0) / outStopN : 0,
+          errShare: x.n ? x.err / x.n : 0,
+          p50: vp50.get(view) ?? 0,
+          appP50,
+        }))
+        .sort((a, b) => b.n - a.n).slice(0, 7) : null);
       const inB = bizOf(rows.filter(inCohortOf));
       const outB = bizOf(rows.filter((r) => !inCohortOf(r)));
       // counts scale with the same factor the headline count used; RATES
@@ -968,7 +1203,8 @@ export function FlowSankey({
       // pivot to the long form RouteInfographic reads: one row per
       // (dimension, bucket, in/out) with the measures aggregated. Entry view
       // is a dimension too, keyed on the first view.
-      type Acc = { sessions: number; hit: number; fatal: number; durs: number[]; views: number[] };
+      type Acc = { sessions: number; hit: number; fatal: number; durs: number[]; views: number[];
+        customers: number; converted: number };
       const key = (d: string, b: string, inC: boolean) => `${d}\u0000${b}\u0000${inC ? 1 : 0}`;
       const acc = new Map<string, Acc>();
       const dimDefs = [...INFO_DIMS.filter((d) => d.expr).map((d) => ({ id: d.id, label: d.label })),
@@ -976,6 +1212,11 @@ export function FlowSankey({
       for (const r of rows) {
         if (!(Number(r.isReal) === 1 || r.isReal === true || r.isReal === "true")) { /* keep all: real flag optional */ }
         const inC = inCohortOf(r);
+        // conversion per characteristic rides along on the SAME rows the bars
+        // already come from — real customers only, so the segment rates and
+        // the route's headline conversion are the one number, not two
+        const real = isRealRow(r) ? 1 : 0;
+        const conv = real && Number(r.reached) === 1 ? 1 : 0;
         const hit = Number(r.errs) > 0 ? 1 : 0;
         const fatal = Number(r.crash) > 0 ? 1 : 0;
         const dur = Number(r.dur) || 0, vw = Number(r.views) || 0;
@@ -984,8 +1225,10 @@ export function FlowSankey({
           if (raw === null || raw === undefined || raw === "") continue;
           const b = String(raw);
           const kk = key(d.label, b, inC);
-          const a = acc.get(kk) ?? { sessions: 0, hit: 0, fatal: 0, durs: [], views: [] };
+          const a = acc.get(kk) ?? { sessions: 0, hit: 0, fatal: 0, durs: [], views: [],
+            customers: 0, converted: 0 };
           a.sessions++; a.hit += hit; a.fatal += fatal; a.durs.push(dur); a.views.push(vw);
+          a.customers += real; a.converted += conv;
           acc.set(kk, a);
         }
       }
@@ -996,6 +1239,7 @@ export function FlowSankey({
         const [dim, bucket, inC] = kk.split("\u0000");
         return { dim, bucket, inCohort: inC === "1",
           sessions: a.sessions, hit: a.hit, fatal: a.fatal,
+          customers: a.customers, converted: a.converted,
           p50dur: med(a.durs), p50views: med(a.views) };
       });
       if (seq === infoSeq.current) setInfo(info);
@@ -1005,12 +1249,6 @@ export function FlowSankey({
   /* the lit-path ids belong to one model; changing mode invalidates them */
   useEffect(() => { setSel(null); setSelNode(null); setFocus(false); }, [appId, mode]);
   /* the no-telemetry card closes on Esc, like every overlay here */
-  useEffect(() => {
-    if (rest === null) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRest(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [rest]);
   useEffect(() => {
     if (ntel === null) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNtel(null); };
@@ -1023,9 +1261,23 @@ export function FlowSankey({
     const r = c.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     // step mode centres its labels, so the hit box is centred too
+    /* The routes column used to answer to a click anywhere in 260px around a
+     * node — 70 to its left and 190 to its right, most of it empty canvas. In
+     * a list whose rows are 26px apart that turns an imprecise click into
+     * someone else's route, which is what "it keeps assembling paths at
+     * random" was. The box is now the bar and its label, nothing more, and it
+     * never overlaps the neighbouring row. */
+    /* A FORGIVING TARGET, again. The box was tightened when a stray click
+     * PILED another band onto the filter — costly, and hard to notice. Now
+     * that the navigation-path column holds one selection at a time, a stray
+     * click merely replaces it, so precision stopped being worth the misses:
+     * thin ribbons whose label is taller than they are were nearly impossible
+     * to hit. The label is the target the reader aims at, so the box covers
+     * the label. */
     const [padL, padR] = stepModeRef.current ? [72, 72] : [70, 190];
     return hitRef.current.find(
-      (n) => mx > n.x - padL && mx < n.x + padR && my >= n.y - 4 && my <= n.y + n.h + 4) ?? null;
+      (n) => mx > n.x - padL && mx < n.x + padR
+        && my >= n.y - 4 && my <= n.y + n.h + 4) ?? null;
   };
 
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1036,17 +1288,88 @@ export function FlowSankey({
      * journeys passing through all of them. The folded "N other views" node
      * is not a point on any path, so it only opens its panel. */
     if (stepModeRef.current && !hit.id.startsWith("more-")) {
-      setPicks((cur) => cur.includes(hit.id)
-        ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
+      setPicks((cur) => {
+        if (cur.includes(hit.id)) { setStepHint(null); return cur.filter((x) => x !== hit.id); }
+        /* A CUSTOM PATH HAS TO BE A PATH. Waypoints were accepted in any
+         * combination, so a reader could start on one route and add a view no
+         * session ever reaches from it — the picks were legal, the cohort was
+         * empty, and the diagram answered with nothing. The click is now tested
+         * before it is taken: if no session walks the whole selection, it is
+         * refused and the reason is said, instead of silently emptying the
+         * screen. */
+        const next = [...cur, hit.id];
+        const app0 = appId ? apps.find((a) => a.appId === appId) : undefined;
+        const reach = app0
+          ? seqs.filter((q) => q.appId === app0.appId && q.journey.length
+              && matchesPicks(q.journey, next))
+              .reduce((a, q) => a + q.sessions, 0)
+          : 1;
+        if (!reach) {
+          setStepHint(`No session goes through ${hit.nm} after the views you have picked — `
+            + "they are not on the same path. Remove a waypoint, or start from this one.");
+          return cur;
+        }
+        setStepHint(null);
+        return next;
+      });
       setSelNode(hit); setSel(hit.id);
       return;
     }
     /* Route mode: routes (jp-…, the folded remainder) and stages narrow the
      * flow the same way; the poster then reads exactly what is on screen. */
     if (pathsModeRef.current
-        && (hit.id.startsWith("jp-") || hit.id === "j-rest" || hit.id.startsWith("st-"))) {
-      setPicks((cur) => cur.includes(hit.id)
-        ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
+        && (hit.id.startsWith("jp-") || hit.id.startsWith("jg-")
+          || hit.id === "j-rest" || hit.id.startsWith("st-"))) {
+      /* WHILE DEFINING, a click REPLACES: a definition is one journey, saved
+       * on its own, and several accumulate by saving several times. Combining
+       * many at once belongs to Business Control, where the question is "how
+       * do these journeys perform", not "what does converted mean". A tail
+       * group or a stage is not a journey and cannot be defined. */
+      if (definingRef.current) {
+        /* MULTIPLE journeys can be chosen in one definition — an application
+         * that completes in more than one place needs more than one route to
+         * say so. Each one is still STORED individually, so the list can drop
+         * them one at a time. A tail group or a stage is not a journey. */
+        if (!hit.id.startsWith("jp-")) {
+          /* Silence was the bug: the reader clicked a tail band — a GROUP of
+           * paths, not one journey — and nothing happened, on a screen that
+           * had just told them to click. A group has many destinations, so it
+           * cannot become a conversion; say that, and say what to click. */
+          setDefHint(hit.id.startsWith("jg-") || hit.id === "j-rest"
+            ? `${hit.nm} is a GROUP of paths, not one journey — it has no single destination. Click one of the routes listed below it.`
+            : "That is a stage, not a journey. Click a route in the middle column.");
+          return;
+        }
+        setDefHint(null);
+        setPicks((cur) => cur.includes(hit.id)
+          ? cur.filter((x) => x !== hit.id) : [...cur, hit.id]);
+        setSelNode(hit); setSel(hit.id);
+        return;
+      }
+      /* ONE PATH AT A TIME. The navigation-path column used to accumulate:
+       * three unrelated bands could sit in the filter at once, and their union
+       * described no journey anybody walks — "from /logout" OR "from /legal"
+       * OR "the remainder" is not a path, it is three. A click in this column
+       * now REPLACES whatever was picked there. Stages live in another column
+       * and still combine, because route-plus-stage narrows one path instead
+       * of adding a second. */
+      /* ONE PER COLUMN. Each column asks a different question — which path,
+       * and how far they got — so the filter holds one answer to each. Two
+       * paths at once described no journey; two stages at once describe no
+       * outcome either ("browsed OR showed intent" is just a wider net, not a
+       * cohort anyone acts on). A click replaces whatever its own column held
+       * and leaves the other column alone, so path-plus-stage still narrows
+       * one story. */
+      const colOf = (id: string) =>
+        id.startsWith("st-") ? "stage"
+        : (id.startsWith("jp-") || id.startsWith("jg-") || id === "j-rest") ? "path"
+        : "other";
+      const col = colOf(hit.id);
+      setPicks((cur) => {
+        if (cur.includes(hit.id)) return cur.filter((x) => x !== hit.id);
+        if (col === "other") return [...cur, hit.id];
+        return [...cur.filter((x) => colOf(x) !== col), hit.id];
+      });
       setSelNode(hit); setSel(hit.id);
       return;
     }
@@ -1162,6 +1485,11 @@ export function FlowSankey({
           return st(a) - st(b);
         }) : picks;
         if (all === 0) return null;
+        /* THE DEFINITION BAR. While the mode is on it replaces the ordinary
+         * selection strip: it says what the app is waiting for, shows the
+         * journeys chosen so far and the DESTINATIONS it will actually store —
+         * because arriving is what converting means, and a reader is owed the
+         * difference between what they clicked and what gets saved. */
         return (
           <div className="flow-sel flow-sel--path">
             <span className="flow-sel__nm">
@@ -1173,6 +1501,9 @@ export function FlowSankey({
                 {word(id)} ✕
               </button>
             ))}
+            {stepHint && (
+              <span className="flow-sel__no">{stepHint}</span>
+            )}
             <span className="flow-sel__num">
               {picks.length
                 ? <>{fmtN(iso)} of {fmtN(all)} sessions{all > 0 ? ` · ${fmtPct((iso / all) * 100)}` : ""}</>
@@ -1182,25 +1513,6 @@ export function FlowSankey({
             {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
                 narrowed one; the reader's rule: characteristics refer to
                 everything the screen currently shows */}
-            {sel === "j-rest" && appId && (
-              <button className="flow-sel__b"
-                onClick={() => {
-                  const app0 = apps.find((a) => a.appId === appId);
-                  if (!app0) return;
-                  const mine = seqs.filter((q) => q.appId === app0.appId && q.journey.length > 0)
-                    .sort((a, b) => b.sessions - a.sessions);
-                  const by = new Map<string, number>();
-                  for (const q of mine.slice(ROUTE_MAX)) {
-                    const dest = q.journey[q.journey.length - 1];
-                    if (dest) by.set(dest, (by.get(dest) ?? 0) + q.sessions);
-                  }
-                  setRest([...by.entries()].map(([view, sessions]) => ({ view, sessions }))
-                    .sort((a, b) => b.sessions - a.sessions));
-                }}
-                title="The folded routes are many, but they END at few views — see which, and teach a goal from any of them">
-                where do they end? ↗
-              </button>
-            )}
             {sel === "j-none" && (
               <button className="flow-sel__b"
                 onClick={openNoTelemetry} disabled={ntel === "loading"}
@@ -1240,17 +1552,10 @@ export function FlowSankey({
                     .filter((v) => !!v && !v.includes("*")))];
               const hasDef = !!outcomeDefs?.[appId ?? ""]?.length;
               return (<>
-                {pickedViews.length > 0 && onDefineOutcome && (
-                  <button className="flow-sel__b flow-sel__b--teach"
-                    onClick={() => { onDefineOutcome(pickedViews); setPicks([]); }}
-                    title={mode === "steps"
-                      ? `Teach the app: reaching ${pickedViews.join(", ")} IS this application's conversion. Replaces the keyword heuristic everywhere — stages, Business Control, forecast, infographic.`
-                      : `Teach the app: these routes END at ${pickedViews.join(", ")} — reaching there IS this application's conversion. Replaces the keyword heuristic everywhere.`}>
-                    {mode === "steps"
-                      ? `define conversion = ${pickedViews.length} view${pickedViews.length > 1 ? "s" : ""} ✓`
-                      : `define conversion = where ${picks.filter((id) => id.startsWith("jp-")).length > 1 ? "these routes end" : "this route ends"} ✓`}
-                  </button>
-                )}
+                {/* The old teach button lived here: a second way to define the
+                    same thing, appearing only once something happened to be
+                    picked. One mechanism now — the definition mode — so this
+                    is gone rather than left to compete with it. */}
                 {hasDef && onClearOutcome && (
                   <button className="flow-sel__b"
                     onClick={onClearOutcome}
@@ -1269,54 +1574,6 @@ export function FlowSankey({
         );
       })()}
 
-      {/* The fold, unpacked BY DESTINATION — a box holding 44% of the
-          sessions must not be opaque, and the endings inside are few enough
-          to name. Each one teaches a goal in place, which is what the fold
-          was blocking. Esc or a click outside closes. */}
-      {rest !== null && (() => {
-        const app0 = appId ? apps.find((a) => a.appId === appId) : undefined;
-        const tot = rest.reduce((a, r) => a + r.sessions, 0) || 1;
-        const max = Math.max(...rest.map((r) => r.sessions), 1);
-        return (
-          <div className="ovl" onClick={() => setRest(null)} role="dialog" aria-modal="true"
-            aria-label="Where the folded routes end">
-            <div className="ntel" onClick={(e) => e.stopPropagation()}>
-              <header className="rinfo__hd">
-                <span className="rinfo__eyebrow">WHERE THE FOLDED ROUTES END · {app0?.name ?? ""}</span>
-                <h2 className="rinfo__path"><span>Many routes, few endings</span></h2>
-                <div className="rinfo__cohort">
-                  <b className="num">{fmtN(rest.length)}</b>
-                  <span>destinations across {fmtN(tot)} sessions the diagram folds away</span>
-                </div>
-                <button className="drawer__x" onClick={() => setRest(null)} aria-label="Close">✕</button>
-              </header>
-              <section className="ntel__pages">
-                <h3>where those sessions ended</h3>
-                {rest.map((r) => (
-                  <div className="rinfo__bar" key={r.view} title={`${fmtN(r.sessions)} sessions`}>
-                    <span className="rinfo__bar-l">{r.view}</span>
-                    <span className="rinfo__bar-t">
-                      <i className="rinfo__bar-fill" style={{ width: `${(r.sessions / max) * 100}%` }} />
-                    </span>
-                    <b className="rinfo__bar-v">{fmtN(r.sessions)}</b>
-                    {onDefineOutcome && !r.view.includes("*") && (
-                      <button className="flow-sel__b flow-sel__b--teach rest__teach"
-                        onClick={() => { onDefineOutcome([r.view]); setRest(null); setPicks([]); }}
-                        title={`Teach the app: reaching ${r.view} IS this application's conversion`}>
-                        conversion ✓
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </section>
-              <footer className="rinfo__ft">
-                the diagram draws the {ROUTE_MAX} busiest routes and folds the rest — folded
-                sessions are still counted in every figure on screen, they simply share one node
-              </footer>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* "No page telemetry", unpacked — the sessions the mining never saw,
           shown for what they are: mostly one stray beacon from a REAL page
@@ -1398,7 +1655,15 @@ export function FlowSankey({
         const all = mine.reduce((a, q) => a + q.sessions, 0);
         const names = new Map(a11yModel.nodes.map((n) => [n.id, n.nm]));
         const word = (id: string) => {
-          if (mode === "paths") return names.get(id) ?? id.replace(/^jp-/, "").split("\u0001").join(" → ");
+          /* The poster gets the WHOLE route. `names` holds the diagram's
+           * display label, which is clipped to 34 characters so the bands stay
+           * readable — reusing it here handed the poster a title ending in an
+           * ellipsis, hiding the very steps it exists to describe. The id
+           * carries the full path, so read it from there. */
+          if (mode === "paths") {
+            if (id.startsWith("jp-")) return id.replace(/^jp-/, "").split("\u0001").join(" → ");
+            return names.get(id) ?? id;
+          }
           const end = /^(done|exit)-(\d+)$/.exec(id);
           if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
           const m = /^n(\d+)-([\s\S]*)$/.exec(id);
@@ -1415,7 +1680,14 @@ export function FlowSankey({
               : ["every journey on screen"]}
             key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
-            biz={infoBiz} vitals={infoVitals} ticket={ticket} sym={sym} approx={infoApprox}
+            biz={infoBiz} vitals={infoVitals} stops={infoStops} approx={infoApprox}
+            /* the rule every rate on the poster rests on, from the same source
+               the queries compile from — never a list retyped into the view */
+            convDef={appId ? {
+              taught: !!outcomeDefs?.[appId]?.length,
+              unreadable: !!defsUnreadable && !outcomeDefs?.[appId]?.length,
+              items: outcomeDefs?.[appId]?.length ? outcomeDefs[appId] : [...OUTCOME_WORDS],
+            } : null}
             onClose={() => { setInfo(null);
               // closing re-arms the cohort intent: a fresh click on the
               // board's "who they are" fires again (it was dead before)

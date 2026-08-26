@@ -58,11 +58,14 @@ export function usePanZoom(
     const w = canvas.scrollWidth, h = canvas.scrollHeight;
     if (!w || !h) return;
     // Only scale down when the content genuinely cannot fit; otherwise keep 1:1
-    // so glyphs stay on the pixel grid. Overflow is meant to be scrolled, not shrunk.
+    // so glyphs stay on the pixel grid.
     const needed = Math.min((stage.clientWidth - 24) / w, (stage.clientHeight - 24) / h);
-    // Floor at 0.9: arriving small is arriving weak. Below this the chain
-    // keeps its size and the overflow becomes panning, not miniaturisation.
-    const z = needed >= 1 ? 1 : clampZ(Math.max(needed, 0.9));
+    // The floor used to be 0.9 — "arriving small is arriving weak" — and it
+    // meant fit did not fit: at 90% the chain still overflowed and grew a
+    // scrollbar, which is exactly what the reader asked to never see. Fitting
+    // wins; the base scale of the diagram was raised instead, so even a full
+    // fit arrives readable. Zooming past it by hand still pans.
+    const z = needed >= 1 ? 1 : clampZ(Math.max(needed, 0.5));
     touched.current = false;
     apply({ z, x: Math.max(0, (stage.clientWidth - w * z) / 2), y: 12 });
   }, [stageRef, canvasRef, apply]);
@@ -135,8 +138,14 @@ export function usePanZoom(
       frame = requestAnimationFrame(() => { if (!touched.current) fit(); });
     });
     ro.observe(stage);
+    /* The CONTENT resizes too: data arrives, labels widen, a column gains
+     * cards — and a fit computed before that is stale, which is how the chain
+     * ended 401px wider than its stage with no scrollbar left to say so. The
+     * canvas is observed with the same one-refit-per-frame guard; a manual
+     * zoom still wins, because touched blocks the refit either way. */
+    if (canvasRef.current) ro.observe(canvasRef.current);
     return () => { cancelAnimationFrame(frame); ro.disconnect(); };
-  }, [stageRef, fit]);
+  }, [stageRef, canvasRef, fit]);
 
   /**
    * Glides the view so one element sits centred at reading zoom — the answer

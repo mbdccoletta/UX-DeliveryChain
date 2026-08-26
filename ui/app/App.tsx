@@ -19,10 +19,9 @@ import { ReportView } from "./components/ReportView";
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
 import { useUrlState } from "./hooks/useUrlState";
 import { useUxOverview } from "./hooks/useUxOverview";
-import { useOutcomeDefs } from "./hooks/useOutcomeDefs";
-import { useTechVitals } from "./hooks/useTechVitals";
-import { fmtBytes, fmtMoney, resetScan, scanTotals, subscribeScan } from "./utils/cost";
-import { TechPanel } from "./components/TechPanel";
+import { useFrontendNames } from "./hooks/useFrontendNames";
+import { useJourneys } from "./hooks/useJourneys";
+import { resetScan } from "./utils/cost";
 import { usePageTitle } from "./hooks/usePageTitle";
 import { Boundary } from "./components/Boundary";
 
@@ -100,20 +99,49 @@ export function App() {
   const setTf = (from: string, to: string) => set({ from, to }, false);
 
 
+  /* What this window has read stays counted even though nothing prints it any
+   * more: the readout is gone, the accounting is not. It is what a ceiling
+   * reads before deciding a query is too wide to run. */
+  useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
+
+  /** A journey handed back to the flow to be re-picked; saving replaces it. */
+  /* Pressing "define a conversion journey" anywhere must START the process,
+   * not deposit the reader on another page to hunt for a second button. This
+   * token travels with the navigation and opens the flow already in
+   * definition mode, waiting for the one click that is actually theirs. */
+
   const d = useChainData(tf, state.session);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   const uxMap = useUxOverview(tf);
+  /* Users & Sessions filters by frontend.name, not the inventory name —
+   * see useFrontendNames for the measured mismatch. */
+  const feNames = useFrontendNames();
+  /* journeys data only where journeys are read (Journeys + Business
+   * Control) — four user.events scans Overview and the chain stopped paying */
+  /* warmed the moment the pointer TOUCHES the Journeys/Business Control
+   * tab — by the click, the four scans are usually already in flight */
+  const [warmJourneys, setWarmJourneys] = useState(false);
+  const jd = useJourneys(tf,
+    warmJourneys || tab === "flow" || tab === "report", state.session);
   // the customer's own conversion definitions — taught on Journeys, read by
   // every screen that speaks of conversion
-  const outcome = useOutcomeDefs();
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
 
-  const current = appId ?? d.apps[0]?.appId ?? "";
+  /* An appId the loaded window does not know (a quiet app whose RUM id
+   * vanished from qApps, a stale share link) used to render a GHOST chain:
+   * empty selector, "No coverage" columns, a nameless Render card — the
+   * reader's screenshot. Unknown falls back exactly like null does: to the
+   * busiest application. While loading, the url's choice stands so the
+   * selection does not flicker away and back. */
+  const current = d.loading
+    ? (appId ?? "")
+    : appId && d.apps.some((a) => a.appId === appId)
+      ? appId
+      : d.apps[0]?.appId ?? "";
   // the engineer's reading of the same anatomy Business Control speaks in
   // business words — shown on the two technical pages, one scan shared
   // the flow page reads its technical vitals from the INFOGRAPHIC now, where
   // they answer the filtered question; only the chain needs this scan
-  const tech = useTechVitals(tf, tab === "chain" ? current : null);
 
   // The header quotes the same per-session scan the pages quote, so the title
   // bar and the card below it can never state two different session counts.
@@ -121,6 +149,13 @@ export function App() {
     ? d.apps.reduce((a, x) => a + (uxMap.get(x.appId)?.sessions ?? x.sessions), 0)
     : d.apps.reduce((a, x) => a + x.sessions, 0);
   const activeProblems = d.problems.length;
+  /* ENVIRONMENT-scoped active signals — custom alerts and OpenPipeline
+   * extractions bound to the tenant itself. No card carries that id, so the
+   * audit found them shown by the platform's own apps and invisible here;
+   * the estate line is the one place scoped exactly like they are. */
+  const envAlerts = [...new Set(d.signals
+    .filter((s) => s.entityId.startsWith("ENVIRONMENT"))
+    .map((s) => s.name))];
   // The classic model and RUM both key a mobile app's entity as
   // MOBILE_APPLICATION-…, whichever of the two named it — verified against
   // every mobile app currently listed. A web app's entity never starts this
@@ -135,21 +170,25 @@ export function App() {
       <AppHeader>
         <AppHeader.Navigation>
           {/* the standard: clicking the logo lands on the first tab */}
-          <AppHeader.Logo appName="DeliveryChain UX" onClick={() => setTab("home")} />
+          {/* WHY A REGISTRY URL, NOT A DATA URI: AppIcon fetch()es its src
+              and the CSP's connect-src has no data: — the data-URI attempt
+              failed silently into the "?" fallback. The dev server serves
+              app.config's icon.png at this same registry path for OUR app
+              id (measured: 200 image/png; the component's default asks for
+              "local-dev-mode" and 404s), and after a deploy the platform
+              registry answers the identical URL. One src, both worlds. */}
+          <AppHeader.Logo appName="UX Delivery Chain"
+            appIcon="/platform/app-engine/registry/v1/app-icons/my.deliverychain.ux"
+            onClick={() => setTab("home")} />
           {TABS.map(([id, label]) => (
-            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}>
+            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}
+              onMouseEnter={(id === "flow" || id === "report")
+                ? () => setWarmJourneys(true) : undefined}>
               {label}
             </AppHeader.NavigationItem>
           ))}
         </AppHeader.Navigation>
         <AppHeader.ActionItems>
-          {/* WHAT THIS WINDOW COST, beside how fresh it is — the two halves of
-              the same question: where these numbers came from, and what
-              reading them charged. Grail bills by bytes scanned and the window
-              is linear (24 hours costs about 12× two), which makes the
-              timeframe the biggest cost control in the product; measured,
-              never estimated. */}
-          <ScanBadge tf={tf} />
           {/* app-wide action: how old the numbers are, and how to refresh them */}
           <AppHeader.ActionButton
             onClick={d.refresh}
@@ -188,6 +227,11 @@ export function App() {
                 <span className="lbl">
                   {d.apps.length} applications · {fmtN(totalSessions)} sessions ·{" "}
                   {activeProblems} active problems
+                  {envAlerts.length > 0 && (
+                    <span title={`Active alerts scoped to the ENVIRONMENT itself — no single component owns them: ${envAlerts.slice(0, 8).join(" · ")}`}>
+                      {" "}· {envAlerts.length} environment alert{envAlerts.length > 1 ? "s" : ""}
+                    </span>
+                  )}
                 </span>
               )}
               {!d.loading && d.apps.length > 0 && (
@@ -268,25 +312,23 @@ export function App() {
                   // in-app Journey view
                   const a = d.apps.find((x) => x.appId === current);
                   if (intentsAvailable() && a) {
-                    openIntent(sessionsLink(tf, a.name,
+                    openIntent(sessionsLink(tf, feNames?.get(a.entity ?? "") ?? a.name,
                       uxMap?.get(current)?.sessions ?? a.sessions));
                   } else { setAppId(current); set({ tab: "flow", sel: null }); }
                 }} />
             </Boundary>
           )}
 
-          {tab === "flow" && (
+          {tab === "flow" && !jd && (
+            <div className="loading"><i />mining the journeys…</div>
+          )}
+          {tab === "flow" && jd && (
             <div className="stack">
-              <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={current || null}
-                transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
+              <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={jd.sequences} appId={current || null}
+                transitions={jd.transitions} friction={jd.friction} views={jd.views} ux={uxMap}
                 tf={tf}
                 cohort={state.coh === "unconverted" ? "unconverted" : null}
                 onCohortConsumed={() => set({ coh: null }, false)}
-                ticket={Number(state.tkt) > 0 ? Number(state.tkt) : null}
-                sym={state.cur ?? "$"}
-                outcomeDefs={outcome.defs}
-                onDefineOutcome={(views) => { if (current) void outcome.save(current, views); }}
-                onClearOutcome={() => { if (current) void outcome.clear(current); }}
                 onBizScope={(picks) => set({ tab: "report", rt: picks.join("\t") })}
                 onPickApp={(id) => { setAppId(id); }}
                 onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
@@ -299,26 +341,29 @@ export function App() {
                 sel={state.sel} onSel={(v) => set({ sel: v })}
                 highlight={state.hl === "anomalies" ? "anomalies" : null}
                 onHighlightClear={() => set({ hl: null }, false)} />
-              {/* the chain draws WHERE the request goes; this says where its
-                  TIME goes, in the same technical vocabulary */}
-              <TechPanel rows={tech}
-                appName={d.apps.find((a) => a.appId === current)?.name ?? ""}
-                isMobile={d.apps.find((a) => a.appId === current)?.entity
-                  ?.startsWith("MOBILE_APPLICATION-")} />
             </Boundary>
           )}
+          {tab === "report" && !jd && (
+            <div className="loading"><i />mining the journeys…</div>
+          )}
+          {/* MOUNTED even while journeys mine — hidden. Gating the mount on
+              jd serialised the board: 2.9s of journeys THEN 3.3s of its own
+              KPI scans (measured, 6.2s total). Mounted hidden, both waves
+              run in parallel and the board appears in the slower one. */}
           {tab === "report" && (
+            <div style={jd ? undefined : { display: "none" }}>
             <Boundary label="Report">
-              <ReportView data={d} scopeApp={current} outcomeDefs={outcome.defs}
+              <ReportView data={{ ...d, views: jd?.views ?? [], sequences: jd?.sequences ?? [],
+                  transitions: jd?.transitions ?? [], friction: jd?.friction ?? [] }} scopeApp={current}
+                onRoutePicks={(picks) => set({ rt: picks.length ? picks.join("\t") : null }, false)}
                 routePicks={state.rt ? state.rt.split("\t").filter(Boolean) : null}
                 onClearRoutes={() => set({ rt: null }, false)}
-                ticket={state.tkt ?? ""} sym={state.cur ?? "$"}
-                onTicket={(t, cu) => set({ tkt: t || null, cur: cu === "$" ? null : cu }, false)}
                 cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}
                 onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null,
                   hl: t === "chain" ? (hl ?? null) : null,
                   coh: t === "flow" ? (hl ?? null) : null })} />
             </Boundary>
+            </div>
           )}
         </>
       )}
@@ -329,50 +374,3 @@ export function App() {
   );
 }
 
-/**
- * The running scan cost of the window on screen.
- *
- * It counts what the app actually read, so a revisit that hits the cache adds
- * nothing and says so. The money is an aside, not the headline: the bytes are
- * the measured fact, the rate belongs to a contract.
- */
-function ScanBadge({ tf }: { tf: Timeframe }) {
-  const [, force] = useState(0);
-  useEffect(() => subscribeScan(() => force((n) => n + 1)), []);
-  useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
-  const { bytes, queries, truncated, trace, inFlight } = scanTotals();
-  if (!queries && !inFlight) return null;
-  // truncation outranks cost: a partial answer is a correctness problem, not
-  // an expense. 100 GB is roughly two cold tours of a two-hour window here.
-  const tone = truncated > 0 || bytes >= 2.5e11 ? "bad" : bytes >= 1e11 ? "warn" : "ok";
-  /* THE READOUT. One bar per query, its height what that query read — square
-   * roots, because a page load mixes 40 GB scans with 40 MB ones and a linear
-   * scale would draw the small ones as nothing. A truncated query is red: the
-   * bar IS the evidence, pointable. */
-  const peak = Math.max(...trace.map((t) => t.bytes), 1);
-  return (
-    <span className={`scanb scanb--${tone}${inFlight ? " scanb--live" : ""}`}
-      title={`This window has scanned ${fmtBytes(bytes)} of Grail across ${queries} `
-        + `quer${queries === 1 ? "y" : "ies"} — about ${fmtMoney(bytes)} at the DPS list `
-        + "rate for querying Grail ($0.0035 per GiB; your contract may differ).\n\n"
-        + (truncated > 0
-          ? `INCOMPLETE: Grail stopped ${truncated} of them at its 500 GB scan limit, `
-            + "so figures on this window are computed from part of the data. Narrow the "
-            + "window — or the application — for numbers that are whole.\n\n"
-          : "")
-        + "Each bar is one query, its height what that query read.\n\n"
-        + "Grail charges what a query READS, and the window is linear: a 24-hour "
-        + "window costs about 12× a 2-hour one, whatever the filters. Revisiting a "
-        + "screen in the same window is free — it reads the cache, not Grail."}>
-      <i className="scanb__led" aria-hidden="true" />
-      <span className="scanb__trace" aria-hidden="true">
-        {trace.map((t, i) => (
-          <i key={i} className={t.cut ? "scanb__b scanb__b--cut" : "scanb__b"}
-            style={{ height: `${Math.max(12, Math.sqrt(t.bytes / peak) * 100)}%` }} />
-        ))}
-      </span>
-      <b className="scanb__n num">{fmtBytes(bytes)}</b>
-      {truncated > 0 && <em className="scanb__cut">partial</em>}
-    </span>
-  );
-}

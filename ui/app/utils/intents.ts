@@ -45,6 +45,14 @@ const INTENTS: Partial<Record<Capability, Record<string, IntentRef>>> = {
     "dynatrace.infraops": { intentId: "view_host", source: "verified" },
     "dynatrace.classic.hosts": { intentId: "view-host", source: "verified" },
   },
+  processes: {
+    // Read off this tenant's registry (2026-08-25): view_process declares
+    // the same shape as the verified view_host pair (meId required). With no
+    // entry here the process route named no action and every click landed on
+    // the "Open with…" chooser — the reader's screenshot.
+    "dynatrace.infraops": { intentId: "view_process", source: "verified" },
+    "dynatrace.classic.technologies": { intentId: "view-process-group-instance", source: "verified" },
+  },
   logs: {
     // snake_case here, kebab-case in every neighbouring app. Not guessable.
     "dynatrace.logs": { intentId: "view_query", source: "verified" },

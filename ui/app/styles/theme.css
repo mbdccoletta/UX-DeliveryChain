@@ -1,4 +1,4 @@
-/* DeliveryChain UX — operations terminal.
+/* UX Delivery Chain — operations terminal.
    Strato tokens (--dt-*) with literal fallbacks, so the app inherits the
    platform theme and still renders if Strato CSS has not loaded. */
 :root {
@@ -9,7 +9,7 @@
   --panel:    var(--dt-colors-background-surface-default, color-mix(in srgb, var(--ink-hi) 3%, transparent));
   --panel-2:  var(--dt-colors-background-container-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
   --border:   var(--dt-colors-border-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
-  --border-2: color-mix(in srgb, var(--ink-hi) 16%, transparent);
+  --border-2: var(--dt-colors-border-neutral-accent, color-mix(in srgb, var(--ink-hi) 16%, transparent));
   --ink:      var(--dt-colors-text-neutral-default, #e2e8f0);
   --ink-2:    var(--dt-colors-text-neutral-subdued, #94a3b8);
   --ink-3:    var(--dt-colors-text-neutral-disabled, #64748b);
@@ -58,12 +58,21 @@
   --tint: #ffffff; --tint-2: #f1f5f9;
   --ink-hi: #0f172a;
   /* Pulse light mode: slate-on-white, same hue families one shade darker. */
-  --bg: #f8fafc; --panel: rgba(0, 0, 0, 0.02); --panel-2: rgba(0, 0, 0, 0.04);
-  --border: rgba(0, 0, 0, 0.06); --border-2: rgba(0, 0, 0, 0.18);
+  /* Bound to the SAME Strato tokens the dark block reads. Strato already
+     flips them per theme, so hard-coding light hexes here meant the app
+     ignored the platform's own palette exactly where it was mounted inside
+     it. The hexes stay as the standalone-dev fallback, nothing more. */
+  --bg:       var(--dt-colors-background-base-default, #f8fafc);
+  --panel:    var(--dt-colors-background-surface-default, rgba(0, 0, 0, 0.02));
+  --panel-2:  var(--dt-colors-background-container-neutral-default, rgba(0, 0, 0, 0.04));
+  --border:   var(--dt-colors-border-neutral-default, rgba(0, 0, 0, 0.06));
+  --border-2: var(--dt-colors-border-neutral-accent, rgba(0, 0, 0, 0.18));
   /* Tertiary ink one step darker than the dark theme's: #94a3b8 is a fine
      hint on near-black and a whisper on white — measured on the chain's
      column captions ("194 SESSIONS"), which lost their legibility. */
-  --ink: #0f172a; --ink-2: #475569; --ink-3: #64748b;
+  --ink:   var(--dt-colors-text-neutral-default, #0f172a);
+  --ink-2: var(--dt-colors-text-neutral-subdued, #475569);
+  --ink-3: var(--dt-colors-text-neutral-disabled, #64748b);
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
   --good: var(--dt-colors-text-success-default, #3d8a83);
@@ -195,7 +204,9 @@ svg { shape-rendering: geometricPrecision; }
 @keyframes blip { 50% { opacity: 0.25; transform: scale(1.6); } }
 
 /* flow (sankey) */
-.flow-shell { height: clamp(360px, calc(100vh - 240px), 860px); padding: 0; overflow: hidden;
+.flow-shell { height: clamp(360px,
+    max(calc(100vh - 240px), calc(var(--flow-rows, 10) * 34px + 96px)),
+    1500px); padding: 0; overflow: hidden;
               display: flex; flex-direction: column; }
 .flow-shell canvas { display: block; width: 100%; flex: 1; min-height: 0; }
 
@@ -232,20 +243,80 @@ svg { shape-rendering: geometricPrecision; }
 .rinfo { position: absolute; inset: 0; margin: auto; width: min(1040px, 94vw);
   max-height: 92vh; overflow-y: auto; display: flex; flex-direction: column;
   gap: 18px; padding: 26px 30px 20px; border-radius: 18px;
-  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 14%, var(--tint)),
-    color-mix(in srgb, var(--accent) 5%, #0d0d1f));
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-2));
+  /* Dynatrace surface, not a mood: the poster wore a blue gradient of its
+     own and the reader vetoed it — the modal now sits on the platform's
+     surface token, opaque, with a neutral border. Colour stays semantic. */
+  background: var(--dt-colors-background-surface-default, var(--bg));
+  border: 1px solid var(--border-2);
   box-shadow: 0 30px 80px -20px rgba(0,0,0,0.7), inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 8%, transparent);
   animation: rinfoin 260ms var(--ease); }
 @keyframes rinfoin { from { transform: translateY(14px) scale(0.985); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .rinfo { animation: none; } }
+/* The journeys under analysis get their own full-width band under the header
+   rather than a narrow column beside it. A poster of percentages must answer
+   "percentages of WHAT" without the reader hunting for a small panel — so the
+   band is labelled, spans the width, and prints every journey in full. */
 .rinfo__hd { display: grid; grid-template-columns: 1fr auto; grid-template-areas:
-  "eye x" "path x" "cohort x"; column-gap: 16px; row-gap: 6px; align-items: start; }
+  "eye x" "path x" "cohort x" "mini mini"; column-gap: 16px; row-gap: 6px;
+  align-items: start; }
+/* the mini flow: what is being evaluated, as a shape. It sits beside the
+   title because that is the first question a poster of percentages raises —
+   percentages OF WHAT — and a string of arrows in a heading answers it more
+   slowly than three boxes do. */
+.rinfo__mini { grid-area: mini; justify-self: stretch; margin-top: 6px;
+  display: flex; flex-flow: row wrap; align-items: center; gap: 7px 9px;
+  padding: 10px 14px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.rinfo__mini-l { flex-basis: 100%; font: 700 10px var(--mono); letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--accent); }
+/* the mini sankey: node, band, label — the poster's subject is a flow, so it
+   is drawn as one rather than spelled as a row of pills */
+.rinfo__msk { display: block; width: 100%; overflow: visible; }
+.rinfo__msk-n { fill: color-mix(in srgb, var(--accent) 75%, transparent); }
+.rinfo__msk-b { fill: color-mix(in srgb, var(--accent) 26%, transparent); }
+.rinfo__msk-t { fill: var(--ink-hi); font: 700 9px var(--mono); }
+.rinfo__mini--all .rinfo__msk-n { fill: color-mix(in srgb, var(--ink-3) 55%, transparent); }
+.rinfo__mini--all .rinfo__msk-b { fill: color-mix(in srgb, var(--ink-3) 22%, transparent); }
+.rinfo__mini--all .rinfo__msk-t { fill: var(--ink-2); }
+/* the sequence reads left to right, like the flow it came from: the steps sit
+   on one line and the arrow between them is the join */
+.rinfo__mini-r { display: inline-flex; align-items: center; gap: 7px; width: auto; }
+.rinfo__mini-seq { font-style: normal; font: 700 13px var(--mono);
+  color: color-mix(in srgb, var(--accent) 80%, transparent); line-height: 1; }
+.rinfo__mini-r b { flex: none; font: 700 9px var(--mono); color: var(--ink-3); }
+.rinfo__mini-n { font: 700 10px var(--mono); color: var(--ink-hi);
+  padding: 5px 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  /* the route is the subject: it wraps rather than being cut */
+  overflow-wrap: anywhere; white-space: normal; line-height: 1.5; }
+.rinfo__mini-a { width: 16px; height: 2px; flex: none; position: relative;
+  background: color-mix(in srgb, var(--accent) 65%, transparent); }
+.rinfo__mini-a::after { content: ""; position: absolute; right: -1px; top: -3px;
+  border-left: 6px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+.rinfo__mini-c { flex-basis: 100%; font: 400 10px var(--mono); font-style: normal;
+  color: var(--ink-3); letter-spacing: 0.04em; }
+/* nothing picked: the shape is generic, and wears it */
+.rinfo__mini--all .rinfo__mini-n { color: var(--ink-2); border-style: dashed;
+  border-color: var(--border-2); background: none; }
+.rinfo__mini--all .rinfo__mini-a,
+.rinfo__mini--all .rinfo__mini-a::after { opacity: 0.5; }
+/* narrow poster: the shape keeps its place in the reading order but stops
+   competing with the title for the same line */
+@media (max-width: 900px) {
+  .rinfo__hd { grid-template-columns: 1fr auto;
+    grid-template-areas: "eye x" "path x" "cohort x" "mini mini"; }
+  .rinfo__mini { justify-self: stretch; max-width: none; }
+  .rinfo__mini-c { text-align: left; }
+}
 .rinfo__hd .drawer__x { grid-area: x; }
 .rinfo__eyebrow { grid-area: eye; font: 700 10px var(--mono); letter-spacing: 0.16em;
   color: var(--accent); }
 .rinfo__path { grid-area: path; margin: 0; font: 700 22px var(--sans); color: var(--ink-hi);
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  overflow-wrap: anywhere; }
 .rinfo__arrow { font-style: normal; color: color-mix(in srgb, var(--accent) 80%, var(--ink-hi)); }
 .rinfo__cohort { grid-area: cohort; display: flex; align-items: baseline; gap: 10px;
   font: 500 12px var(--mono); color: var(--ink-2); }
@@ -381,7 +452,14 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .side .chain__node { font-size: 12px; padding: 4px 9px; }
 
 /* pan + zoom stage (Smartscape-like) */
-.stage { position: relative; overflow: auto; cursor: grab; touch-action: none; }
+/* panning surface: the bar is noise on a stage that drags — auto-fit keeps
+   the content inside, and when someone zooms past it the hand does the moving */
+/* Panning here is TRANSFORM-based (usePanZoom moves x/y), so the stage never
+   needed scrolling at all — `overflow: auto` was legacy, and it manufactured
+   phantom scroll extent: a canvas scaled to fit still keeps its untransformed
+   layout box (measured: 1,204px in an 803px stage → 401px of scrollable void
+   at every zoom level). Hidden, the void is gone with nothing to hide. */
+.stage { position: relative; overflow: hidden; cursor: grab; touch-action: none; }
 .stage.dragging { cursor: grabbing; }
 .stage__canvas { position: relative; transform-origin: 0 0; width: max-content; }
 .stage__canvas.glide { transition: transform 420ms var(--ease); }
@@ -509,7 +587,10 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 
 /* executive report */
 /* ── Business Control: a C-level board — hero number per front, trend, support ── */
-.bc { gap: 16px; }
+/* Content-capped: on an ultrawide monitor the board keeps a readable measure
+   and honest margins instead of stretching cards into flat slabs with a void
+   under the shortest column. */
+.bc { gap: 16px; max-width: 1240px; margin-inline: auto; }
 .bc__bar { display: flex; align-items: center; gap: 12px; padding: 4px 2px; flex-wrap: wrap; }
 .bc__ticket { display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--mono);
   color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--border-2);
@@ -556,8 +637,17 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__hero-t em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
 .bc__hero-s { font: 400 12px var(--mono); color: var(--ink-2); margin-top: 6px; }
 /* the support row: four compact stats */
+/* The stats grid used to inherit the hero's full height and STRETCH its rows
+   into it: on a wide window each card became a tall box that was two-thirds
+   hole, and the full-width bands (entry, biggest loss) read as empty slabs.
+   Rows now take their natural height and the leftover space stays at the
+   bottom, invisible, instead of being distributed as padding nobody asked
+   for. The column cap keeps cards from gaining absurd widths on ultrawide. */
 .bc__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px; }
+  gap: 10px; align-content: start; grid-auto-rows: min-content; }
+/* The 3-column cap at 1500px was mine and it manufactured holes: four brand
+   cards became 3+1 with two empty slots. The max-width above already stops
+   ultrawide bloat, so auto-fit is free to pack the row. */
 .bc__stat { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
   border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
 .bc__stat--load { min-height: 110px; }
@@ -605,18 +695,402 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
 .bc__cost-verdict b { font-size: 22px; color: var(--bad); }
 .bc__cost-verdict em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
-/* what the route is worth — the poster's business strip */
-.rinfo__worth { border: 1px solid color-mix(in srgb, var(--t-cyan) 40%, var(--border));
-  background: color-mix(in srgb, var(--t-cyan) 7%, transparent);
+/* defining the conversion journey — a declared mode, not a hidden button.
+   The entry point lives in the flow header and states what it is for; while
+   it is on, the bar below says what the app is waiting for and what will be
+   stored, and colour marks the whole thing as an editing state. */
+.flow-def { margin-left: 0; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--good) 70%, var(--border));
+  background: color-mix(in srgb, var(--good) 16%, transparent);
+  border-radius: 8px; padding: 7px 14px;
+  font: 700 10px var(--mono); letter-spacing: 0.08em; color: var(--good); }
+.flow-def:hover { background: color-mix(in srgb, var(--good) 26%, transparent);
+  color: var(--ink-hi); }
+/* the two steps of the process, lit as you move through them */
+.flow-def-step { font: 700 9px var(--mono); letter-spacing: 0.1em; padding: 3px 8px;
+  border-radius: 999px; border: 1px solid var(--border-2); color: var(--ink-3); }
+.flow-def-step--now { border-color: var(--good); color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent); }
+.flow-def--on { border-style: solid; color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--border));
+  background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.flow-def-bar { border-left: 3px solid var(--good) !important;
+  background: color-mix(in srgb, var(--good) 8%, transparent) !important;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.flow-def-bar__l { font: 700 9px var(--mono); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--good); }
+.flow-def-bar__h { font: 400 11px var(--mono); color: var(--ink-2); }
+.flow-def-bar__h b { color: var(--ink-hi); }
+.flow-def-bar__h--no { color: var(--warn); }
+.flow-sel__no { flex-basis: 100%; font: 400 11px var(--mono); color: var(--warn);
+  line-height: 1.45; }
+.flow-def-list { flex-basis: 100%; margin-top: 4px; }
+.flow-def-list .cdefs { margin: 0; }
+.flow-sel__b:disabled { opacity: 0.45; cursor: not-allowed; }
+.bc__scoped-none { flex-basis: 100%; font: 400 11px var(--mono); color: var(--warn);
+  line-height: 1.5; }
+/* what changed — the deltas the board already had both windows for */
+.bc__chg { margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  display: flex; flex-direction: column; gap: 7px; }
+.bc__chg-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__chg-rows { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.bc__chg-r { display: inline-flex; align-items: baseline; gap: 6px;
+  font: 400 11px var(--mono); color: var(--ink-2); }
+.bc__chg-r i { font-style: normal; color: var(--good); font-size: 10px; }
+.bc__chg-r b.num { font-size: 14px; color: var(--good); font-variant-numeric: tabular-nums; }
+.bc__chg-r em { font-style: normal; color: var(--ink-3); font-size: 10px; }
+.bc__chg-r--bad i, .bc__chg-r--bad b.num { color: var(--bad); }
+/* where they come in decides how far they go — the two ends of a journey,
+   crossed: best entry against worst, with the spread named */
+.bc__entry { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--good) 34%, var(--border));
+  background: color-mix(in srgb, var(--good) 7%, transparent); }
+.bc__entry-l { font: 700 9px var(--mono); letter-spacing: .11em; text-transform: uppercase;
+  color: var(--good); }
+.bc__entry-r { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.bc__entry-w { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bc__entry-w b.num { font: 700 12px var(--mono); color: var(--good);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__entry-w em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3); }
+.bc__entry-w--bad b.num { color: var(--bad); }
+.bc__entry-x { font: 700 10px var(--mono); font-style: normal; color: var(--ink-2);
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-2); white-space: nowrap; }
+.bc__entry-ft { font: 400 10.5px var(--mono); color: var(--ink-3); line-height: 1.5; }
+/* the funnel as rows — each row a sentence with its own bar; the loss between
+   rows is written where it happens, with the screen responsible named */
+.bc__fun { margin-top: 14px; display: flex; flex-direction: column; gap: 3px; }
+.bc__fun-r { display: grid; grid-template-columns: minmax(0, 7.2rem) 1fr auto auto;
+  align-items: center; gap: 9px; }
+.bc__fun-l { font: 500 10.5px var(--mono); color: var(--ink-2); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.bc__fun-t { height: 13px; border-radius: 3px;
+  background: color-mix(in srgb, var(--ink-hi) 5%, transparent); }
+.bc__fun-b { display: block; height: 100%; border-radius: 3px;
+  background: color-mix(in srgb, var(--ink-hi) 30%, transparent); }
+.bc__fun-b--goal { background: color-mix(in srgb, var(--good) 80%, transparent); }
+.bc__fun-r b.num { font: 700 11.5px var(--mono); color: var(--ink-hi);
+  font-variant-numeric: tabular-nums; }
+.bc__fun-r em.num { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  min-width: 2.8rem; text-align: right; }
+.bc__fun-d { font: 400 10px var(--mono); color: var(--ink-3); padding: 1px 0 1px 7.9rem; }
+.bc__fun-d--worst { color: var(--warn); font-weight: 700; }
+.bc__fun-d b { color: var(--warn); }
+/* the busiest sequences — the pages in the order people walk them. As a grid
+   cell it fills the void beside the short cards instead of stretching the
+   hero into the tallest column on the page. */
+.bc__seqs { margin-top: 14px; display: flex; flex-direction: column; gap: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 11px; }
+.bc__seqs--cell { grid-column: 1 / -1; margin-top: 0; border-top: none; padding: 12px 14px;
+  border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+.bc__seqs-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__seqs-r { display: flex; align-items: baseline; gap: 8px; font: 400 10.5px var(--mono);
+  color: var(--ink-2); }
+.bc__seqs-r b.num { flex: none; min-width: 2.6rem; text-align: right;
+  font: 700 11px var(--mono); color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+.bc__seqs-p { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.bc__seqs-p i { font-style: normal; color: var(--ink-3); padding: 0 3px; }
+.bc__seqs-r em { flex: none; font: 700 9.5px var(--mono); font-style: normal;
+  color: var(--good); white-space: nowrap; }
+.bc__seqs-r--done .bc__seqs-p { color: var(--ink); }
+.bc__seqs-go { align-self: flex-start; background: none; border: none; cursor: pointer;
+  padding: 2px 0; font: 700 10px var(--mono); color: var(--accent); }
+.bc__seqs-go:hover { text-decoration: underline; }
+/* the biggest single loss, sized in the board's own unit */
+.bc__loss { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 10px; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--border));
+  background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.bc__loss-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--warn); }
+.bc__loss b.num { font: 700 12px var(--mono); color: var(--ink-hi); }
+.bc__loss-v { flex-basis: 100%; font: 400 11px var(--mono); color: var(--ink-2); line-height: 1.5; }
+.bc__loss-v b { color: var(--warn); }
+/* what stands out as slow — ranked by deviation, not by traffic */
+.bc__out { display: flex; flex-direction: column; gap: 7px; }
+.bc__out-r { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px;
+  align-items: baseline; padding: 8px 11px; border-radius: 9px;
+  border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 55%, transparent); }
+.bc__out-n { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__out-r b { font: 700 15px var(--mono); color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+.bc__out-x { font: 700 10px var(--mono); font-style: normal; color: var(--warn); white-space: nowrap; }
+.bc__out-x--bad { color: var(--bad); }
+.bc__out-r em { grid-column: 1 / -1; font: 400 10px var(--mono); font-style: normal;
+  color: var(--ink-3); }
+.bc__out-bar { grid-column: 1 / -1; height: 5px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink-hi) 7%, transparent); }
+.bc__out-bar i { display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--warn) 55%, transparent), var(--bad)); }
+.bc__out-ft { display: block; margin-top: 9px; font: 400 10.5px var(--mono);
+  color: var(--ink-3); line-height: 1.5; }
+/* the stop verdict — the join between where sessions end and how those screens
+   perform, stated as a conclusion rather than left for the reader to infer */
+.rinfo__stopv { margin: 9px 0 2px; padding: 9px 12px; border-radius: 9px;
+  font: 400 11.5px var(--mono); line-height: 1.55; color: var(--ink-2);
+  border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border));
+  background: color-mix(in srgb, var(--good) 8%, transparent); }
+.rinfo__stopv b { color: var(--good); font-weight: 700; }
+.rinfo__stopv--tech { border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.rinfo__stopv--tech b { color: var(--warn); }
+/* traffic as one instrument: volume, the failing share against it, the rate */
+.trf { margin: 8px 0 2px; display: flex; flex-direction: column; gap: 7px; }
+.trf__top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.trf__top b { font: 700 26px var(--mono); color: var(--ink-hi); line-height: 1;
+  font-variant-numeric: tabular-nums; }
+.trf__top span { font: 400 10px var(--mono); color: var(--ink-3); letter-spacing: .06em; }
+.trf__top em { margin-left: auto; font: 700 11px var(--mono); font-style: normal; }
+.trf__bar { position: relative; height: 7px; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--panel); }
+.trf__ok { position: absolute; inset: 0;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--good) 55%, transparent),
+    color-mix(in srgb, var(--good) 22%, transparent)); }
+.trf__no { position: absolute; right: 0; top: 0; bottom: 0; }
+/* the latency ladder — three percentiles on one logarithmic rail, so the tail
+   reads as distance instead of as three tidy numbers */
+.lad { margin: 10px 0 4px; display: flex; flex-direction: column; gap: 9px; }
+.lad__rail { position: relative; height: 8px; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--ink-hi) 6%, transparent),
+    color-mix(in srgb, var(--ink-hi) 12%, transparent));
+  border: 1px solid var(--border); }
+.lad__fill { position: absolute; top: -1px; bottom: -1px; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--t-cyan) 45%, transparent),
+    color-mix(in srgb, var(--bad) 55%, transparent)); }
+.lad__tick { position: absolute; top: -4px; width: 2px; height: 16px; border-radius: 1px;
+  box-shadow: 0 0 6px currentColor; }
+.lad__legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px;
+  font: 400 10px var(--mono); color: var(--ink-3); }
+.lad__legend span { display: inline-flex; align-items: center; gap: 5px; }
+.lad__legend i { width: 7px; height: 7px; border-radius: 2px; }
+.lad__legend b { color: var(--ink-hi); font-size: 11px; }
+.lad__tail { flex-basis: 100%; font-style: normal; color: var(--warn); }
+.lad__tail--bad { color: var(--bad); }
+/* the defined conversion journeys — one list, mounted on the board and on
+   the poster. Rows are filters where filtering means something (the board)
+   and plain statements where it does not (the poster). */
+.cdefs { display: flex; flex-direction: column; gap: 6px; margin: -6px 0 12px;
+  padding: 9px 12px; border-radius: 9px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 45%, transparent); }
+.cdefs__l { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; gap: 8px; align-items: baseline; }
+.cdefs__l em { font-style: normal; letter-spacing: 0.04em; color: var(--ink-2); }
+.cdefs__none { font: 400 11px var(--mono); color: var(--warn); }
+.cdefs__l--btn { background: none; border: none; cursor: pointer; padding: 0;
+  text-align: left; }
+.cdefs__l--btn i { font-style: normal; color: var(--ink-3); }
+.cdefs__l--btn:hover em, .cdefs__l--btn:hover i { color: var(--ink-hi); }
+.cdefs__hint { font: 400 10px var(--mono); color: var(--ink-3); margin-left: auto; }
+.cdefs__no { flex: none; width: 18px; text-align: right; font: 700 10px var(--mono);
+  color: var(--ink-3); }
+.cdefs__rows { display: flex; flex-direction: column; gap: 3px; }
+.cdefs__r { display: flex; align-items: center; gap: 6px; border-radius: 8px;
+  padding: 3px 4px 3px 0; }
+.cdefs__r--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cdefs__p { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 5px; background: none; border: none; text-align: left; cursor: pointer;
+  padding: 4px 8px; border-radius: 8px; font: 500 10px var(--mono); color: var(--ink-2); }
+.cdefs__p:disabled { cursor: default; }
+.cdefs__p:not(:disabled):hover { background: color-mix(in srgb, var(--ink-hi) 8%, transparent); }
+.cdefs__p i { font-style: normal; color: var(--ink-3); }
+.cdefs__goal { color: var(--good); font-weight: 700; }
+.cdefs__a { background: none; border: 1px solid var(--border-2); border-radius: 999px;
+  cursor: pointer; padding: 3px 9px; font: 700 9px var(--mono); color: var(--ink-3); }
+.cdefs__a:hover { color: var(--ink-hi); border-color: var(--accent); }
+.cdefs__a--x:hover { color: var(--bad); border-color: var(--bad); }
+.cdefs__ft { display: flex; gap: 10px; }
+.cdefs__add { background: none; border: none; cursor: pointer; padding: 2px 0;
+  font: 700 10px var(--mono); color: var(--accent); }
+/* the START of the process, weighted like the action it is */
+.cdefs__start { cursor: pointer; padding: 8px 14px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--good) 70%, var(--border));
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  font: 700 10px var(--mono); letter-spacing: 0.06em; color: var(--good); }
+.cdefs__start:hover { background: color-mix(in srgb, var(--good) 30%, transparent);
+  color: var(--ink-hi); }
+.cdefs__add:hover { text-decoration: underline; }
+/* on the poster it is a statement, not a control surface */
+.cdefs--ro { margin: 8px 0 0; background: none; border-color: var(--border-2); }
+.cdefs--ro .cdefs__p { padding-left: 0; }
+/* the saved journeys, offered back as filters on the board. Authored one at
+   a time on Journeys; combined many at a time here. */
+.bc__jf { display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: -6px 0 12px; padding: 7px 12px; border-radius: 9px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 45%, transparent); }
+.bc__jf-l { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-3); margin-right: 4px; }
+.bc__jf-c { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.bc__jf-c button { background: none; border: none; cursor: pointer; padding: 4px 4px 4px 10px;
+  font: 500 10px var(--mono); color: var(--ink-2); }
+.bc__jf-c i { cursor: pointer; font-style: normal; padding: 4px 8px 4px 2px;
+  font-size: 9px; color: var(--ink-3); }
+.bc__jf-c i:hover { color: var(--bad); }
+.bc__jf-c--on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.bc__jf-c--on button { color: var(--ink-hi); font-weight: 700; }
+.bc__jf-clear { background: none; border: none; cursor: pointer; padding: 4px 6px;
+  font: 700 9px var(--mono); color: var(--accent); }
+/* where they stopped — the last screen of each session, with what happened
+   there. Amber marks a screen that is both over-represented in this cohort and
+   carrying errors: the place to look first. */
+.rinfo__stop { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__stop-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; }
+.rinfo__stop-rows { display: grid; gap: 2px; }
+.rinfo__stop-r { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto;
+  align-items: baseline; gap: 10px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.rinfo__stop-r:first-of-type { border-top: none; }
+.rinfo__stop-v { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__stop-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
+.rinfo__stop-x { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3); white-space: nowrap; }
+.rinfo__stop-x--odd { color: var(--warn); font-weight: 700; }
+.rinfo__stop-e { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  white-space: nowrap; text-align: right; }
+.rinfo__stop-e--bad { color: var(--bad); font-weight: 700; }
+.rinfo__stop-ft { display: block; margin-top: 8px; font: 400 10px var(--mono); color: var(--ink-3); }
+/* where they are — the route walked from a map. Same anatomy as the stops
+   block, but a NEUTRAL Dynatrace container (the reader vetoed the blue
+   tint): plain border, token surface, colour only where it means something —
+   the verdict line turns red only when a country concentrates the failures. */
+.rinfo__geo { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__geo-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.rinfo__geo-v { margin: 0 0 8px; font: 400 12px var(--mono); color: var(--ink-2); }
+.rinfo__geo-v b { color: var(--ink-hi); font-weight: 700; }
+.rinfo__geo-v--bad { color: var(--bad); }
+.rinfo__geo-v--bad b { color: var(--bad); }
+.rinfo__geo-rows { display: grid; gap: 2px; }
+.rinfo__geo-r { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto;
+  align-items: baseline; gap: 10px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.rinfo__geo-r:first-of-type { border-top: none; }
+.rinfo__geo-c { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__geo-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
+.rinfo__geo-x { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3); white-space: nowrap; }
+.rinfo__geo-x--odd { color: var(--ink-2); font-weight: 700; }
+.rinfo__geo-e { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  white-space: nowrap; text-align: right; }
+.rinfo__geo-e--bad { color: var(--bad); font-weight: 700; }
+
+/* what stands out — the poster's insight layer, above the evidence. Ranked
+   findings across every characteristic at once; the bars below became the
+   proof you open rather than the wall you scan. */
+.rinfo__so { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__so-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  color: var(--ink-3); margin-bottom: 8px; }
+.rinfo__so-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2px 18px; }
+.rinfo__so-r { display: grid; grid-template-columns: auto auto auto 1fr;
+  align-items: baseline; gap: 8px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.rinfo__so-r b { font: 700 12px var(--mono); color: var(--ink-hi);
+  max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__so-d { font: 400 9px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+.rinfo__so-r i { font: 700 10px var(--mono); font-style: normal; white-space: nowrap; }
+.rinfo__so-r--up i { color: var(--t-cyan); }
+.rinfo__so-r--dn i { color: var(--warn); }
+.rinfo__so-r em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  text-align: right; white-space: nowrap; }
+.rinfo__so-r em u { text-decoration: none; opacity: 0.6; }
+.rinfo__so-v { grid-column: 1 / -1; font: 400 10px var(--mono); color: var(--ink-2);
+  padding: 1px 0 2px; line-height: 1.45; }
+.rinfo__so-v u { text-decoration: none; color: var(--ink-3); }
+.rinfo__so-e { grid-column: 1 / -1; font: 400 10px var(--mono); color: var(--ink-3);
+  padding-bottom: 2px; line-height: 1.45; }
+.rinfo__so-e--bad { color: var(--bad); }
+.rinfo__so-none { font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+.rinfo__so-none b { color: var(--ink-hi); }
+/* the characteristics that match everyone, folded away but never deleted */
+.rinfo__fold { grid-column: 1 / -1; background: none; cursor: pointer;
+  border: 1px dashed var(--border-2); border-radius: 10px; padding: 9px 12px;
+  font: 400 11px var(--mono); color: var(--ink-3); }
+.rinfo__fold:hover { color: var(--ink); border-color: var(--accent); }
+/* what this board calls a conversion — stated above the number it governs.
+   Quiet by default (a taught definition is settled fact); the fallback wears
+   the amber of an assumption, because it is one. */
+.bc__rule { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+  margin: -2px 0 12px; padding: 7px 12px; border-radius: 9px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.bc__rule--taught { border-color: color-mix(in srgb, var(--good) 32%, var(--border)); }
+.bc__rule-k { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__rule-v { font: 400 11px var(--mono); color: var(--ink-2); }
+.bc__rule-v b { color: var(--ink-hi); font-weight: 700; }
+.bc__rule-v i { font-style: normal; color: var(--ink-3); }
+.bc__rule-v em { font-style: normal; color: var(--ink-3); }
+.bc__rule-src { font: 700 9px var(--mono); letter-spacing: 0.06em; color: var(--good);
+  margin-left: auto; white-space: nowrap; }
+.bc__rule-src--guess { color: var(--warn); }
+.bc__rule-go { background: none; border: none; padding: 0; cursor: pointer;
+  font: 700 10px var(--mono); color: var(--accent); white-space: nowrap; }
+.bc__rule-go:hover { text-decoration: underline; }
+/* what the route is worth — the poster's business strip. Neutral Dynatrace
+   container (the tinted section frames were vetoed with the blue poster):
+   the numbers carry the meaning, the frame carries nothing. */
+.rinfo__worth { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
   border-radius: 12px; padding: 12px 16px; }
 .rinfo__worth-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
-  color: var(--t-cyan); margin-bottom: 8px; }
+  color: var(--ink-3); margin-bottom: 8px; }
 .rinfo__worth-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px; }
 .rinfo__kpi--worth { border: none; background: none; padding: 0; }
-.rinfo__vit { border-color: color-mix(in srgb, var(--t-violet) 40%, var(--border));
-  background: color-mix(in srgb, var(--t-violet) 7%, transparent); }
-.rinfo__vit .rinfo__worth-l { color: var(--t-violet); }
+.rinfo__vit { border-color: var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent); }
+.rinfo__vit .rinfo__worth-l { color: var(--ink-3); }
+/* where conversion lives — and dies. Two columns, one verdict each: the
+   segments that beat the route's own conversion and the ones that lose to it.
+   Colour is the verdict, never identity — the same rule the rest obeys. */
+.rinfo__seg { border-color: color-mix(in srgb, var(--t-azure) 40%, var(--border));
+  background: color-mix(in srgb, var(--t-azure) 7%, transparent); }
+.rinfo__seg .rinfo__worth-l { color: var(--t-azure); }
+.rinfo__seg-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px; }
+.rinfo__seg-c { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.rinfo__seg-c h4 { margin: 0 0 6px; font: 700 9px var(--mono); letter-spacing: 0.12em;
+  text-transform: uppercase; }
+.rinfo__seg-c--up h4 { color: var(--good); }
+.rinfo__seg-c--dn h4 { color: var(--bad); }
+.rinfo__seg-r { display: grid; grid-template-columns: 1fr auto auto auto;
+  align-items: baseline; gap: 8px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.rinfo__seg-r:first-of-type { border-top: none; }
+.rinfo__seg-b { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__seg-b em { font-style: normal; font-weight: 400; font-size: 9px;
+  color: var(--ink-3); margin-left: 6px; letter-spacing: 0.06em; }
+.rinfo__seg-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
+.rinfo__seg-l--up, .rinfo__seg-l--dn { font: 700 10px var(--mono); font-style: normal;
+  white-space: nowrap; }
+.rinfo__seg-l--up { color: var(--good); }
+.rinfo__seg-l--dn { color: var(--bad); }
+.rinfo__seg-n { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  white-space: nowrap; }
+.rinfo__seg-none { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+.rinfo__seg-ft { display: block; margin-top: 8px; font: 400 10px var(--mono);
+  color: var(--ink-3); }
 /* "no page telemetry", unpacked */
 .ntel { width: min(660px, 92vw); max-height: 86vh; overflow-y: auto; margin: auto;
   background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px;
@@ -1014,12 +1488,14 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* ── The chain as a flat node graph, the app's one visual language: circles,
    thin flows, labels beneath — the Davis resolution-path idiom at full size.
    Neutral by default; colour appears exactly where a signal does. ── */
-.graph { user-select: none; display: flex; gap: 22px; padding: 22px 30px 46px; width: max-content;
+/* gaps and type scale with --gs: a sparse chain earns room, a dense one
+   keeps today's compactness untouched (--gs = 1) */
+.graph { user-select: none; display: flex; gap: calc(22px * var(--gs, 1)); padding: 22px 30px 46px; width: max-content;
          min-width: 100%; align-items: stretch; }
 /* Each layer stands on its own band: a quiet vertical panel that groups the
    column. Identity stays neutral; a Davis signal tints the whole band, so a
    sick LAYER is findable from across the room, not only a sick node. */
-.gcol { display: flex; flex-direction: column; min-width: 150px;
+.gcol { display: flex; flex-direction: column; min-width: 0;
         padding: 12px 12px 18px; border-radius: 14px;
         background: linear-gradient(180deg, var(--panel-2), transparent 65%);
         border: 1px solid var(--border); }
@@ -1037,23 +1513,39 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
             color: var(--ink-3); }
 .gcol__hd { border-bottom: 1px solid var(--border-2);
              padding-bottom: 7px; margin-bottom: 4px; }
-.gcol__hd b { font: 700 15px var(--mono); letter-spacing: 0.2em;
+.gcol__hd b { font: 700 calc(15px * var(--gs, 1)) var(--mono); letter-spacing: 0.2em;
               text-transform: uppercase; color: var(--ink); }
 .gcol__hd:hover b, .gcol__hd--on b { color: var(--accent); }
 .gcol--warn .gcol__hd { border-bottom-color: color-mix(in srgb, var(--warn) 55%, transparent); }
 .gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad) 60%, transparent); }
-.gcol__name { text-align: center; font: 500 10px var(--sans); color: var(--ink-2);
+/* the reader asked for legible column captions — up from 10px ink-2 the
+   layer names were furniture, not labels */
+.gcol__name { text-align: center; font: 600 12.5px var(--sans); color: var(--ink);
               margin-top: 2px; }
 .gcol__hd:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .gcol__ic { display: inline-flex; color: var(--ink-2); }
 .gcol__n { font: 700 12px var(--mono); color: var(--ink-2); }
-.gcol__sub { text-align: center; font: 500 10px var(--mono); letter-spacing: 0.08em;
-             text-transform: uppercase; color: var(--ink-3); margin: 1px 0 10px; }
+/* The column captions carry the layer's number, and the number leads: "841
+   traces", "394.3k requests". They used to run at a fixed size in a column
+   that compresses, so on a narrower window the caption spilled past its own
+   card and the LEADING DIGITS were the part that left the screen — the only
+   part worth reading. Now the caption shrinks with the column and, past the
+   point where shrinking would make it illegible, truncates from the TAIL:
+   the count survives, the word gives way. */
+.gcol__sub { text-align: center; letter-spacing: 0.06em;
+             font: 600 clamp(10px, 0.85vw, 11.5px) var(--mono);
+             text-transform: uppercase; color: var(--ink-2); margin: 1px 0 10px;
+             max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
 .gcol__nodes { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly;
-               align-items: center; gap: 12px; min-height: 540px; }
+               align-items: center; gap: 12px;
+               /* height from the densest column: ~96px per node, floor for
+                  one-node apps, the old 540px only as a lower bound when the
+                  estate is genuinely busy */
+               min-height: clamp(240px, calc(var(--chain-rows, 5) * 96px + 60px), 620px); }
 
 .gnode { display: flex; flex-direction: column; align-items: center; gap: 5px;
-         cursor: pointer; background: none; border: none; max-width: 150px;
+         cursor: pointer; background: none; border: none; max-width: calc(150px * var(--gs, 1));
          position: relative; z-index: 4; }
 .gnode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gnode__c { display: flex; align-items: center; justify-content: center;
@@ -1087,19 +1579,21 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* A line may route wherever it likes; it may never cross TEXT. The label sits
    above the edge layer on an opaque plate, so the rule holds by construction —
    no routing algorithm required to keep it. */
-.gnode__nm { font: 600 11px var(--mono); color: var(--ink); text-align: center;
+.gnode__nm { font: 600 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink); text-align: center;
              max-width: 148px; overflow: hidden; text-overflow: ellipsis;
              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
              background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-.gnode__v { font: 500 11px var(--mono); color: var(--ink-3); text-align: center;
+.gnode__v { font: 500 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink-3); text-align: center;
              background: var(--bg); padding: 0 5px; border-radius: 4px; }
 .gnode__fc { font-style: normal; color: var(--warn); }
 .gnode--more .gnode__nm { color: var(--ink-3); }
 
 @media (prefers-reduced-motion: reduce) { .gnode__c--bad { animation: none; } }
 
-.dcf-svg text { font: 600 10px var(--mono); fill: var(--ink-2); text-anchor: middle;
-                paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+/* edge labels ride the glowing flow lines, so they need weight and a thick
+   ground-halo to stay legible — the reader asked twice for bigger type here */
+.dcf-svg text { font: 700 12px var(--mono); fill: var(--ink-hi); text-anchor: middle;
+                paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 
 /* ── The entrance. Bands sweep left to right, the circuit draws itself, and
    the signal pops LAST — the sequence ends the eye on what matters. ── */
@@ -1168,6 +1662,9 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
             margin-right: 9px; vertical-align: 1px; flex: none; }
 
 /* ─── pulse: the landing page — one application, mission-control ─── */
+/* NOT pinned. Pinning this line was tried and it floated OVER the cards —
+   a third sticky layer is one too many. It scrolls with the content; the
+   pinned TitleBar's shadowed seam is what makes the pass-under read clean. */
 .pl-estate { display: flex; align-items: center; justify-content: space-between;
              font: 500 12px var(--mono); color: var(--ink-2); padding: 2px 2px 0; }
 .pl-link { background: none; border: none; cursor: pointer; color: var(--ink-3);
@@ -1374,11 +1871,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    One column standing for Serve→Cloud, each row a subject and the platform
    app that manages it. It is a DESTINATION LIST, not a graph — that is the
    point of the pivot. */
-.gcol--bsum { justify-content: flex-start; }
+.gcol--bsum { justify-content: flex-start;
+  /* the graph is width: max-content, so this column grew to its longest
+     child — one Spring service's aching name stretched the Backend across
+     the screen. The cap is what makes every ellipsis below actually clip. */
+  max-width: calc(320px * var(--gs, 1)); }
 /* above the mesh: the reader's screenshot had the trace line running OVER
    the rows' lettering — the block is a landing, not a road */
 .bsum { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 14px;
-  align-items: stretch; position: relative; z-index: 4; }
+  align-items: stretch; position: relative; z-index: 4; min-width: 0; }
+.bsum__row { min-width: 0; }
 .bsum__c { width: 34px; height: 34px; margin: 6px auto 10px; }
 /* Each row wears the ENTITY layout the rest of the chain speaks: the circled
    icon, the tone on its ring, the anomaly count on its shoulder — the same
@@ -1399,13 +1901,17 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bsum__ic { grid-area: ic; width: 28px; height: 28px; position: relative; }
 .bsum__sig { position: absolute; top: -6px; right: -8px; }
 .bsum__pb { font: 700 10px var(--mono); color: var(--bad); }
-.bsum__l { grid-area: l; font: 600 10px var(--mono); letter-spacing: 0.08em;
+.bsum__l { grid-area: l; font: 600 calc(10px * var(--gs, 1)) var(--mono); letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-2); }
-.bsum__v { grid-area: v; font: 700 15px var(--mono); color: var(--ink);
+.bsum__v { grid-area: v; font: 700 calc(15px * var(--gs, 1)) var(--mono); color: var(--ink);
   text-align: right; }
 .bsum__s { grid-area: s; font: 400 9px var(--mono); color: var(--ink-3);
   font-style: normal; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
+  white-space: nowrap;
+  /* a grid track grows to min-content, so one unbroken Spring service name
+     stretched the whole Backend column across the screen — min-width: 0 is
+     what lets the ellipsis actually clip */
+  min-width: 0; max-width: 100%; }
 /* the aching entity, named in the harm's own colour */
 .bsum__s--hurt { color: var(--bad); font-weight: 600; }
 .bsum__go { grid-area: go; font: 600 9px var(--mono); color: var(--accent);
@@ -2025,7 +2531,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    800: modules ended up mostly air, and the viewport's lower half stayed
    empty. Everything below scales the CARD, not the numbers' meaning — the
    same content, sized to the screen it is on. */
-@media (min-width: 1280px) {
+/* The wide layout enlarges everything — a 52px core, 30px figures, 116px
+   watermarks — and those sizes were tuned on a desktop display. At 1280 they
+   also caught 13" and 15" notebooks, where the same cards no longer fit the
+   viewport height and the lower one was clipped. Notebooks now keep the
+   compact layout; the enlargement waits for a screen that can hold it. */
+@media (min-width: 1600px) {
   /* the boxes grow into the vertical room instead of leaving it blank */
   .cc .tk-col { grid-template-rows: auto auto; gap: 16px; align-content: center; }
   .cc .tk-block { padding: 16px 22px; }
@@ -2239,3 +2750,281 @@ a.svcf__row { text-decoration: none; color: inherit; }
 }
 /* and the trigger itself, so the CHOSEN name is readable before opening */
 .ctl [class*="strato-select"] { min-width: 15rem; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STRATO ALIGNMENT LAYER — extracted from developer.dynatracelabs.com docs.
+   One place, appended last so it wins the cascade, deletable as one block.
+
+   The authoritative values (design/design-tokens):
+     Radius   surface 12px · container 9px · field 6px · pill 9999px
+     Type     text base: DynatraceFlow/Roboto · code: Roboto Mono 12px/1.333
+     Colors   already bound to --dt-colors-* in both theme blocks above.
+
+   What this layer does NOT touch: the canvas/SVG drawings (sankey, chain
+   ribbons, ladders) — Strato has no equivalent primitives, so they keep the
+   app's own hand. Mono stays for DATA (numbers, paths, captions), as the
+   platform's own code face; CONTROLS move to the text face, which is what
+   Strato buttons and inputs use. */
+:root {
+  --r-surface:   var(--dt-borders-radius-surface-default, 12px);
+  --r-container: var(--dt-borders-radius-container-default, 9px);
+  --r-field:     var(--dt-borders-radius-field-default, 6px);
+}
+
+/* ── Surfaces & containers: one radius vocabulary ─────────────────────── */
+.panel, .dcf-shell, .flow-shell, .ntel, .rinfo,
+.app-card, .tk-core { border-radius: var(--r-surface); }
+.bc__hero, .bc__stat, .kpi, .gcol, .bc__seqs--cell,
+.bc__out-r, .bc__entry, .bc__loss, .bc__chg, .bc__scoped, .bc__fc,
+.rinfo__worth, .rinfo__so, .rinfo__stop, .tech,
+.bc__rule, .bc__jf { border-radius: var(--r-container); }
+
+/* ── Controls: Strato fields — text face, field radius, one focus ring ── */
+.flow-sel__b, .seg button, .zoomctl button, .bc__scoped-x,
+.hlbar, .drawer__x, .tab, .bc__jf-clear, .cdefs__a, .cdefs__start,
+.bc__out-x-btn, .flow-def, .rest__teach {
+  font-family: var(--sans);
+  border-radius: var(--r-field);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.bc__ticket input, .bc__cov input, .bc__ticket select {
+  font-family: var(--sans);
+  border-radius: var(--r-field);
+}
+.flow-sel__b:focus-visible, .seg button:focus-visible,
+.zoomctl button:focus-visible, .tab:focus-visible,
+.bc__ticket input:focus-visible, .bc__cov input:focus-visible,
+.drawer__x:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* ── Code face at the platform's own metric: 12px / 1.333 ─────────────── */
+.bc__seqs-p, .cdefs__p, .dt td { font-size: 12px; line-height: 1.333; }
+
+
+/* ── The top chrome stays put ─────────────────────────────────────────────
+   The platform AppHeader and the page TitleBar scrolled away with the
+   content, so on a long board the tabs and the timeframe selector — the two
+   controls a reader needs MOST while deep in a page — were gone. Both are
+   pinned; the content scrolls beneath. The header keeps the page ground so
+   nothing bleeds through it, and the z-index sits above the diagrams' own
+   stacking contexts. */
+/* The TitleBar is NOT pinned. Measured: the platform reserves a ~45px slot
+   for PageLayout.Header while the TitleBar renders 57px — it has always
+   overflowed the slot by ~12px, invisibly, because it was transparent.
+   Pinning it added an opaque ground and z-index, which turned that silent
+   overflow into "eaten text" over the first content line. The platform tabs
+   above (the actual top menu) stay pinned by the rule below; the title
+   scrolls with the page, as the platform designed it to. */
+/* WHY THE MENUS DISAPPEARED AT ALL — measured 2026-08-25: the shell wraps
+   [header 32px, app column 100vh] in a plain div, so the page is 100vh+32
+   tall and the WINDOW scrolls exactly one menu-height before the app's own
+   scroller (main) even starts. No sticky needed: fit the pair to the
+   viewport and the window has nothing to scroll — tabs, TitleBar and the
+   selectors stay put, main scrolls beneath them, and nothing floats over
+   content (the two earlier sticky attempts both did). NOTE: :has() cannot
+   nest, which is how the first draft of this rule failed silently. */
+div:has(> header):has(main) {
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden;
+}
+div:has(> header):has(main) > div {
+  flex: 1; min-height: 0; height: auto !important;
+}
+
+
+/* access and health by location — share of traffic as the bar, the judgement
+   as the tone, against the application's own error share */
+.geo__rows { display: flex; flex-direction: column; gap: 5px; }
+/* the traffic light's rulebook: one quiet line, dots matching the map */
+.geo__rule {
+  margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.6;
+  color: var(--ink-3); letter-spacing: .02em;
+}
+.geo__rule i {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin: 0 3px 0 6px; vertical-align: baseline;
+}
+.geo__rule i:first-child { margin-left: 0; }
+.geo__r { display: grid; grid-template-columns: auto 2.1rem minmax(0, 6.5rem) 1fr auto minmax(5.6rem, auto) 3.4rem;
+  align-items: center; gap: 8px; }
+.geo__lat { font: 500 10px var(--mono); font-style: normal; text-align: right;
+  color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.geo__lat--good { color: var(--good); }
+.geo__lat--warn { color: var(--warn); }
+.geo__lat--bad { color: var(--bad); font-weight: 700; }
+.geo__nm { font: 400 10.5px var(--sans); color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.geo__cc { font: 700 12px var(--mono); color: var(--ink-hi); letter-spacing: .06em; }
+.geo__t { height: 9px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink-hi) 6%, transparent); }
+.geo__b { display: block; height: 100%; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.geo__n { font: 700 11px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.geo__h { font: 500 10px var(--mono); font-style: normal; text-align: right; white-space: nowrap; }
+.geo__h--good { color: var(--good); }
+.geo__h--warn { color: var(--warn); }
+.geo__h--bad { color: var(--bad); font-weight: 700; }
+
+/* map + legend, side by side like the platform's own geo tiles; the list IS
+   the legend — same colours, same judgement, ranked by volume */
+.geo__wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(19rem, 24rem);
+  gap: 16px; align-items: start; }
+@media (max-width: 900px) { .geo__wrap { grid-template-columns: 1fr; } }
+.geo__map > div { border-radius: var(--r-container); overflow: hidden; }
+.geo__dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+/* the geo drill — one country opened, its screens, and the platform hand-off */
+.geo__r { background: none; border: none; text-align: left; cursor: pointer;
+  border-radius: 7px; padding: 3px 6px; }
+.geo__r:hover { background: color-mix(in srgb, var(--ink-hi) 6%, transparent); }
+.geo__r--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.geo__drill { border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 9px; }
+.geo__drill-hd { display: flex; align-items: baseline; gap: 10px; }
+.geo__drill-hd b { font: 700 14px var(--mono); color: var(--ink-hi); letter-spacing: .08em; }
+.geo__drill-hd span { font: 400 10.5px var(--mono); color: var(--ink-3); }
+.geo__drill-x { margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--ink-3); font-size: 12px; }
+.geo__drill-x:hover { color: var(--ink-hi); }
+.geo__drill-rows { display: flex; flex-direction: column; gap: 4px; }
+.geo__dr { display: grid; grid-template-columns: minmax(0, 18rem) 1fr auto minmax(5rem, auto);
+  align-items: center; gap: 10px; }
+.geo__dr-v { font: 500 11px var(--mono); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.geo__dr b.num { font: 700 11px var(--mono); font-variant-numeric: tabular-nums; }
+.geo__drill-none { font: 400 11px var(--mono); color: var(--ink-3); }
+.geo__drill-go { align-self: flex-start; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: var(--r-field, 6px); padding: 7px 14px;
+  font: 700 11px var(--sans); color: var(--accent); }
+.geo__drill-go:hover { background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--ink-hi); }
+/* the target picker — siblings of the layer as chips, aching first: the
+   reader chooses WHO to investigate right where the routes live */
+.tpick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 2px 0 10px; }
+.tpick__l { font: 700 9px var(--mono); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-3); margin-right: 2px; }
+.tpick__c { display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 9999px; cursor: pointer;
+  border: 1px solid var(--border); background: none;
+  font: 500 10.5px var(--mono); color: var(--ink-2); }
+.tpick__c i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
+.tpick__c--warn i { background: var(--warn); }
+.tpick__c--bad i { background: var(--bad); }
+.tpick__c--bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+  color: var(--ink); }
+.tpick__c--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.tpick__c--on { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink-hi); }
+.tpick__c b { font: 700 9.5px var(--mono); color: var(--bad); }
+.tpick__c:hover { border-color: var(--accent); color: var(--ink-hi); }
+.tpick__more { font: 400 9.5px var(--mono); color: var(--ink-3); }
+
+/* the drawer's ONE primary action — the technical route's first step worn as
+   a real button, standing where three persona walls used to open */
+.drill-primary { display: block; margin: 10px 0 2px; padding: 9px 14px;
+  border-radius: var(--r-field, 6px); text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font: 700 12px var(--sans); color: var(--accent); }
+.drill-primary:hover { background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--ink-hi); }
+/* the healthy verdict line — same anatomy as the aching one, green voice */
+.elsum__v--good { color: var(--good); }
+
+/* the second door: same shape, the error red — an <a>, so kill the underline */
+.geo__drill-go--err { text-decoration: none; display: inline-block; margin-left: 8px;
+  border-color: color-mix(in srgb, var(--bad, #ff7a8a) 55%, var(--border));
+  background: color-mix(in srgb, var(--bad, #ff7a8a) 12%, transparent);
+  color: var(--bad, #ff7a8a); }
+.geo__drill-go--err:hover { background: color-mix(in srgb, var(--bad, #ff7a8a) 22%, transparent);
+  color: var(--ink-hi); }
+
+/* what sets the region apart — the drill's foot, laid out as it deserves:
+   the verdict is a callout, the characteristics are pill cards with their
+   lift worn as a badge, and the exit is a real button. Loose prose over
+   loose chips over a bare link was a findings section dressed as leftovers. */
+.geo__who { display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 11px; }
+.geo__who-g { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px 8px; }
+.geo__who-l { flex-basis: 100%; font: 700 9px var(--mono); letter-spacing: .11em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 1px; }
+.geo__who-l--bad { color: var(--bad); }
+.geo__who-r { display: inline-flex; align-items: center; gap: 7px;
+  font: 400 11px var(--mono); color: var(--ink-2);
+  border: 1px solid var(--border); border-radius: var(--r-field, 6px);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  padding: 5px 10px; }
+.geo__who-r b { color: var(--ink-hi); font-weight: 700; font-size: 11.5px; }
+.geo__who-r em { font-style: normal; font-size: 9px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .05em; }
+.geo__who-r i { font-style: normal; font: 700 10px var(--mono); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 999px; padding: 1px 8px; }
+.geo__who-x { color: var(--bad) !important;
+  background: color-mix(in srgb, var(--bad) 14%, transparent) !important; }
+.geo__who-g--bad .geo__who-r { border-color: color-mix(in srgb, var(--bad) 40%, var(--border));
+  background: color-mix(in srgb, var(--bad) 7%, transparent); }
+.geo__who-none { font: 400 11.5px var(--mono); color: var(--ink-2); line-height: 1.55;
+  border: 1px solid color-mix(in srgb, var(--good) 35%, var(--border));
+  background: color-mix(in srgb, var(--good) 7%, transparent);
+  border-radius: var(--r-container, 9px); padding: 9px 12px; }
+.geo__who-none b { color: var(--good); }
+
+/* the animated pins the DotLayer draws — shape is a ReactNode, so the map
+   itself can move: problem countries pulse a sonar ring, the busiest breathe */
+.geo__map { position: relative; }
+.geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.gpin { position: absolute; transform: translate(-50%, -50%);
+  border: none; cursor: pointer; pointer-events: auto;
+  border-radius: 50%; padding: 0; }
+.gpin--sel { outline: 2px solid var(--ink-hi); outline-offset: 2px; }
+.gpin__lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  margin-top: 3px; display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
+  font: 700 10px var(--sans); color: var(--ink-hi);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  padding: 1px 7px; border-radius: 999px; }
+.gpin__lbl em { font-style: normal; font: 700 9.5px var(--mono); color: var(--ink-2); }
+.gpin--good { background: color-mix(in srgb, #4cc38a 75%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, #4cc38a 45%, transparent); }
+.gpin--warn { background: color-mix(in srgb, #e8c34a 82%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, #e8c34a 50%, transparent); }
+.gpin--bad { background: color-mix(in srgb, #ff7a8a 85%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, #ff7a8a 60%, transparent); }
+.gpin--bad::before, .gpin--bad::after { content: ""; position: absolute; inset: 0;
+  border-radius: 50%; border: 2px solid #ff7a8a; animation: gsonar 2.2s ease-out infinite; }
+.gpin--bad::after { animation-delay: 1.1s; }
+.gpin--warn::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid #e8c34a; animation: gsonar 3.2s ease-out infinite; }
+.gpin--busy { animation: gbreathe 3.4s ease-in-out infinite; }
+@keyframes gsonar {
+  0% { transform: scale(1); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes gbreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gpin--bad::before, .gpin--bad::after, .gpin--warn::before { animation: none; opacity: .5; }
+  .gpin--busy { animation: none; }
+}
+
+/* rows are <button>s now, and a bare button paints BLACK text — which on the
+   dark ground read as the unreadable numbers. Colour is set explicitly. */
+.geo__dr--btn { background: none; border: none; text-align: left; cursor: pointer;
+  border-radius: 6px; padding: 2px 6px; width: 100%; color: var(--ink-2); }
+.geo__dr--btn .num { color: var(--ink-hi); }
+.geo__dr--on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.geo__r { color: var(--ink-2); }
+.geo__r .num { color: var(--ink-hi); }
+.geo__dr--btn:hover { background: color-mix(in srgb, var(--ink-hi) 6%, transparent); }
+.geo__dr--btn:hover .geo__dr-v { color: var(--accent); }
+
+.geo__who-r--go { cursor: pointer; }
+.geo__who-r--go:hover { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); }

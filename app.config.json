@@ -1,14 +1,19 @@
 {
   "environmentUrl": "https://bwm98081.apps.dynatrace.com",
   "app": {
-    "name": "DeliveryChain UX",
+    "name": "UX Delivery Chain",
     "version": "0.1.0",
     "description": "Smartscape delivery chain crossed with RUM, Davis, alerts and extensions.",
+    "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",
     "scopes": [
       {
         "name": "storage:user.events:read",
         "comment": "RUM on Grail: views, requests, errors and actions"
+      },
+      {
+        "name": "storage:user.sessions:read",
+        "comment": "frontend.name per application — the name Users & Sessions filters by (differs from the entity name)"
       },
       {
         "name": "storage:events:read",

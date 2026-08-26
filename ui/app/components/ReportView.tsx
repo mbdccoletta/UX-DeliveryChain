@@ -20,14 +20,13 @@ import { useDifficulty } from "../hooks/useDifficulty";
 import { useAppScope } from "../hooks/useAppScope";
 import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
 import { routeCtxOf } from "./FlowSankey";
-import { fmtN, type OutcomeDefs } from "../utils/dql";
+import { fmtMs, fmtN, type OutcomeDefs } from "../utils/dql";
+import { useGeo } from "../hooks/useGeo";
+import { GEO_WORD, geoBecause, geoJudge, geoName } from "../utils/geoVerdict";
+import { exportImage } from "../utils/exportImage";
 
 type Dir = "good" | "bad" | "flat";
 const pct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
-const money = (v: number, sym: string) =>
-  v >= 1e6 ? `${sym}${(v / 1e6).toFixed(1)}M`
-  : v >= 1e3 ? `${sym}${(v / 1e3).toFixed(0)}k`
-  : `${sym}${Math.round(v)}`;
 
 /** The ARROW is the direction the number moved; the COLOUR is whether that
  *  was good for the business. Risk rising = ▲ in red; risk falling = ▼ in
@@ -43,7 +42,8 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, outcomeDefs,
+export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
+  defsUnreadable, savedJourneys, onDropJourney, onEditJourney, onStartDefine, onRoutePicks,
   routePicks, onClearRoutes, onGo }: {
   data: ChainData;
   /** The application this board reads — the header's own selector drives it,
@@ -51,8 +51,6 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   scopeApp: string;
   /** The value of one conversion and its currency — URL state, shared with
    *  the Journeys route economics, so both pages read the same money. */
-  ticket: string; sym: string;
-  onTicket: (ticket: string, sym: string) => void;
   /** Monitored share (coverage %) — url state, like the ticket, so a shared
    *  link carries the same extrapolated figures. */
   cov: string;
@@ -60,6 +58,21 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   /** Customer-taught conversion definitions — they replace the keyword
    *  heuristic per application, and the hero says so. */
   outcomeDefs?: OutcomeDefs;
+  /** The definitions store could not be read — say so rather than claiming
+   *  the fallback is the customer's own rule. */
+  defsUnreadable?: boolean;
+  /** The journeys the reader defined, one at a time, on Journeys. The board
+   *  offers them back as filters — and here MORE THAN ONE can be combined,
+   *  because "what does converted mean" is authored singly while "how do
+   *  these journeys perform" is asked of several at once. */
+  savedJourneys?: string[][];
+  onDropJourney?: (journey: string[]) => void;
+  /** Re-pick this journey on the flow; saving there replaces it. */
+  onEditJourney?: (journey: string[]) => void;
+  /** Start the definition process — opens the flow already waiting for the
+   *  one click that is the reader's to make. */
+  onStartDefine?: () => void;
+  onRoutePicks?: (picks: string[]) => void;
   /** Routes picked on Journeys — the board recomputes its journey and brand
    *  figures for exactly those sessions. */
   routePicks?: string[] | null;
@@ -67,6 +80,12 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
   const kpis = useBizKpis(data.tf, outcomeDefs, scopeApp || null);
+  const bcRef = React.useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = React.useState(false);
+  /* Access and health by location — the same rows and the same three-arm
+   * verdict the Overview map speaks (utils/geoVerdict), memoised per app and
+   * window, so opening the board after the map costs no second scan. */
+  const geoRows = useGeo(data.tf, scopeApp || null);
   const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs);
   const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
   const difficulty = useDifficulty(data.tf, scopeApp || null);
@@ -95,14 +114,147 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
     () => (routePicks?.length && scopeApp ? routeCtxOf(data.sequences, scopeApp) : null),
     [data.sequences, scopeApp, routePicks]);
   const cohort = useRouteCohort(data.tf, scopeApp, routePicks ?? null, routeCtx, outcomeDefs);
-  const scoped = !!routePicks?.length;
-  const tv = Number(ticket) > 0 ? Number(ticket) : null;
+  /* NOTHING PICKED — OR NOTHING FOUND — IS THE WHOLE APPLICATION.
+   *
+   * A board narrowed to journeys nobody walked in this window printed zero
+   * everywhere and called it a measurement. Zero customers, zero revenue, zero
+   * at risk: a reader is entitled to read that as "we measured, and it was
+   * nothing". It was not a measurement, it was an empty cohort. So the board
+   * falls back to the whole application and says why it did — the finding
+   * ("these journeys had no traffic") is kept as a sentence, not staged as a
+   * page of noughts. */
+  const emptyPick = !!routePicks?.length && cohort !== null && cohort.cur.sessions === 0;
+  const scoped = !!routePicks?.length && !emptyPick;
   const covN = Number(cov);
   const factor = covN >= 1 && covN < 100 ? 100 / covN : 1;
   const ex = factor > 1;
   const sc = (v: number) => v * factor;
   const fmtCount = (v: number) => `${ex ? "≈ " : ""}${fmtN(Math.round(sc(v)))}`;
-  const fmtMoney = (v: number) => `${ex ? "≈ " : ""}${money(sc(v), sym)}`;
+
+  /**
+   * ROUTE COMPLETENESS — the journey metric that needs no vocabulary.
+   *
+   * Conversion was read off view NAMES, which fits one demo application and
+   * misses every customer whose screens are named otherwise, or whose ending
+   * is not a screen. Completeness asks something every application answers:
+   * of the routes this application actually has, how deep is the deepest, and
+   * what share of sessions got that far. It is the SAME rule the flow draws as
+   * "Reached the deepest journey", computed from the same mined routes, so the
+   * board and the diagram cannot disagree.
+   */
+  const completeness = React.useMemo(() => {
+    const mine = data.sequences.filter((q) => (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+    const total = mine.reduce((a, q) => a + q.sessions, 0);
+    /* NOT THE LONGEST ROUTE — the deepest one people actually reach. Measured
+     * here: the single deepest journey ran 25 views and exactly ONE session
+     * walked it, so "complete" meant 0.0% and the metric said nothing. One
+     * outlier cannot be the bar. The bar is the deepest depth that at least a
+     * tenth of the sessions still reach, which self-calibrates to any
+     * application — a three-screen signup and a twenty-screen checkout both
+     * get a bar their own traffic defines. */
+    const FLOOR = 0.1;
+    const reach = (d: number) =>
+      mine.filter((q) => q.journey.length >= d).reduce((a, q) => a + q.sessions, 0);
+    const maxDepth = mine.reduce((m, q) => Math.max(m, q.journey.length), 0);
+    let deepest = 2;
+    for (let d = maxDepth; d >= 2; d--) {
+      if (total && reach(d) / total >= FLOOR) { deepest = d; break; }
+    }
+    const full = deepest > 1 ? reach(deepest) : 0;
+    return { deepest, total, full, share: total ? full / total : 0 };
+  }, [data.sequences, scopeApp]);
+
+  /**
+   * WHAT DESTOA — the outlier hunter.
+   *
+   * Every list in this product ranks by VOLUME, so the screen that is broken
+   * but small never surfaces. Measured on this tenant: /special-offers.jsp
+   * runs 1,126ms against ~450ms for every other screen — the only real
+   * performance target in the application, and invisible on every page
+   * because it carries 80 views.
+   *
+   * So this ranks by DEVIATION, and guards it two ways: a screen must carry
+   * enough traffic to have a stable timing at all, and it must miss the
+   * median by half again before it is called out. Ranked by deviation TIMES
+   * the people who meet it, because a screen twice as slow that nobody opens
+   * is arithmetic, not a finding.
+   */
+  const outliers = React.useMemo(() => {
+    const mine = data.views.filter((v) => (!scopeApp || v.appId === scopeApp) && v.p50 > 0);
+    if (mine.length < 4) return { list: [], median: 0 };
+    const sorted = [...mine].map((v) => v.p50).sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const floor = Math.max(20, mine.reduce((a, v) => a + v.views, 0) * 0.005);
+    const list = mine
+      .filter((v) => v.views >= floor && v.p50 >= median * 1.5)
+      .map((v) => ({ ...v, times: v.p50 / median, impact: (v.p50 - median) * v.views }))
+      .sort((a, b) => b.impact - a.impact)
+      .slice(0, 4);
+    return { list, median };
+  }, [data.views, scopeApp]);
+
+  /**
+   * THE BIGGEST SINGLE LOSS, SIZED IN JOURNEYS.
+   *
+   * "26% end at /logout.jsf" is a share; it does not say what it is worth.
+   * The mined routes already know where each journey ends and the board
+   * already knows the rate at which journeys complete, so the loss can be
+   * expressed in the board's own unit: had those endings behaved like the
+   * rest, this many journeys would have completed. No query, no new
+   * vocabulary — two things the app already holds, multiplied.
+   */
+  const biggestLoss = React.useMemo(() => {
+    const mine = data.sequences.filter((q) =>
+      (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+    if (!mine.length) return null;
+    const byEnd = new Map<string, number>();
+    for (const q of mine) {
+      const end = q.journey[q.journey.length - 1];
+      if (end) byEnd.set(end, (byEnd.get(end) ?? 0) + q.sessions);
+    }
+    const top = [...byEnd.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!top) return null;
+    const total = mine.reduce((a, q) => a + q.sessions, 0);
+    return { view: top[0], n: top[1], share: total ? top[1] / total : 0 };
+  }, [data.sequences, scopeApp]);
+
+  /**
+   * WHERE THEY COME IN DECIDES HOW FAR THEY GO.
+   *
+   * The mined routes know both ends of every journey — the screen it started
+   * on and the depth it reached — and the board never crossed them. Crossed,
+   * they answer the one question whose action is cheap: a team cannot easily
+   * change what a page asks of a customer, but it CAN change where customers
+   * are sent in from. An entry that completes three times better than another
+   * is a campaign target, a link, a redirect.
+   *
+   * Guarded like every other ranking here: an entry needs enough traffic to
+   * carry a rate, and the spread has to be worth naming.
+   */
+  const entries = React.useMemo(() => {
+    const mine = data.sequences.filter((q) =>
+      (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+    const total = mine.reduce((a, q) => a + q.sessions, 0);
+    if (!total || !completeness.deepest) return null;
+    const by = new Map<string, { n: number; full: number }>();
+    for (const q of mine) {
+      const start = q.journey[0];
+      if (!start) continue;
+      const cur = by.get(start) ?? { n: 0, full: 0 };
+      cur.n += q.sessions;
+      if (q.journey.length >= completeness.deepest) cur.full += q.sessions;
+      by.set(start, cur);
+    }
+    const floor = Math.max(30, total * 0.02);
+    const rated = [...by.entries()]
+      .filter(([, v]) => v.n >= floor)
+      .map(([view, v]) => ({ view, n: v.n, rate: v.full / v.n }))
+      .sort((a, b) => b.rate - a.rate);
+    if (rated.length < 2) return null;
+    const best = rated[0], worst = rated[rated.length - 1];
+    if (best.rate <= 0 || best.rate < worst.rate * 1.3) return null;
+    return { best, worst, times: worst.rate > 0 ? best.rate / worst.rate : Infinity };
+  }, [data.sequences, scopeApp, completeness.deepest]);
 
   const f = (s?: BizPeriod) => {
     const real = s?.realSessions ?? 0;
@@ -110,6 +262,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
     return {
       customersAtRisk: s?.hitReal ?? 0,
       crashed: s?.fatalSessions ?? 0,
+      waited: s?.waitedReal ?? 0,
       reputationIndex: real ? 1 - (s?.hitReal ?? 0) / real : 1,
       customers: real,
       conversion: real ? convR / real : 0,
@@ -128,6 +281,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   /** The route cohort wears the same shape the app figures do. */
   const asFacts = (x?: CohortFacts) => ({
     customersAtRisk: x?.hit ?? 0, crashed: x?.crashed ?? 0,
+    waited: x?.waited ?? 0,
     reputationIndex: x?.customers ? 1 - (x.hit / x.customers) : 1,
     customers: x?.customers ?? 0,
     conversion: x?.customers ? (x.converted / x.customers) : 0,
@@ -135,29 +289,125 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
     realEngaged: x?.engaged ?? 0,
     engagedShare: x?.customers ? (x.engaged / x.customers) : 0,
   });
-  const c = scoped ? asFacts(cohort?.cur) : f(curP);
-  const p = scoped ? asFacts(cohort?.prev) : f(prevP);
+  /* CONVERSION = THE SHARE OF JOURNEYS THAT COMPLETE. One definition, and it
+   * needs no vocabulary: a journey is complete when it reaches the depth this
+   * application's own traffic still reaches. Every conversion figure on the
+   * board is derived from it, so "converted", "left unconverted" and the
+   * failure cost can no longer disagree with the diagram. */
+  const withCompleteness = (x: ReturnType<typeof asFacts>) => ({
+    ...x,
+    conversion: completeness.share,
+    converted: completeness.full,
+  });
+  const c = withCompleteness(scoped ? asFacts(cohort?.cur) : f(curP));
+  const p = withCompleteness(scoped ? asFacts(cohort?.prev) : f(prevP));
+
+  /**
+   * WHAT CHANGED — the first question anyone opens a monitoring app with, and
+   * the one this board never answered. Everything here was a photograph of the
+   * window; a reader had to hold the previous one in their head.
+   *
+   * It costs nothing: the board already fetches BOTH windows for its KPIs, so
+   * the comparison is arithmetic on numbers in hand. What would cost is
+   * comparing ROUTES and SCREENS across windows — a second mining pass — and
+   * that is deliberately not done here.
+   *
+   * Ranked by relative move, floored twice: a fact must be big enough to
+   * matter (a jump from one to three is +200% and means nothing) and must
+   * have moved more than noise before it is called a change.
+   */
+  const changed = React.useMemo(() => {
+    if (scoped || !curP || !prevP) return null;
+    const facts: Array<[string, number, number, boolean]> = [
+      ["customers", curP.realSessions, prevP.realSessions, true],
+      ["customers at risk", curP.hitReal, prevP.hitReal, false],
+      ["customers made to wait", curP.waitedReal, prevP.waitedReal, false],
+      ["sessions lost to a crash", curP.fatalSessions, prevP.fatalSessions, false],
+      ["customers who bounced",
+        Math.max(0, curP.realSessions - curP.realEngaged),
+        Math.max(0, prevP.realSessions - prevP.realEngaged), false],
+    ];
+    const moves = facts
+      .filter(([, cur, prev]) => Math.max(cur, prev) >= 20 && prev > 0)
+      .map(([label, cur, prev, riseIsGood]) => ({
+        label, cur, prev, riseIsGood,
+        rel: (cur - prev) / prev,
+      }))
+      .filter((m) => Math.abs(m.rel) >= 0.15)
+      .sort((a, b) => Math.abs(b.rel) - Math.abs(a.rel))
+      .slice(0, 3);
+    return moves.length ? moves : null;
+  }, [scoped, curP, prevP]);
+
+  /**
+   * THE DEPTH LADDER — the funnel behind the conversion number.
+   *
+   * "17%" alone is a verdict without a trial: it does not say WHERE the other
+   * 83% fell away. The mined routes already carry every journey's depth, so
+   * the hero can show survival step by step — how many journeys reach 1, 2,
+   * 3 … views, down to the completion bar. The narrowest drop between two
+   * steps is the funnel's real story, and it is named. Zero queries.
+   */
+  const ladder = React.useMemo(() => {
+    const mine = data.sequences.filter((q) =>
+      (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+    const total = mine.reduce((a, q) => a + q.sessions, 0);
+    const deep = completeness.deepest;
+    if (!total || deep < 2) return null;
+    const steps: Array<{ d: number; n: number }> = [];
+    for (let d = 1; d <= deep; d++) {
+      steps.push({ d, n: mine.filter((q) => q.journey.length >= d)
+        .reduce((a, q) => a + q.sessions, 0) });
+    }
+    // the single worst step: where the most journeys are lost
+    let worst = 0, worstLost = -1;
+    for (let i = 1; i < steps.length; i++) {
+      const lost = steps[i - 1].n - steps[i].n;
+      if (lost > worstLost) { worstLost = lost; worst = i; }
+    }
+    /* "view 1 → 2" is a position, not a place — it names nothing a reader can
+     * open. The journeys that die at that step ended ON a screen the mine
+     * knows by name: journey.length === worst, last view = journey[worst-1].
+     * The top screens carry the sentence. */
+    const at = new Map<string, number>();
+    for (const q of mine) {
+      if (q.journey.length !== worst) continue;
+      const v = q.journey[worst - 1];
+      if (v) at.set(v, (at.get(v) ?? 0) + q.sessions);
+    }
+    const where = [...at.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2)
+      .map(([v, n]) => ({ v, n }));
+    /* THE SEQUENCES THEMSELVES. The funnel compresses journeys into counts,
+     * and the reader's next question is always "which pages, in which order".
+     * The mine already has them — the busiest few, spelled out, completed
+     * ones marked, are the evidence behind every row above. */
+    const top = [...mine].sort((x, y) => y.sessions - x.sessions).slice(0, 5)
+      .map((q) => ({ path: q.journey, n: q.sessions,
+        done: q.journey.length >= deep }));
+    return { steps, total, worst, worstLost, where, top };
+  }, [data.sequences, scopeApp, completeness.deepest]);
 
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
     if (!kpis) return <div className="bc__hero bc__hero--load" />;
     const isBrand = front === "brand";
-    const heroVal = isBrand
-      ? (tv ? c.customersAtRisk * c.conversion * tv : c.customersAtRisk)
-      : (tv ? c.converted * tv : c.conversion);
-    const prevVal = isBrand
-      ? (tv ? p.customersAtRisk * p.conversion * tv : p.customersAtRisk)
-      : (tv ? p.converted * tv : p.conversion);
-    const t = trend(heroVal, prevVal, !isBrand);
-    const label = isBrand ? (tv ? "revenue at risk" : "customers at risk")
-      : (tv ? "revenue captured" : "conversion rate");
-    const fmt = isBrand
-      ? (tv ? fmtMoney : fmtCount)
-      : (tv ? fmtMoney : pct);
-    const customDef = !!outcomeDefs?.[scopeApp]?.length;
+    /* Money is back, on a base that holds: a completed journey is a business
+     * event the reader can point at in the diagram, so pricing it is honest
+     * where pricing a keyword guess was not. */
+    const heroVal = isBrand ? c.customersAtRisk : c.conversion;
+    const prevVal = isBrand ? p.customersAtRisk : c.conversion;
+    const t = isBrand ? trend(heroVal, prevVal, false)
+      /* Journeys are mined for the window on screen only, so there is no
+       * previous window to compare a completion rate against. Printing
+       * "steady" would be inventing one. */
+      : { dir: "flat" as Dir, rel: null, arrow: "—" };
+    const label = isBrand ? "customers at risk" : "conversion";
+    const fmt = isBrand ? fmtCount : pct;
     const sub = isBrand
       ? `${fmtCount(c.customersAtRisk)} customers met a failure · ${pct(1 - c.reputationIndex)} of the base`
-      : `${fmtCount(c.converted)} of ${fmtCount(c.customers)} customers reached the goal`
-        + (customDef ? " · your definition" : "");
+      : `${fmtCount(completeness.full)} of ${fmtCount(completeness.total)} journeys completed`
+        + ` (${pct(completeness.share)})`
+        + ` · complete = reaching ${completeness.deepest} views, the depth a tenth of this`
+        + " application's traffic still gets to";
     return (
       <div className="bc__hero" style={{ ["--ht" as string]: TONE[t.dir] }}>
         <span className="bc__hero-l">{label}</span>
@@ -167,9 +417,82 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
           <em> vs previous {data.tf.label}</em>
         </span>
         <span className="bc__hero-s">{sub}</span>
+        {/* the funnel, drawn: one bar per depth, the completion bar marked,
+            and the step that loses the most journeys called out in words */}
+        {/* THE FUNNEL, AS ROWS. Two rounds of labels could not save the
+            vertical bars — the FORM was the problem: tiny columns with tiny
+            numbers is an analyst's chart. Rows read like a story: each one a
+            sentence with its own bar, and the loss between two rows written
+            where it happens, with the screens responsible named. */}
+        {!isBrand && ladder && (
+          <div className="bc__fun">
+            {ladder.steps.map((x, i) => {
+              const share = x.n / ladder.total;
+              const prev = i > 0 ? ladder.steps[i - 1].n : x.n;
+              const lost = prev - x.n;
+              const last = i === ladder.steps.length - 1;
+              return (
+                <React.Fragment key={x.d}>
+                  {i > 0 && lost > 0 && (
+                    <div className={i === ladder.worst ? "bc__fun-d bc__fun-d--worst" : "bc__fun-d"}>
+                      ↓ {fmtCount(lost)} leave here{i === ladder.worst && ladder.where.length
+                        ? <> — most on <b>{ladder.where[0].v}</b></> : null}
+                    </div>
+                  )}
+                  <div className="bc__fun-r">
+                    <span className="bc__fun-l">
+                      {i === 0 ? "arrived" : last ? "completed" : `saw ${x.d} screens`}
+                    </span>
+                    <span className="bc__fun-t">
+                      <i className={last ? "bc__fun-b bc__fun-b--goal" : "bc__fun-b"}
+                        style={{ width: `${Math.max(2, share * 100)}%` }} />
+                    </span>
+                    <b className="num">{fmtCount(x.n)}</b>
+                    <em className="num">{pct(share)}</em>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
+
+  /**
+   * WHAT THIS BOARD CALLS A CONVERSION — said out loud, above the number.
+   *
+   * Every figure on this front rests on one predicate, and until now the
+   * board only whispered "· your definition" when the reader had taught one,
+   * and said nothing at all when it had not. A C-level reader was being shown
+   * a conversion rate without being told what counts as converting.
+   *
+   * So the rule is stated from the SAME constants the queries are compiled
+   * from — never a list retyped into the markup, which is how a screen and
+   * its query drift apart — and the taught definition is named view by view.
+   */
+  /* The strip DECLARES the rule the numbers actually use. Its previous body
+   * still recited the keyword vocabulary ("any screen named like checkout…")
+   * while every figure below had long moved to completeness — a reader asked
+   * "would this work for any application?" about a rule the board was not
+   * even using. It would not have; this one does, and it needs no vocabulary,
+   * no configuration and no language. */
+  const ConvRule = () => (
+    <div className="bc__rule bc__rule--taught"
+      title={"A journey is COMPLETE when it reaches the depth this application's own "
+        + "traffic still reaches — the deepest screen count that at least a tenth of "
+        + "journeys get to (here: " + completeness.deepest + " screens).\n\nNo screen "
+        + "names, no keywords, no setup: the bar is derived from each application's own "
+        + "traffic, so it holds for any product, in any language, including apps whose "
+        + "completion is not a named screen at all."}>
+      <span className="bc__rule-k">counts as converted</span>
+      <span className="bc__rule-v">
+        a journey that reaches <b>{completeness.deepest} screens</b> — the depth a tenth
+        of this application&apos;s own traffic still gets to
+      </span>
+      <span className="bc__rule-src">derived from the traffic · works for any application</span>
+    </div>
+  );
 
   const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share, liveOnly }: {
     label: string; cur: number; prev: number; fmt: (v: number) => string;
@@ -224,39 +547,27 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
   //    sessions is the conversions the errors cost — arithmetic on measured
   //    rates, stated as such.
   const scopedRows = breakdown?.filter((r) => !scopeApp || r.appId === scopeApp) ?? null;
-  const errCost = (() => {
-    // inside a route scope the cost is the cohort's own — the app-wide
-    // breakdown would have contradicted the hero right above it
-    if (scoped) {
-      const k = cohort?.cur;
-      if (!k || !k.cleanN || !k.hit) return null;
-      const rClean = k.cleanConv / k.cleanN, rHit = k.hitConv / k.hit;
-      return { rClean, rHit, hitN: k.hit,
-        lost: Math.max(0, Math.round(k.hit * (rClean - rHit))) };
-    }
-    if (!scopedRows) return null;
-    const leg = scopedRows.filter((r) => r.d === "__err");
-    const agg = (b: string) => leg.filter((r) => r.bucket === b)
-      .reduce((a, r) => ({ n: a.n + r.realN, c: a.c + r.realConv }), { n: 0, c: 0 });
-    const clean = agg("clean"), hit = agg("hit");
-    if (!clean.n || !hit.n) return null;
-    const rClean = clean.c / clean.n, rHit = hit.c / hit.n;
-    return { rClean, rHit, hitN: hit.n,
-      lost: Math.max(0, Math.round(hit.n * (rClean - rHit))) };
-  })();
 
-  // ── segments: buckets ranked by conversion lift vs the scope's own rate.
-  //    Human sessions only, and only buckets big enough to mean something.
+  // ── segments: buckets ranked by ERROR lift against the application's own
+  //    rate. Human sessions only, and only buckets big enough to mean
+  //    something. The baseline is the same population the buckets come from,
+  //    so a group is compared with its peers and not with a different scan.
   const segments = (() => {
     if (!scopedRows) return null;
-    const base = c.customers ? c.converted / c.customers : 0;
+    const bAll = scopedRows.filter((r) => r.d !== "__err" && r.d !== "user type");
+    const bN = bAll.reduce((a, r) => a + r.realN, 0);
+    const base = bN ? bAll.reduce((a, r) => a + r.realHit, 0) / bN : 0;
     if (!base) return { best: [], worst: [] };
     const byBucket = new Map<string, { d: string; bucket: string; n: number; conv: number }>();
     for (const r of scopedRows) {
       if (r.d === "__err" || r.d === "user type") continue;
-      const k = `${r.d} ${r.bucket}`;
+      const k = `${r.d}\u0000${r.bucket}`;
       const a = byBucket.get(k) ?? { d: r.d, bucket: r.bucket, n: 0, conv: 0 };
-      a.n += r.realN; a.conv += r.realConv; byBucket.set(k, a);
+      /* ERROR, not the keyword conversion this used to rank on. The bucket
+       * rows already carry realHit — sessions in the group that met an error —
+       * so the same section answers "where does failure concentrate" without
+       * the vocabulary the product abandoned, and works for any application. */
+      a.n += r.realN; a.conv += r.realHit; byBucket.set(k, a);
     }
     const rows = [...byBucket.values()]
       .filter((x) => x.n >= 50 && x.n < (c.customers || Infinity))
@@ -314,7 +625,7 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
     `${fmtN(Math.round(sc(Math.max(0, pj.lower))))}–${fmtN(Math.round(sc(pj.upper)))}`;
 
   return (
-    <div className="stack bc">
+    <div className="stack bc" ref={bcRef}>
       <div className="bc__bar">
         <span className="lbl">Business Control</span>
         <span className="hint">{data.tf.label} vs the {data.tf.label} before ·{" "}
@@ -327,19 +638,57 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
             value={cov} onChange={(e) => onCov(e.target.value.replace(/[^\d]/g, "").slice(0, 3))} />
           <span>% monitored</span>
         </label>
-        <label className="bc__ticket" title="Value of one conversion — turns customers into revenue. Blank = customers only.">
-          <span>{sym}</span>
-          <input inputMode="decimal" placeholder="value / conversion"
-            value={ticket} onChange={(e) => onTicket(e.target.value.replace(/[^\d.]/g, ""), sym)} />
-          <select value={sym} onChange={(e) => onTicket(ticket, e.target.value)} aria-label="currency">
-            {["$", "€", "£", "R$"].map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </label>
+        {/* the board is a thing people paste into decks — export the whole
+            of it, not a viewport crop */}
+        <button className="bc__export noexport" disabled={exporting}
+          title="Download this board as a PNG (2×) — the export button itself stays out of the picture"
+          onClick={async () => {
+            if (!bcRef.current) return;
+            setExporting(true);
+            try { await exportImage(bcRef.current, `business-control-${data.tf.label.replace(/\W+/g, "-")}`); }
+            finally { setExporting(false); }
+          }}>
+          {exporting ? "rendering…" : "⬇ export image"}
+        </button>
       </div>
+
+      {/* WHAT CHANGED — first, because it is the first question. */}
+      {changed && (
+        <div className="bc__chg">
+          <span className="bc__chg-l">what changed vs the previous {data.tf.label.replace(/^last /i, "")}</span>
+          <div className="bc__chg-rows">
+            {changed.map((m) => {
+              const up = m.rel > 0;
+              const good = up === m.riseIsGood;
+              return (
+                <span className={`bc__chg-r${good ? "" : " bc__chg-r--bad"}`} key={m.label}>
+                  <i>{up ? "▲" : "▼"}</i>
+                  <b className="num">{Math.abs(m.rel * 100).toFixed(0)}%</b>
+                  <span>{m.label}</span>
+                  <em>{fmtCount(m.prev)} → {fmtCount(m.cur)}</em>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* THE ROUTE SCOPE, stated. A board quietly narrowed is a board that
           lies by omission: this says what it is calculating on, how many
           sessions that is, and hands back the whole application in one click. */}
+      {emptyPick && (
+        <div className="bc__scoped">
+          <span className="bc__scoped-l">showing the whole application</span>
+          <span className="bc__scoped-none">
+            nobody walked {routePicks && routePicks.length > 1 ? "those journeys" : "that journey"}
+            {" "}in this window, so the board fell back to everything rather than printing a
+            {" "}page of zeros. Widen the timeframe to see them.
+          </span>
+          <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
+            forget the selection ✕
+          </button>
+        </div>
+      )}
       {scoped && (
         <div className="bc__scoped">
           <span className="bc__scoped-l">calculating on picked routes</span>
@@ -348,6 +697,17 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
               : `${fmtN(cohort.cur.sessions)} sessions · ${fmtN(cohort.cur.customers)} customers`}
             {cohort?.sampled && " · scaled from a capped sample"}
           </span>
+          {/* EMPTY IS NOT ZERO. A journey saved days ago may simply not have
+              been walked inside the window on screen, and then every figure
+              below reads 0 — which a reader is entitled to mistake for "we
+              measured, and it was nothing". Say which of the two it is. */}
+          {cohort !== null && cohort.cur.sessions === 0 && (
+            <span className="bc__scoped-none">
+              nobody walked {routePicks && routePicks.length > 1 ? "these journeys" : "this journey"}
+              {" "}in this window — the figures below are EMPTY, not zero. Widen the timeframe
+              {" "}or hand the board back the whole application.
+            </span>
+          )}
           <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
             whole application ✕
           </button>
@@ -361,15 +721,15 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
           {scoped && " · whole application"}</span>
         {!fc ? <span className="bc__fc-wait">projecting…</span> : (
           <>
-            {fc.conversions && (
-              <span className="bc__fc-item">
-                <b className="num">{tv ? `≈ ${money(sc(fc.conversions.point) * tv, sym)}`
-                  : `≈ ${fmtN(Math.round(sc(fc.conversions.point)))}`}</b>
-                {tv ? " revenue expected" : " conversions expected"}
-                <em>({tv ? `≈ ${money(sc(Math.max(0, fc.conversions.lower)) * tv, sym)}–${money(sc(fc.conversions.upper) * tv, sym)}`
-                  : range(fc.conversions)})</em>
-              </span>
-            )}
+            {/* The conversion leg is gone. It projected the keyword predicate
+                the product no longer uses, and the honest replacement —
+                projecting completed journeys — is not worth its cost:
+                completeness is a ratio derived in the browser from mined
+                routes, with no timeseries behind it, so forecasting it would
+                need a two-stage query to produce a number carrying more
+                uncertainty than value. Volume IS directly projectable, so the
+                board projects volume. One fewer analyzer leg, measured
+                earlier as the heaviest scan in the product. */}
             {fc.sessions && (
               <span className="bc__fc-item">
                 <b className="num">≈ {fmtN(Math.round(sc(fc.sessions.point)))}</b> sessions
@@ -395,10 +755,20 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
             <Stat label="sessions lost to a crash or freeze" cur={c.crashed} prev={p.crashed}
               fmt={fmtCount} riseIsGood={false} tab="home"
               caption="crashes and ANRs — ended with no way back" />
-            <Stat label="brand health (0–100)" cur={c.reputationIndex} prev={p.reputationIndex}
-              fmt={(v) => `${Math.round(v * 100)}`} riseIsGood={true} tab="chain"
-              caption="share of customers untouched by any failure"
-              share={c.reputationIndex} />
+            {/* This slot held "brand health (0–100)": the share of customers
+                untouched by a failure, printed as an integer. Measured on
+                easytravel it read 100 against a previous 100 — and so would
+                every variant of it, because 5 harmed customers in 5,380 is
+                99.91%. Widening the harm did not help either: errors OR waits
+                over 12s gave 99.78, over 3s gave 99.57. Both round to 100.
+                An index over a rare event has no resolution left to show.
+                So the slot now carries the harm the board was missing, as the
+                count it is — 18 customers waited where 5 met a failure, two
+                different harms that no longer hide inside one saturated 100. */}
+            <Stat label="customers made to wait" cur={c.waited} prev={p.waited}
+              fmt={fmtCount} riseIsGood={false} tab="chain"
+              caption="an action took longer than 3s — the platform's own satisfaction threshold"
+              share={c.customers ? c.waited / c.customers : 0} />
             <Stat label="open incidents"
               cur={chainProblems ?? 0} prev={chainProblems ?? 0}
               fmt={(v) => (chainProblems === null ? "…" : fmtN(v))}
@@ -410,68 +780,147 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
 
       <section className="bc__front" style={{ ["--fh" as string]: "var(--t-cyan)" }}>
         <h2 className="bc__ftitle">Deliver personalised journeys</h2>
+        <ConvRule />
+
         <div className="bc__row">
           <Hero front="journeys" />
           <div className="bc__stats">
-            <Stat label="customers who converted" cur={c.converted} prev={p.converted}
+            {/* The unit is the JOURNEY, not the customer: completeness is
+                measured on the mined routes, and calling those sessions
+                "customers" would mix two populations in one sentence. */}
+            <Stat label="journeys completed" cur={c.converted} prev={p.converted}
               fmt={fmtCount} riseIsGood={true} tab="flow"
-              caption={`${pct(c.conversion)} of the customer base reached the goal`}
+              caption={`${pct(c.conversion)} of journeys reached the full depth`}
               share={c.conversion} />
-            <Stat label="customers who left unconverted"
-              cur={c.customers - c.converted} prev={p.customers - p.converted}
+            <Stat label="journeys cut short"
+              cur={completeness.total - completeness.full}
+              prev={completeness.total - completeness.full}
               fmt={fmtCount} riseIsGood={false} tab="flow"
-              caption="the growth pool — every one is a winnable sale"
-              share={c.customers ? (c.customers - c.converted) / c.customers : 0}
+              caption="stopped before the depth the rest of the traffic reaches"
+              share={completeness.total
+                ? (completeness.total - completeness.full) / completeness.total : 0}
               coh="unconverted" />
-            {tv ? (
-              <Stat label="opportunity on the table"
-                cur={(c.customers - c.converted) * c.conversion * tv}
-                prev={(p.customers - p.converted) * p.conversion * tv}
-                fmt={fmtMoney} riseIsGood={false} tab="flow"
-                caption="if the unconverted converted at today's rate" />
-            ) : (
-              <Stat label="reached first screen only" cur={1 - c.engagedShare} prev={1 - p.engagedShare}
-                fmt={pct} riseIsGood={false} tab="flow"
-                caption="never saw a second screen" share={1 - c.engagedShare} />
-            )}
+            {/* "Opportunity on the table" was `(customers − converted) × rate
+                × ticket`. Once converted became a count of JOURNEYS and
+                customers stayed a count of PEOPLE, that subtraction mixed two
+                populations and the money it produced meant nothing. There is
+                no money figure without a conversion to price, so the slot
+                carries a fact the board can actually stand behind. */}
+            <Stat label="reached first screen only" cur={1 - c.engagedShare} prev={1 - p.engagedShare}
+              fmt={pct} riseIsGood={false} tab="flow"
+              caption="never saw a second screen" share={1 - c.engagedShare} />
             <Stat label="customers who bounced"
               cur={Math.max(0, c.customers - c.realEngaged)}
               prev={Math.max(0, p.customers - p.realEngaged)}
               fmt={fmtCount} riseIsGood={false} tab="flow"
               caption="came, saw one screen, left" />
+            {entries && (
+              <div className="bc__entry">
+                <span className="bc__entry-l">where they come in decides how far they go</span>
+                <div className="bc__entry-r">
+                  <span className="bc__entry-w">
+                    <b className="num">{entries.best.view}</b>
+                    <em>{pct(entries.best.rate)} complete · {fmtCount(entries.best.n)} journeys</em>
+                  </span>
+                  <i className="bc__entry-x">
+                    {entries.times === Infinity ? "the only entry that completes"
+                      : `${entries.times.toFixed(1)}× better`}
+                  </i>
+                  <span className="bc__entry-w bc__entry-w--bad">
+                    <b className="num">{entries.worst.view}</b>
+                    <em>{pct(entries.worst.rate)} complete · {fmtCount(entries.worst.n)} journeys</em>
+                  </span>
+                </div>
+                <span className="bc__entry-ft">
+                  the screen a journey STARTS on, against how far it gets. Changing where
+                  customers are sent in is cheaper than changing what a page asks of them.
+                </span>
+              </div>
+            )}
+            {biggestLoss && completeness.share > 0 && (
+              <div className="bc__loss">
+                <span className="bc__loss-l">biggest single loss</span>
+                <b className="num">{biggestLoss.view}</b>
+                <span className="bc__loss-v">
+                  {fmtCount(biggestLoss.n)} journeys end here ({pct(biggestLoss.share)}) ·
+                  {" "}at this application&apos;s completion rate that is{" "}
+                  <b>≈ {fmtCount(Math.round(biggestLoss.n * completeness.share))}</b>
+                  {" "}completions never reached
+                </span>
+              </div>
+            )}
+
+            {/* the busiest sequences, spelled out — the pages in the order people
+            actually walk them, completions marked */}
+            {ladder && ladder.top.length > 0 && (
+              <div className="bc__seqs bc__seqs--cell">
+            <span className="bc__seqs-l">the busiest sequences</span>
+            {ladder.top.map((q) => (
+              <div className={q.done ? "bc__seqs-r bc__seqs-r--done" : "bc__seqs-r"}
+                key={q.path.join("\u0001")}
+                title={`${fmtN(q.n)} journeys walk exactly this sequence${q.done
+                  ? " — and it reaches the completion depth" : ""}`}>
+                <b className="num">{fmtCount(q.n)}</b>
+                <span className="bc__seqs-p">
+                  {q.path.map((v, i) => (
+                    <React.Fragment key={i}>
+                      {i > 0 && <i aria-hidden="true">→</i>}
+                      <span>{v}</span>
+                    </React.Fragment>
+                  ))}
+                </span>
+                {q.done && <em>✓ completes</em>}
+              </div>
+            ))}
+            {onGo && (
+              <button className="bc__seqs-go" onClick={() => onGo("flow", scopeApp || undefined)}>
+                every sequence, on the flow →
+              </button>
+            )}
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      {/* what failure costs — the bridge between the two fronts, in the
-          board's own currency: conversions (or money, with the ticket set) */}
-      {errCost && (
-        <section className="bc__front" style={{ ["--fh" as string]: "var(--t-amber, var(--t-pink))" }}>
-          <h2 className="bc__ftitle">What failure costs</h2>
-          <div className="bc__cost">
-            <div className="bc__cost-k">
-              <b className="num">{pct(errCost.rClean)}</b>
-              <span>conversion, error-free sessions</span>
-            </div>
-            <i className="bc__cost-vs">vs</i>
-            <div className="bc__cost-k bc__cost-k--bad">
-              <b className="num">{pct(errCost.rHit)}</b>
-              <span>conversion after meeting an error</span>
-            </div>
-            <div className="bc__cost-verdict">
-              {errCost.lost > 0 ? (
-                <>errors cost <b className="num">{tv ? `≈ ${money(sc(errCost.lost) * tv, sym)}` : `≈ ${fmtN(Math.round(sc(errCost.lost)))}`}</b>
-                  {tv ? "" : " conversions"} this {data.tf.label.replace(/^last /i, "")}
-                  <em>{fmtCount(errCost.hitN)} customers met an error and converted
-                    {errCost.rClean > 0 ? ` ${(errCost.rHit / errCost.rClean) < 1
-                      ? `${(errCost.rClean / Math.max(errCost.rHit, 0.0001)).toFixed(1)}× less`
-                      : "no less"} often` : ""}</em></>
-              ) : (
-                <>errors did not dent conversion this window
-                  <em>{fmtCount(errCost.hitN)} customers met an error and converted just as often</em></>
-              )}
-            </div>
+      {/* WHAT FAILURE COSTS lived here. It compared the rate at which
+          error-free and error-hit sessions reached the goal — and "the goal"
+          was the keyword predicate the product no longer uses anywhere else.
+          It was the last consumer of that vocabulary.
+
+          Rebasing it onto completeness needs per-session DEPTH and per-session
+          ERROR STATE together. The board holds each separately — depth from the
+          mined routes, errors from the KPI scan — and joining them means
+          fetching the per-session query on every board load, a real scan the
+          block does not earn. So it is removed rather than left quietly
+          measuring a definition the rest of the product abandoned. The failure
+          cost still shows up where it is honest: customers at risk on the
+          brand front, and the error lift per segment on the poster. */}
+
+      {/* WHAT DESTOA — ranked by deviation, never by size. */}
+      {outliers.list.length > 0 && (
+        <section className="bc__front" style={{ ["--fh" as string]: "var(--t-violet, var(--accent))" }}>
+          <h2 className="bc__ftitle">What stands out as slow</h2>
+          <div className="bc__out">
+            {outliers.list.map((v) => (
+              <div className="bc__out-r" key={v.view}>
+                <span className="bc__out-n">{v.view}</span>
+                <b className="num">{fmtMs(v.p50)}</b>
+                <i className={v.times >= 2.5 ? "bc__out-x bc__out-x--bad" : "bc__out-x"}>
+                  {v.times.toFixed(1)}× the median screen
+                </i>
+                <em>{fmtN(v.views)} views · {fmtN(v.sessions)} sessions meet it</em>
+                <span className="bc__out-bar">
+                  <i style={{ width: `${Math.min(100, (v.p50 / (outliers.median * 4)) * 100)}%` }} />
+                </span>
+              </div>
+            ))}
           </div>
+          <span className="bc__out-ft">
+            ranked by how far each screen sits from this application&apos;s median of{" "}
+            {fmtMs(outliers.median)} — times the people who meet it. A screen twice as slow that
+            nobody opens is arithmetic, not a finding; every list that ranks by traffic hides these.
+          </span>
         </section>
       )}
 
@@ -587,11 +1036,14 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
       {/* where conversion lives and dies — the segments to personalise for */}
       {segments && (segments.best.length > 0 || segments.worst.length > 0) && (
         <section className="bc__front" style={{ ["--fh" as string]: "var(--t-cyan)" }}>
-          <h2 className="bc__ftitle">Where conversion lives — and dies
+          <h2 className="bc__ftitle">Where failure concentrates
             {scoped && <em className="bc__ftitle-note"> · whole application</em>}</h2>
           <div className="bc__segs">
-            {([["converts above average", segments.best, "good"],
-               ["converts below average", segments.worst, "bad"]] as const)
+            {/* `best` is the HIGHER lift, which under an error metric is the
+                worse outcome — the names come from the ranking, the tone from
+                what the ranking now means. */}
+            {([["meets more errors than average", segments.best, "bad"],
+               ["meets fewer errors than average", segments.worst, "good"]] as const)
               .map(([title, rows, tone]) => rows.length > 0 && (
                 <div className="bc__seg" key={title}>
                   <h3 className={`bc__seg-h bc__seg-h--${tone}`}>{title}</h3>
@@ -600,8 +1052,8 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
                       <span className="bc__seg-b">{r.bucket}<em>{r.d}</em></span>
                       <b className="num">{pct(r.rate)}</b>
                       <span className="bc__seg-lift" style={{ color: `var(--${tone})` }}>
-                        {r.lift >= 1 ? `${r.lift.toFixed(1)}×`
-                          : r.rate === 0 ? "none convert" : `${(1 / r.lift).toFixed(1)}× less`}
+                        {r.lift >= 1 ? `${r.lift.toFixed(1)}× the errors`
+                          : r.rate === 0 ? "no errors at all" : `${(1 / r.lift).toFixed(1)}× fewer`}
                       </span>
                       <em className="bc__seg-n">{fmtCount(r.n)} customers</em>
                     </div>
@@ -611,6 +1063,45 @@ export function ReportView({ data, scopeApp, ticket, sym, onTicket, cov, onCov, 
           </div>
         </section>
       )}
+
+      {/* WHERE THE CUSTOMERS ARE — the map's verdict, spoken in the board's
+          language. Same rows, same three-arm rule (utils/geoVerdict); the
+          headline is the worst location or the negative finding, because "no
+          region stands out" is also an answer the owner needs stated. */}
+      {geoRows && geoRows.length > 0 && (() => {
+        const tot = geoRows.reduce((a, g) => a + g.sessions, 0) || 1;
+        const base = geoRows.reduce((a, g) => a + g.hit, 0) / tot;
+        const judged = geoRows.map((g) => ({ g, tone: geoJudge(g, base) }));
+        const hurt = judged.filter((x) => x.tone !== "good")
+          .sort((a, b) => (a.tone === b.tone ? b.g.sessions - a.g.sessions
+            : a.tone === "bad" ? -1 : 1));
+        const lead = hurt[0];
+        return (
+          <section className="bc__front" style={{ ["--fh" as string]: "var(--t-cyan)" }}>
+            <h2 className="bc__ftitle">Where the customers are</h2>
+            <div className="bc__seg">
+              <h3 className={`bc__seg-h bc__seg-h--${lead ? "bad" : "good"}`}>
+                {lead
+                  ? `${geoName(lead.g.country)} is ${GEO_WORD[lead.tone]} — ${geoBecause(lead.g, base)}`
+                  : "no location stands out — every country reads satisfied under the map's own rule"}
+              </h3>
+              {judged.slice(0, 6).map(({ g, tone }) => (
+                <div className="bc__seg-r" key={g.country}
+                  title={`${fmtN(g.sessions)} sessions from ${geoName(g.country)} — ${GEO_WORD[tone]}: ${geoBecause(g, base)}`}>
+                  <span className="bc__seg-b">{geoName(g.country)}<em>{pct(g.sessions / tot)} of sessions</em></span>
+                  <b className="num">{fmtN(g.sessions)}</b>
+                  <span className="bc__seg-lift" style={{ color: `var(--${tone})` }}>
+                    {GEO_WORD[tone]}
+                  </span>
+                  <em className="bc__seg-n">
+                    {g.hit > 0 ? `${pct(g.hit / Math.max(g.sessions, 1))} met an error` : "no errors"}
+                  </em>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })()}
     </div>
   );
 }
