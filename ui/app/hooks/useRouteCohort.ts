@@ -21,13 +21,15 @@ export interface CohortFacts {
   customers: number; converted: number; hit: number; crashed: number; sessions: number;
   /** Real customers who went past their first screen. */
   engaged: number;
+  /** Real customers made to wait past the satisfaction threshold. */
+  waited: number;
   /** The failure cost, inside the cohort: conversion with and without errors. */
   cleanN: number; cleanConv: number; hitConv: number;
 }
 export interface RouteCohort { cur: CohortFacts; prev: CohortFacts; sampled: boolean }
 
 const ZERO: CohortFacts = { customers: 0, converted: 0, hit: 0, crashed: 0, sessions: 0,
-  engaged: 0, cleanN: 0, cleanConv: 0, hitConv: 0 };
+  engaged: 0, waited: 0, cleanN: 0, cleanConv: 0, hitConv: 0 };
 const memo = new Map<string, RouteCohort>();
 
 /** One window's facts for the sessions whose journey matches the picks. */
@@ -37,7 +39,7 @@ async function windowFacts(
 ): Promise<{ facts: CohortFacts; sampled: boolean }> {
   const [rows, paths] = await Promise.all([
     runDql<Record<string, unknown>>(qCohortSessions(tf, appId, defs), 10000),
-    runDql<Record<string, unknown>>(qPathSessions(tf, appId), 2000),
+    runDql<Record<string, unknown>>(qPathSessions(tf, appId), 10000),
   ]);
   const inCohort = new Set<string>();
   for (const r of paths) {
@@ -61,9 +63,10 @@ async function windowFacts(
       // the same per-session facts the board's own figures rest on, so a
       // narrowed board keeps every line it had: engagement and failure cost
       engaged: real.filter((r) => Number(r.views) > 1).length,
+      waited: real.filter((r) => Number(r.waited) > 0).length,
       cleanN: clean.length, cleanConv: conv(clean), hitConv: conv(hurt),
     },
-    sampled: paths.length >= 2000 || rows.length >= 10000,
+    sampled: paths.length >= 10000 || rows.length >= 10000,
   };
 }
 

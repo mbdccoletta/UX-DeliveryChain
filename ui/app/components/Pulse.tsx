@@ -13,10 +13,18 @@
 // green is a session that made it, red is one that did not.
 import React, { useEffect, useRef, useState } from "react";
 import { fmtK, fmtMs, fmtN } from "../utils/dql";
+import * as Q from "../utils/dql";
+import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
+import { useFrontendNames } from "../hooks/useFrontendNames";
+import { GEO_COL, GEO_WORD, geoArms, geoBecause, geoEnName, geoJudge, geoName,
+  type GeoArm } from "../utils/geoVerdict";
 import type { ChainData } from "../hooks/useChainData";
 import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
+import { useGeo } from "../hooks/useGeo";
+import { ChoroplethLayer, DotLayer, MapView } from "@dynatrace/strato-geo";
+import { CENTROID } from "../utils/geoCentroids";
 import { usePulse } from "../hooks/usePulse";
 import { useAppScope } from "../hooks/useAppScope";
 import { useMetricForecast, METRIC_LABEL, type Metric } from "../hooks/useEcgForecast";
@@ -24,7 +32,7 @@ import { useServiceForecasts, SERVICE_FORECAST_CAP,
   type ServiceAhead } from "../hooks/useServiceForecasts";
 import { useServiceSeries } from "../hooks/useServiceSeries";
 import { useServiceVitals, type ServiceVitals } from "../hooks/useServiceVitals";
-import type { Forecast } from "../utils/forecast";
+import { aheadOf, type Forecast } from "../utils/forecast";
 import { useUxOverview } from "../hooks/useUxOverview";
 import { originOf } from "./DeliveryChain";
 import {
@@ -74,8 +82,108 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 }) {
   const app = data.apps.find((a) => a.appId === appId);
   const impacted = useImpacted(appId, data.tf, true);
+  const geo = useGeo(data.tf, appId);
+  /* The name Users & Sessions knows this app by. Its Frontends facet filters
+   * on frontend.name, not the inventory name — "Astroshop Android" the
+   * entity, "Astroshop_Android" the frontend — and the wrong one is accepted
+   * silently and matches nothing. */
+  const feNames = useFrontendNames();
+  const feName = (app && (feNames?.get(app.entity ?? "") ?? app.name)) || "";
+  /* The geo drill: one country opened at a time, one scan leg per first
+   * click, memoised for the window like everything else. */
+  const [geoSel, setGeoSel] = useState<string | null>(null);
+  const [geoDetail, setGeoDetail] = useState<Array<{ view: string; sessions: number; hit: number }> | null>(null);
+  const geoMemo = React.useRef(new Map<string, Array<{ view: string; sessions: number; hit: number }>>());
+  useEffect(() => {
+    if (!geoSel || !appId) { setGeoDetail(null); return; }
+    const k = `${data.tf.from}|${data.tf.to}|${appId}|${geoSel}`;
+    const hit = geoMemo.current.get(k);
+    if (hit) { setGeoDetail(hit); return; }
+    setGeoDetail(null);
+    let live = true;
+    (async () => {
+      try {
+        const rows = await Q.runDql<Record<string, unknown>>(Q.qGeoCountry(data.tf, appId, geoSel), 8);
+        const res = rows.map((r) => ({ view: String(r.view ?? "?"),
+          sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0 }));
+        geoMemo.current.set(k, res);
+        if (live) setGeoDetail(res);
+      } catch { if (live) setGeoDetail([]); }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geoSel, appId, data.tf.from, data.tf.to]);
+  useEffect(() => { setGeoSel(null); }, [appId, data.tf.from, data.tf.to]);
+  useEffect(() => { setGeoViewSel(null); }, [geoSel]);
+  /* The map draws into a CANVAS: ReactNode shapes do not paint and CSS cannot
+   * animate there — measured, zero dots rendered. So the animated pins are an
+   * HTML OVERLAY, projected with the same Web-Mercator maths the map uses and
+   * kept in sync through onViewStateChange. HTML means real text labels and
+   * real CSS animation, which is exactly what was asked for. */
+  const [geoView, setGeoView] = useState<{ latitude: number; longitude: number; zoom: number } | null>(null);
+  /* A row click FILTERS; the button at the foot is the only door out —
+   * the reader asked for the hand-off to stay a deliberate act. */
+  const [geoViewSel, setGeoViewSel] = useState<string | null>(null);
+  /* The WHO leg: per-session characteristics for the selected country vs the
+   * rest, pivoted here. Two findings families, both floored so small buckets
+   * cannot pose as findings:
+   *   PRESENCE  — a characteristic over-represented in the region (≥1.5×)
+   *   ERROR     — inside the region, the characteristic whose sessions carry
+   *               the errors (≥2× the region's own rate)              */
+  const [geoWho, setGeoWho] = useState<null | {
+    over: Array<{ d: string; b: string; lift: number; share: number }>;
+    err: Array<{ d: string; b: string; lift: number; rate: number; n: number }>;
+    regionRate: number; restRate: number;
+  }>(null);
+  const whoMemo = React.useRef(new Map<string, NonNullable<typeof geoWho>>());
+  useEffect(() => {
+    if (!geoSel || !appId) { setGeoWho(null); return; }
+    const k = `${data.tf.from}|${data.tf.to}|${appId}|${geoSel}`;
+    const hitM = whoMemo.current.get(k);
+    if (hitM) { setGeoWho(hitM); return; }
+    setGeoWho(null);
+    let live = true;
+    (async () => {
+      try {
+        const rows = await Q.runDql<Record<string, unknown>>(Q.qGeoWho(data.tf, appId, geoSel), 10000);
+        const DIMS = ["os", "browser", "isp", "devtype", "conn", "osv", "browserv"] as const;
+        const LABEL: Record<string, string> = { os: "os", browser: "browser", isp: "isp",
+          devtype: "device", conn: "connection", osv: "os version", browserv: "browser version" };
+        const inRows = rows.filter((r) => Number(r.inC) === 1);
+        const outRows = rows.filter((r) => Number(r.inC) !== 1);
+        const inN = inRows.length || 1, outN = outRows.length || 1;
+        const regionHit = inRows.filter((r) => Number(r.hit) > 0).length;
+        const regionRate = regionHit / inN;
+        const restRate = outRows.filter((r) => Number(r.hit) > 0).length / outN;
+        const over: Array<{ d: string; b: string; lift: number; share: number }> = [];
+        const err: Array<{ d: string; b: string; lift: number; rate: number; n: number }> = [];
+        for (const d of DIMS) {
+          const buckets = new Set(inRows.map((r) => String(r[d] ?? "")).filter(Boolean));
+          for (const b of buckets) {
+            const inB = inRows.filter((r) => String(r[d] ?? "") === b);
+            if (inB.length < 20) continue;
+            const shIn = inB.length / inN;
+            const shOut = outRows.filter((r) => String(r[d] ?? "") === b).length / outN;
+            const lift = shOut > 0 ? shIn / shOut : Infinity;
+            if (shIn >= 0.05 && lift >= 1.5) over.push({ d: LABEL[d], b, lift, share: shIn });
+            const bHit = inB.filter((r) => Number(r.hit) > 0).length;
+            const bRate = bHit / inB.length;
+            const eLift = regionRate > 0 ? bRate / regionRate : 0;
+            if (bHit >= 5 && eLift >= 2) err.push({ d: LABEL[d], b, lift: eLift, rate: bRate, n: inB.length });
+          }
+        }
+        over.sort((x, y) => y.share - x.share);
+        err.sort((x, y) => y.lift - x.lift);
+        const res = { over: over.slice(0, 4), err: err.slice(0, 3), regionRate, restRate };
+        whoMemo.current.set(k, res);
+        if (live) setGeoWho(res);
+      } catch { if (live) setGeoWho({ over: [], err: [], regionRate: 0, restRate: 0 }); }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geoSel, appId, data.tf.from, data.tf.to]);
   const pulse = usePulse(appId, data.tf);
-  const fc = useAppForecast(appId);
+  const fc = useAppForecast(appId, data.tf);
   const ux = useUxOverview(data.tf);
   const scope = useAppScope(appId, data.apps.find((a) => a.appId === appId)?.entity);
   /* The page opens on sessions. Clicking a card opens that card's evidence
@@ -85,12 +193,27 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 
   const mfc = useMetricForecast(appId, data.tf,
     detail && detail !== "services" ? detail : null);
-  /* One projection per card, because every card now draws one. They read the
-   * metric store, measured at 0 scanned bytes, so this is four API calls
-   * rather than four scans. */
+  /* One projection per card, because every card now draws one. These are NOT
+   * free: each runs a DQL timeseries over user.events inside the analyzer, so
+   * each is a real Grail scan — and one the header's readout never sees, since
+   * the app's own query path is not the one executing it. That is why history
+   * is capped (forecastPlan): four cards on a thirty-day window used to ask
+   * for four times ninety days. */
   const fcSessions = useMetricForecast(appId, data.tf, "sessions");
   const fcErrors = useMetricForecast(appId, data.tf, "errors");
   const fcRequests = useMetricForecast(appId, data.tf, "requests");
+  /* THE HERO'S PROJECTION FOLLOWS THE SELECTED BOX. It used to be the error
+   * forecast whatever was selected — so picking "sessions" left a chip talking
+   * about errors beside a chart about sessions. Each box's projection is
+   * already in hand, so the switch costs nothing and never blanks. Services
+   * has no single series to project, so it keeps the application's errors. */
+  const heroFc = detail === "sessions" ? fcSessions
+    : detail === "errors" ? fcErrors
+    : detail === "requests" ? fcRequests
+    : detail && detail !== "services" ? mfc : fc;
+  const heroMetric = detail && detail !== "services"
+    ? METRIC_LABEL[detail as Metric] : "errors";
+
   const svcSeries = useServiceSeries([...scope.services], data.tf);
   const detailRows = useCardDetail(appId, data.tf,
     detail && detail !== "services" ? detail : null);
@@ -299,7 +422,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
         services={scopeCount} svcNames={svcNames} domNames={domNames}
-        fc={fc} onOpen={() => onOpenChain()}
+        fc={heroFc} fcMetric={heroMetric} onOpen={() => onOpenChain()}
         /* Always open. Clicking the open box used to collapse it, which left
            the page with no chart at all and the default box looking broken.
            A box can now only hand the chart to another box, never remove it. */
@@ -329,6 +452,383 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           appEntity={appEntityOf(app.entity, appId)} appName={app.name}
           tracedDomains={domainTraces} onClose={() => setDetail(null)} />
       )}
+
+      {/* ── ACCESS AND HEALTH BY LOCATION ──
+          Rebuilt to the standard of the platform's own dashboard geo tiles:
+          a LARGE map framed on the data (initialViewState from the traffic's
+          own bounding box), bubbles in volume buckets — shapeSize is per
+          layer, so three layers make three sizes — coloured by the health
+          judgement, and the ranked list beside the map as its legend. One
+          scan leg (qGeo) feeds all of it. */}
+      {geo && geo.length > 0 && (() => {
+        const tot = geo.reduce((a, g) => a + g.sessions, 0) || 1;
+        const totHit = geo.reduce((a, g) => a + g.hit, 0);
+        const base = totHit / tot;
+        const max = Math.max(...geo.map((g) => g.sessions), 1);
+        const located = geo.filter((g) => CENTROID[g.country]);
+        // frame the map on the traffic itself
+        const lats = located.map((g) => CENTROID[g.country][0]);
+        const lngs = located.map((g) => CENTROID[g.country][1]);
+        const cLat = lats.length ? (Math.min(...lats) + Math.max(...lats)) / 2 : 20;
+        const cLng = lngs.length ? (Math.min(...lngs) + Math.max(...lngs)) / 2 : 0;
+        const span = lngs.length ? Math.max(Math.max(...lngs) - Math.min(...lngs), 30) : 360;
+        const zoom = span > 200 ? 1.1 : span > 120 ? 1.6 : span > 60 ? 2.2 : 3;
+        /* The rule itself lives in utils/geoVerdict — the board and the
+         * poster judge locations too, and three copies of a threshold is
+         * how screens start to argue. */
+        const arms = (g: GeoArm) => geoArms(g, base);
+        const judge = (g: GeoArm) => geoJudge(g, base);
+        /* The reader's own semantics, stated as a rule: satisfied = green,
+         * tolerating = yellow, frustrated = red. Blue was the odd one out. */
+        const COL = GEO_COL;
+        const WORD = GEO_WORD;
+        const because = (g: GeoArm) => geoBecause(g, base);
+        /* Country NAMES from the browser itself — no dataset needed, and it
+         * speaks the reader's own language. City stays impossible honestly:
+         * measured null on every RUM row of this tenant. */
+        /* LATENCY per region: ttfb p75 from the same scan. Judged against
+         * the MEDIAN country — a region 2× the median is paying for its
+         * route, whatever the absolute number is. */
+        const latVals = geo.filter((g) => g.ttfbMs > 0).map((g) => g.ttfbMs)
+          .sort((x, y) => x - y);
+        const latBase = latVals.length ? latVals[Math.floor(latVals.length / 2)] : 0;
+        const latTone = (g: { ttfbMs: number }) =>
+          !g.ttfbMs || !latBase ? null
+          : g.ttfbMs >= latBase * 2 ? "bad" : g.ttfbMs >= latBase * 1.4 ? "warn" : "good";
+        const fmtLat = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`;
+        /* THE FILTER GRAMMAR, copied from an OBSERVED Users & Sessions URL —
+         * the one rule this app never breaks after being burned by guessed
+         * grammars: the field is `Location`, not Country; the value is the
+         * ENGLISH display name (Japan, "United States"), quoted only when it
+         * carries spaces; `"User Type" = "Real Users"` scopes to people; and
+         * `"Has Errors" = "With Errors"` narrows to the sessions worth
+         * reading when the reader is chasing an error. */
+        const chipQ = (v: string) =>
+          /^[\w.:@/-]+$/.test(v) ? v : `"${v.replace(/["\\]/g, "")}"`;
+        const enName = geoEnName;
+        const nameOf = geoName;
+        const dot = (g: typeof located[number]) => ({
+          latitude: CENTROID[g.country][0], longitude: CENTROID[g.country][1],
+          color: COL[judge(g)], country: nameOf(g.country),
+          sessions: g.sessions, hitByErrors: g.hit,
+        });
+        /* Nine layers, because shape and shapeSize are PER LAYER: three volume
+         * buckets × three health tones. The shape is a ReactNode, which is
+         * what lets the map itself ANIMATE — problem countries pulse a sonar
+         * ring, the busiest breathe. CSS drives it, reduced-motion respected. */
+        const sizeOf = (g: typeof located[number]) =>
+          g.sessions >= max * 0.45 ? 44 : g.sessions >= max * 0.12 ? 26 : 14;
+
+        return (
+          <div className="panel geo">
+            <div className="panel__hd"><span className="lbl">Where they connect from</span>
+              <span className="hint">sessions and health by country · {data.tf.label}</span></div>
+            <div className="pad geo__wrap">
+              <div className="geo__map">
+                <MapView height={380}
+                  initialViewState={{ latitude: cLat, longitude: cLng, zoom }}
+                  onViewStateChange={(v) => setGeoView({
+                    latitude: v.latitude ?? cLat, longitude: v.longitude ?? cLng,
+                    zoom: v.zoom ?? zoom })}>
+                  {/* a faint native layer keeps the map's own tooltip */}
+                  <DotLayer shape="circle" shapeSize={6} data={located.map(dot)} />
+                </MapView>
+                {(() => {
+                  const vs = geoView ?? { latitude: cLat, longitude: cLng, zoom };
+                  const world = 512 * Math.pow(2, vs.zoom);
+                  const mx = (lng: number) => ((lng + 180) / 360) * world;
+                  const my = (lat: number) => {
+                    const p = (lat * Math.PI) / 180;
+                    return ((1 - Math.log(Math.tan(p) + 1 / Math.cos(p)) / Math.PI) / 2) * world;
+                  };
+                  const cx = mx(vs.longitude), cy = my(vs.latitude);
+                  return (
+                    <div className="geo__ov" aria-hidden="true">
+                      {located.map((g) => {
+                        const [la, lo] = CENTROID[g.country];
+                        const sz = sizeOf(g);
+                        const tone = judge(g);
+                        return (
+                          <button type="button" key={g.country}
+                            className={`gpin gpin--${tone}${sz === 44 ? " gpin--busy" : ""}${geoSel === g.country ? " gpin--sel" : ""}`}
+                            style={{ width: sz, height: sz,
+                              left: `calc(50% + ${(mx(lo) - cx).toFixed(1)}px)`,
+                              top: `calc(50% + ${(my(la) - cy).toFixed(1)}px)` }}
+                            title={`${nameOf(g.country)} — ${WORD[tone]} · ${fmtN(g.sessions)} sessions, ${fmtN(g.hit)} met an error · ${because(g)}${g.ttfbMs ? ` · ${fmtLat(g.ttfbMs)} to first byte (p75)` : ""}`}
+                            onClick={() => {
+                              const opening = geoSel !== g.country;
+                              setGeoSel((c) => (c === g.country ? null : g.country));
+                              /* A map pin sits at the top of a tall tile; the
+                               * drill it opens renders below the fold. The
+                               * click carries the reader to what it opened —
+                               * smooth unless they asked for reduced motion. */
+                              if (opening) setTimeout(() => {
+                                /* Not the drill centred — the TILE topped: the
+                                 * reader framed it exactly, map and legend
+                                 * above, details below, all in one screen. */
+                                document.querySelector(".geo")?.scrollIntoView({
+                                  behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+                                    ? "auto" : "smooth",
+                                  block: "start",
+                                });
+                              }, 120);
+                            }}>
+                            {(sz >= 26 || tone !== "good") && (
+                              <span className="gpin__lbl">
+                                {sz === 44 ? nameOf(g.country) : g.country}
+                                <em>{fmtK(g.sessions)}</em>
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="geo__rows">
+                {geo.map((g) => {
+                  const a = arms(g);
+                  const { rate, lift } = a;
+                  const tone = judge(g);
+                  /* when SPEED alone set the tone, the cell must say so — a
+                   * red country with zero errors reading "clean" is the same
+                   * contradiction this tile just got cured of */
+                  const spdOnly = a.level > 0 && a.spd === a.level
+                    && a.abs < a.level && a.rel < a.level;
+                  return (
+                    <button type="button"
+                      className={`geo__r${geoSel === g.country ? " geo__r--on" : ""}`}
+                      onClick={() => {
+                        const opening = geoSel !== g.country;
+                        setGeoSel((c) => (c === g.country ? null : g.country));
+                        if (opening) setTimeout(() => {
+                          document.querySelector(".geo")?.scrollIntoView({
+                            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+                              ? "auto" : "smooth",
+                            block: "start",
+                          });
+                        }, 120);
+                      }}
+                      key={g.country}
+                      title={`${fmtN(g.sessions)} sessions from ${g.country} — ${fmtN(g.hit)} met an error (${(rate * 100).toFixed(1)}%, application average ${(base * 100).toFixed(1)}%) · ${WORD[tone]}: ${because(g)}`}>
+                      <i className="geo__dot" style={{ background: COL[tone] }} />
+                      <b className="geo__cc">{g.country}</b>
+                      <span className="geo__nm">{nameOf(g.country)}</span>
+                      <span className="geo__t">
+                        <i className="geo__b" style={{ width: `${(g.sessions / max) * 100}%`,
+                          background: `color-mix(in srgb, ${COL[tone]} 55%, transparent)` }} />
+                      </span>
+                      <span className="num geo__n">{fmtN(g.sessions)}</span>
+                      {/* the multiplier only when deviation IS the finding —
+                          same substance gate as judge(): a red country at
+                          1.0× the app reads its own rate, and one errored
+                          session in hundreds never gets to claim "2.8×" */}
+                      <em className={`geo__h geo__h--${tone}`}>
+                        {spdOnly ? `Apdex ${a.apx!.toFixed(2)}`
+                          : g.hit === 0 ? "clean"
+                          : lift >= 1.15 && g.hit >= 5 && rate >= 0.02
+                            ? `${lift.toFixed(1)}× the app`
+                          : `${(rate * 100).toFixed(1)}% hit`}
+                      </em>
+                      <em className={`geo__lat${latTone(g) ? ` geo__lat--${latTone(g)}` : ""}`}
+                        title={g.ttfbMs ? `first byte p75 for ${nameOf(g.country)} — the network route's own cost; median country here: ${fmtLat(latBase)}` : "no timed views from here"}>
+                        {g.ttfbMs ? fmtLat(g.ttfbMs) : "—"}
+                      </em>
+                    </button>
+                  );
+                })}
+                {/* the traffic light's own rulebook, always on screen — the
+                    verdict never asks to be taken on faith */}
+                <span className="geo__rule"
+                  title={`Errors: share of a country's sessions that met at least one — this app's average this window: ${(base * 100).toFixed(1)}%; the deviation arm needs ≥30 sessions, 5 errored, 2% hit before it speaks. Slowness: duration-only Apdex over the country's user actions, T = 3s — under 0.85 tolerating, under 0.50 frustrated (≥30 rated actions). Worst arm wins; each pin's tooltip names the arm that fired.`}>
+                  <i style={{ background: COL.bad }} /> ≥25% hit · <i style={{ background: COL.warn }} /> ≥10% ·
+                  <i style={{ background: COL.good }} /> below — or 1.5× / 1.15× the app&apos;s average · slow: Apdex &lt;0.85 / &lt;0.50
+                </span>
+              </div>
+            </div>
+            {/* THE DRILL: what this country does here — its screens, and where
+                it meets errors — plus the hand-off to the platform's own
+                session analysis, already filtered to the country. */}
+            {geoSel && (
+              <div className="pad geo__drill">
+                <div className="geo__drill-hd">
+                  <b>{nameOf(geoSel)} · {geoSel}</b>
+                  <span>{geoDetail === null ? "reading this country's sessions…"
+                    : `top screens · ${data.tf.label}`}</span>
+                  <button className="geo__drill-x" onClick={() => setGeoSel(null)}>✕</button>
+                </div>
+                {geoDetail && geoDetail.length > 0 && (() => {
+                  const dmax = Math.max(...geoDetail.map((d) => d.sessions), 1);
+                  /* The drill speaks the same traffic light as the map: each
+                   * screen judged against the COUNTRY's own error rate —
+                   * green satisfied, yellow tolerating, red where the errors
+                   * concentrate (≥2× the country). Bar and word carry the
+                   * same colour, so the eye needs no second read. */
+                  const cTot = geoDetail.reduce((a, d) => a + d.sessions, 0) || 1;
+                  const cRate = geoDetail.reduce((a, d) => a + d.hit, 0) / cTot;
+                  const toneOf = (d: { sessions: number; hit: number }) => {
+                    if (d.hit === 0) return "good";
+                    const r = d.hit / Math.max(d.sessions, 1);
+                    // same absolute floor as the map: a quarter of sessions
+                    // erroring is red even when the whole country runs hot
+                    return (cRate > 0 && r >= cRate * 2) || r >= 0.25 ? "bad" : "warn";
+                  };
+                  const BAR = { good: "#4cc38a", warn: "#e8c34a", bad: "#ff7a8a" } as const;
+                  return (
+                    <div className="geo__drill-rows">
+                      {geoDetail.map((d) => {
+                        const t = toneOf(d);
+                        const noScreen = d.view === Q.NO_SCREEN;
+                        return (
+                          <button type="button"
+                            className={`geo__dr geo__dr--btn${geoViewSel === d.view ? " geo__dr--on" : ""}`}
+                            key={d.view}
+                            onClick={() => setGeoViewSel((v) => (v === d.view ? null : d.view))}
+                            title={noScreen
+                              ? `${fmtN(d.hit)} ${geoSel} sessions met an error that belongs to no screen — app-level failures like ANR (the app frozen until the OS kills it). They count in the country's total, and a session opened from the list below may carry one of these instead of a screen's error.`
+                              : `${fmtN(d.sessions)} sessions from ${geoSel} on ${d.view}${d.hit ? ` — ${fmtN(d.hit)} met an error (${((d.hit / Math.max(d.sessions, 1)) * 100).toFixed(1)}% vs ${(cRate * 100).toFixed(1)}% for the country)` : ""}. Click to set this screen as the filter — the button below opens the sessions.`}>
+                            <span className="geo__dr-v">{d.view}</span>
+                            <span className="geo__t"><i className="geo__b"
+                              style={{ width: `${(d.sessions / dmax) * 100}%`,
+                                background: `color-mix(in srgb, ${BAR[t]} 55%, transparent)` }} /></span>
+                            <b className="num">{fmtN(d.sessions)}</b>
+                            <em className={`geo__h geo__h--${t}`}>
+                              {d.hit === 0 ? "satisfied"
+                                : t === "bad" ? `${fmtN(d.hit)} hit · frustrated`
+                                : `${fmtN(d.hit)} hit · tolerating`}</em>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                {geoDetail && geoDetail.length === 0 && (
+                  <span className="geo__drill-none">no screens recorded for this country in the window</span>
+                )}
+                {/* WHAT SETS THIS REGION APART — presence lifts vs the rest,
+                    and inside the region, the characteristic that carries the
+                    errors. This is the question the map exists to raise: a red
+                    country is a WHERE; this is the WHAT. */}
+                {geoWho && (geoWho.over.length > 0 || geoWho.err.length > 0 || geoWho.regionRate > 0) && (
+                  <div className="geo__who">
+                    {geoWho.err.length > 0 ? (
+                      <div className="geo__who-g geo__who-g--bad">
+                        <span className="geo__who-l geo__who-l--bad">inside {geoSel}, the errors ride on</span>
+                        {geoWho.err.map((x) => {
+                          const facet = x.d === "browser" ? SESSION_CHIP.browser(x.b)
+                            : x.d === "os" ? SESSION_CHIP.osName(x.b)
+                            : x.d === "device" ? SESSION_CHIP.deviceType(x.b)
+                            : x.d === "isp" ? SESSION_CHIP.clientIsp(x.b)
+                            : x.d === "browser version" ? SESSION_CHIP.browserVersion(x.b)
+                            : x.d === "os version" ? SESSION_CHIP.osVersion(x.b) : null;
+                          return facet ? (
+                          <button type="button" className="geo__who-r geo__who-r--go" key={`${x.d}${x.b}`}
+                            onClick={() => app && openIntent(sessionsLink(data.tf, feName, x.n,
+                              chips(SESSION_CHIP.location(enName(geoSel!)), SESSION_CHIP.realUsers(),
+                                facet, SESSION_CHIP.withErrors()),
+                              `${geoSel} · ${x.b} sessions with errors`))}
+                            title={`${fmtN(x.n)} ${geoSel} sessions on ${x.b} — ${(x.rate * 100).toFixed(1)}% met an error, against ${(geoWho.regionRate * 100).toFixed(1)}% for ${geoSel} overall. Click: these sessions, WITH errors, in Users & Sessions.`}>
+                            <b>{x.b}</b><em>{x.d}</em>
+                            <i className="geo__who-x">{x.lift.toFixed(1)}× the region&apos;s own rate</i>
+                          </button>
+                          ) : (
+                          <span className="geo__who-r" key={`${x.d}${x.b}`}
+                            title={`${x.b} — no session facet exists for ${x.d} in Users & Sessions, so this one cannot be clicked through`}>
+                            <b>{x.b}</b><em>{x.d}</em>
+                            <i className="geo__who-x">{x.lift.toFixed(1)}× the region&apos;s own rate</i>
+                          </span>
+                          );
+                        })}
+                      </div>
+                    ) : geoWho.regionRate > 0 && (
+                      <span className="geo__who-none">
+                        <b>Nothing local stands out.</b> Errors in {geoSel} spread evenly across
+                        devices, browsers and carriers — which points at the route to the region,
+                        not at who is in it.
+                      </span>
+                    )}
+                    {geoWho.over.length > 0 && (
+                      <div className="geo__who-g">
+                        <span className="geo__who-l">what makes {geoSel} different</span>
+                        {geoWho.over.map((x) => {
+                          const facet = x.d === "browser" ? SESSION_CHIP.browser(x.b)
+                            : x.d === "os" ? SESSION_CHIP.osName(x.b)
+                            : x.d === "device" ? SESSION_CHIP.deviceType(x.b)
+                            : x.d === "isp" ? SESSION_CHIP.clientIsp(x.b)
+                            : x.d === "browser version" ? SESSION_CHIP.browserVersion(x.b)
+                            : x.d === "os version" ? SESSION_CHIP.osVersion(x.b) : null;
+                          const Tag = facet ? "button" : "span";
+                          return (
+                            <Tag {...(facet ? { type: "button" as const,
+                                onClick: () => app && openIntent(sessionsLink(data.tf, feName, 0,
+                                  chips(SESSION_CHIP.location(enName(geoSel!)),
+                                    SESSION_CHIP.realUsers(), facet),
+                                  `${geoSel} · ${x.b} sessions`)) } : {})}
+                              className={`geo__who-r${facet ? " geo__who-r--go" : ""}`}
+                              key={`${x.d}${x.b}`}
+                              title={`${(x.share * 100).toFixed(0)}% of ${geoSel}'s sessions are on ${x.b} — ${x.lift === Infinity ? "seen nowhere else" : `${x.lift.toFixed(1)}× everyone else`}${facet ? ". Click: these sessions in Users & Sessions." : ""}`}>
+                              <b>{x.b}</b><em>{x.d}</em>
+                              <i>{x.lift === Infinity ? "only here" : `${x.lift.toFixed(1)}×`}</i>
+                            </Tag>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {app && (() => {
+                  const selRow = geoViewSel
+                    ? geoDetail?.find((d) => d.view === geoViewSel) : undefined;
+                  const chasing = !!selRow && selRow.hit > 0;
+                  const realScreen = !!geoViewSel && geoViewSel !== Q.NO_SCREEN;
+                  return (<>
+                  <button className="geo__drill-go"
+                    title={chasing && realScreen
+                      ? `The Sessions bar has no screen facet, so this opens EVERY ${geoSel} session that met an error — the ${geoViewSel} ones among them, but also app-level failures like ANR. For the screen alone, use the red button.`
+                      : undefined}
+                    onClick={() => {
+                      /* "View Name" is NOT a Sessions facet — it belongs to
+                       * the Error Inspector's bar. Sent here it poisoned the
+                       * whole segment (the reader's screenshot arrived with
+                       * only Frontends applied). And because the chips cannot
+                       * carry the screen, the LABEL must not promise it — a
+                       * reader sent to "Product detail sessions" landed on an
+                       * ANR session and rightly asked where the screen went. */
+                      const chip = chips(
+                        SESSION_CHIP.location(enName(geoSel)),
+                        SESSION_CHIP.realUsers(),
+                        chasing ? SESSION_CHIP.withErrors() : null,
+                      );
+                      const n = geo.find((g) => g.country === geoSel)?.sessions ?? 0;
+                      openIntent(sessionsLink(data.tf, feName, n, chip,
+                        chasing ? `${geoSel} sessions with errors` : `Analyze ${geoSel} sessions`));
+                    }}>
+                    analyze {geoSel} sessions{chasing ? " with errors" : ""} in Users &amp; Sessions →
+                  </button>
+                  {/* The screen itself is filterable only in the ERROR
+                    * INSPECTOR — its bar takes "View Name" and the inventory
+                    * app name, both observed (see errorsExplorerHref). So a
+                    * frustrated screen gets a second door: its errors, each
+                    * one opening the session that met it. The Sessions bar
+                    * cannot say "this screen"; this bar can. The no-screen
+                    * row gets no door: its errors belong to no view, so a
+                    * View Name filter would return nothing. */}
+                  {chasing && realScreen && (
+                    <a className="geo__drill-go geo__drill-go--err"
+                      href={errorsExplorerHref(data.tf, app.name, geoViewSel!)}
+                      target="_blank" rel="noreferrer"
+                      title={`${fmtN(selRow!.hit)} ${geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all frontends' hits on this view.`}>
+                      inspect {geoViewSel} errors in Error Inspector →
+                    </a>
+                  )}
+                  </>);
+                })()}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -376,7 +876,9 @@ interface CardProps {
   services: number | null; svcNames: string[];
   /** The domains this application contacts, busiest first, with their volume. */
   domNames: string[];
-  fc: { total: number; slope: number; point: number[] } | null;
+  fc: Forecast | null;
+  /** What the projection is OF — the selected box's metric, in words. */
+  fcMetric: string;
   onOpen: () => void;
 }
 
@@ -715,7 +1217,9 @@ function CleanCard(p: CardProps) {
           <div className={`tk-fc cc-fc${p.fc.slope > 0 ? " tk-fc--warn cc-fc--rising" : ""}`}>
             <div className="cc-fc__row">
               <AnalyticsIcon />
-              <span>forecast ≈ {fmtK(Math.round(p.fc.total))} errors 12h
+              <span title={`Projected by the platform's own analyzer over this application's
+error series, read at the same width the window is drawn in.`}>
+                forecast ≈ {fmtK(Math.round(p.fc.total))} {p.fcMetric} next {aheadOf(p.fc)}{" "}
                 · {p.fc.slope > 0 ? "rising ↗" : "easing ↘"}</span>
             </div>
             <ForecastLine fc={p.fc} />
@@ -1150,7 +1654,7 @@ function MetricChart({ series, tf, metric, fc }: {
           <em>· {tf.label}, peak {fmtN(Math.round(peak))}</em></span>
         {fc && (
           <span className={`mch__fc${fc.slope > 0 ? " mch__fc--up" : ""}`}>
-            forecast ≈ {fmtK(total)} next {HZ} intervals
+            forecast ≈ {fmtK(total)} next {aheadOf(fc)}{" "}
             · {fc.slope > 0 ? "rising ↗" : "easing ↘"}
           </span>
         )}

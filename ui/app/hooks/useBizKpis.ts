@@ -9,6 +9,8 @@ import { qBizKpis, runDql, type OutcomeDefs, type Timeframe } from "../utils/dql
 export interface BizPeriod {
   sessions: number; realSessions: number; converted: number; convertedReal: number;
   hitReal: number; fatalSessions: number;
+  /** Customers whose actions went past the satisfaction threshold T. */
+  waitedReal: number;
   engaged: number; realEngaged: number; actions: number; abandoned: number;
   satisfied: number; tolerating: number; frustrated: number;
 }
@@ -18,7 +20,7 @@ export interface BizKpis {
 }
 
 const ZERO: BizPeriod = { sessions: 0, realSessions: 0, converted: 0, convertedReal: 0,
-  hitReal: 0, fatalSessions: 0, engaged: 0, realEngaged: 0, actions: 0, abandoned: 0,
+  hitReal: 0, fatalSessions: 0, waitedReal: 0, engaged: 0, realEngaged: 0, actions: 0, abandoned: 0,
   satisfied: 0, tolerating: 0, frustrated: 0 };
 const memo = new Map<string, BizKpis>();
 
@@ -43,6 +45,7 @@ export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs,
             sessions: Number(r.sessions) || 0, realSessions: Number(r.realSessions) || 0,
             converted: Number(r.converted) || 0, convertedReal: Number(r.convertedReal) || 0,
             hitReal: Number(r.hitReal) || 0, fatalSessions: Number(r.fatalSessions) || 0,
+            waitedReal: Number(r.waitedReal) || 0,
             engaged: Number(r.engaged) || 0, realEngaged: Number(r.realEngaged) || 0,
             actions: Number(r.actions) || 0,
             abandoned: Number(r.abandoned) || 0, satisfied: Number(r.satisfied) || 0,

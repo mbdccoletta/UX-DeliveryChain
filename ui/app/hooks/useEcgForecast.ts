@@ -9,8 +9,8 @@
 // forecast needs more past than the screen shows — while the horizon stays
 // about a third of the visible span, so the future never dwarfs the present.
 import { useEffect, useState } from "react";
-import { forecast, type Forecast } from "../utils/forecast";
-import { binFor, durStr, type Timeframe } from "../utils/dql";
+import { forecast, forecastPlan, type Forecast } from "../utils/forecast";
+import type { Timeframe } from "../utils/dql";
 
 /** The metrics that have a real per-bin series behind them. */
 export type Metric = "sessions" | "errors" | "actions" | "requests";
@@ -20,14 +20,14 @@ export const METRIC_LABEL: Record<Metric, string> = {
   actions: "user actions", requests: "web requests",
 };
 
-/** Three windows of history at the chart's own bin width, and a horizon of
- *  about a third of the visible span — derived, so any window the selector
- *  offers is covered, not just four presets. */
-const histOf = (tf: Timeframe) => durStr(tf.minutes * 3);
-const horizonOf = (tf: Timeframe) => {
-  const bin = tf.minutes / 34;
-  return Math.max(6, Math.min(24, Math.round((tf.minutes / 3) / Math.max(bin, 1))));
-};
+// History, bin and horizon all come from forecastPlan now — the single rule
+// shared with the chain's own projection. What used to live here asked for
+// three times the visible window at the CHART's bin width, uncapped: on a
+// thirty-day view that is ninety days of user.events per metric, four metrics
+// deep, every one of them past the platform's 500 GB scan limit. That is the
+// slowness a wide window showed, and the numbers it returned came from a
+// partial scan. The plan caps history at one day and sizes the bin off the
+// history, so the projection keeps its points and the window keeps its cost.
 
 const AGG: Record<Metric, string> = {
   sessions: "sessions = countDistinct(dt.rum.session.id)",
@@ -52,9 +52,10 @@ export function useMetricForecast(
 
     let live = true;
     setFc(null);
-    forecast(`fetch user.events, from: now()-${histOf(tf!)}
+    const plan = forecastPlan(tf!.minutes);
+    forecast(`fetch user.events, from: now()-${plan.hist}
 | filter dt.rum.application.id == "${rumAppId!.replace(/"/g, "")}"
-| makeTimeseries ${AGG[metric!]}, interval: ${binFor(tf!.minutes)}`, horizonOf(tf!))
+| makeTimeseries ${AGG[metric!]}, interval: ${plan.bin}`, plan.horizon)
       .then((f) => { memo.set(key, f); if (live) setFc(f); });
 
     return () => { live = false; };
