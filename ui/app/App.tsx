@@ -163,19 +163,6 @@ export function App() {
   // the flow page reads its technical vitals from the INFOGRAPHIC now, where
   // they answer the filtered question; only the chain needs this scan
 
-  // The header quotes the same per-session scan the pages quote, so the title
-  // bar and the card below it can never state two different session counts.
-  const totalSessions = uxMap
-    ? d.apps.reduce((a, x) => a + (uxMap.get(x.appId)?.sessions ?? x.sessions), 0)
-    : d.apps.reduce((a, x) => a + x.sessions, 0);
-  const activeProblems = d.problems.length;
-  /* ENVIRONMENT-scoped active signals — custom alerts and OpenPipeline
-   * extractions bound to the tenant itself. No card carries that id, so the
-   * audit found them shown by the platform's own apps and invisible here;
-   * the estate line is the one place scoped exactly like they are. */
-  const envAlerts = [...new Set(d.signals
-    .filter((s) => s.entityId.startsWith("ENVIRONMENT"))
-    .map((s) => s.name))];
   // The classic model and RUM both key a mobile app's entity as
   // MOBILE_APPLICATION-…, whichever of the two named it — verified against
   // every mobile app currently listed. A web app's entity never starts this
@@ -243,17 +230,9 @@ export function App() {
           )}
           <TitleBar.Suffix>
             <div className="ctl">
-              {!d.loading && (
-                <span className="lbl">
-                  {d.apps.length} applications · {fmtN(totalSessions)} sessions ·{" "}
-                  {activeProblems} active problems
-                  {envAlerts.length > 0 && (
-                    <span title={`Active alerts scoped to the ENVIRONMENT itself — no single component owns them: ${envAlerts.slice(0, 8).join(" · ")}`}>
-                      {" "}· {envAlerts.length} environment alert{envAlerts.length > 1 ? "s" : ""}
-                    </span>
-                  )}
-                </span>
-              )}
+              {/* the estate line (apps · sessions · problems · env alerts)
+                  was removed by request — the pages themselves carry their
+                  numbers, and the bar keeps only the controls */}
               {!d.loading && d.apps.length > 0 && (
                 <Select
                   value={current}
