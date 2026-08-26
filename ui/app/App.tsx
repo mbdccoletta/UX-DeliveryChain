@@ -86,10 +86,30 @@ export function App() {
   // Flow (whose step mode now takes custom paths) is the Journeys page.
   // Any window the platform selector can express — presets and custom ranges
   // alike — travels in the URL as the two expressions the queries will use.
-  const tf = React.useMemo(
-    () => tfFrom(state.from || TF0.from, state.to || TF0.to),
-    [state.from, state.to],
-  );
+  /* THE 24-HOUR CEILING. Scan cost is linear in the window (measured:
+   * ~16.9 GB for 2h of this estate — a 30-day pick would be ~6 TB), so the
+   * window's LENGTH is capped at 24h: the END the reader chose is kept and
+   * the start is pulled up to 24h before it. Recency is not constrained —
+   * yesterday's 2h window is as valid as today's. The label says when the
+   * cap acted, because a silently different window is the lie this app
+   * refuses to tell. */
+  const tf = React.useMemo(() => {
+    const raw = tfFrom(state.from || TF0.from, state.to || TF0.to);
+    if (raw.minutes <= 1440) return raw;
+    if (/^now\(\)$/i.test(raw.to.trim())) {
+      const capped = tfFrom("-24h", "now");
+      return { ...capped, label: `${capped.label} — capped at 24h` };
+    }
+    const endIso = raw.to.replace(/"/g, "");
+    const end = new Date(endIso);
+    if (!Number.isFinite(end.getTime())) {
+      const capped = tfFrom("-24h", "now");
+      return { ...capped, label: `${capped.label} — capped at 24h` };
+    }
+    const start = new Date(end.getTime() - 24 * 3600e3);
+    const capped = tfFrom(start.toISOString(), end.toISOString());
+    return { ...capped, label: `${capped.label} — capped at 24h` };
+  }, [state.from, state.to]);
   const appId = state.app;
 
   // a new view or a different application is worth a history entry; changing
@@ -273,7 +293,19 @@ export function App() {
               {/* the platform's own selector: presets, custom range, stepper */}
               <TimeframeSelector
                 value={{ from: state.from || TF0.from, to: state.to || TF0.to }}
-                onChange={(v) => setTf(v?.from.value ?? TF0.from, v?.to.value ?? TF0.to)} />
+                onChange={(v) => setTf(v?.from.value ?? TF0.from, v?.to.value ?? TF0.to)}>
+                {/* only windows the 24h ceiling allows — the platform's
+                    default list offers 7/30/90 days, which the cap above
+                    would silently shrink; better not to offer them */}
+                <TimeframeSelector.Presets>
+                  <TimeframeSelector.PresetItem value={{ from: "-30m", to: "now" }}>Last 30 minutes</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-1h", to: "now" }}>Last 1 hour</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-2h", to: "now" }}>Last 2 hours</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-6h", to: "now" }}>Last 6 hours</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-12h", to: "now" }}>Last 12 hours</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-24h", to: "now" }}>Last 24 hours</TimeframeSelector.PresetItem>
+                </TimeframeSelector.Presets>
+              </TimeframeSelector>
             </div>
           </TitleBar.Suffix>
         </TitleBar>
