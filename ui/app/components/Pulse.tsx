@@ -24,7 +24,7 @@ import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
 import { useGeo } from "../hooks/useGeo";
-import { ChoroplethLayer, DotLayer, MapView } from "@dynatrace/strato-geo";
+import { DotLayer, MapView } from "@dynatrace/strato-geo";
 import { CENTROID } from "../utils/geoCentroids";
 import { usePulse } from "../hooks/usePulse";
 import { useAppScope } from "../hooks/useAppScope";
@@ -37,7 +37,7 @@ import { aheadOf, type Forecast } from "../utils/forecast";
 import { useUxOverview } from "../hooks/useUxOverview";
 import { originOf } from "./DeliveryChain";
 import {
-  AnalyticsIcon, CriticalIcon, DesktopIcon, GroupIcon, HttpIcon, InternetIcon,
+  AnalyticsIcon, DesktopIcon, HttpIcon,
   MobileIcon, ServicesIcon, UserSessionsIcon, WarningIcon,
 } from "@dynatrace/strato-icons";
 
@@ -490,8 +490,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const arms = (g: GeoArm) => geoArms(g, base);
         const judge = (g: GeoArm) => geoJudge(g, base);
         /* The reader's own semantics, stated as a rule: satisfied = green,
-         * tolerating = yellow, frustrated = red. Blue was the odd one out. */
+         * tolerating = yellow, frustrated = red. Blue was the odd one out.
+         * COL's literals are for the CANVAS layer only (it paints outside
+         * CSS and cannot read a var); everything rendered as HTML uses the
+         * theme tokens, so the map follows light mode like every other
+         * verdict on screen. */
         const COL = GEO_COL;
+        const TOK = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" } as const;
         const WORD = GEO_WORD;
         const because = (g: GeoArm) => geoBecause(g, base);
         /* Country NAMES from the browser itself — no dataset needed, and it
@@ -623,12 +628,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       }}
                       key={g.country}
                       title={`${fmtN(g.sessions)} sessions from ${g.country} — ${fmtN(g.hit)} met an error (${(rate * 100).toFixed(1)}%, application average ${(base * 100).toFixed(1)}%) · ${WORD[tone]}: ${because(g)}`}>
-                      <i className="geo__dot" style={{ background: COL[tone] }} />
+                      <i className="geo__dot" style={{ background: TOK[tone] }} />
                       <b className="geo__cc">{g.country}</b>
                       <span className="geo__nm">{nameOf(g.country)}</span>
                       <span className="geo__t">
                         <i className="geo__b" style={{ width: `${(g.sessions / max) * 100}%`,
-                          background: `color-mix(in srgb, ${COL[tone]} 55%, transparent)` }} />
+                          background: `color-mix(in srgb, ${TOK[tone]} 55%, transparent)` }} />
                       </span>
                       <span className="num geo__n">{fmtN(g.sessions)}</span>
                       {/* the multiplier only when deviation IS the finding —
@@ -667,7 +672,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   <b>{nameOf(geoSel)} · {geoSel}</b>
                   <span>{geoDetail === null ? "reading this country's sessions…"
                     : `top screens · ${data.tf.label}`}</span>
-                  <button className="geo__drill-x" onClick={() => setGeoSel(null)}>✕</button>
+                  <button className="geo__drill-x" aria-label="Close"
+                    onClick={() => setGeoSel(null)}>✕</button>
                 </div>
                 {geoDetail && geoDetail.length > 0 && (() => {
                   const dmax = Math.max(...geoDetail.map((d) => d.sessions), 1);
@@ -689,7 +695,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     if (d.sessions >= GEO_MIN_SESSIONS && r >= GEO_ABS_WARN) return "warn";
                     return "good";
                   };
-                  const BAR = GEO_COL;
+                  // theme tokens — these bars are HTML, not canvas
+                  const BAR = { good: "var(--good)", warn: "var(--warn)",
+                    bad: "var(--bad)" } as const;
                   return (
                     <div className="geo__drill-rows">
                       {geoDetail.map((d) => {

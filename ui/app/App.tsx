@@ -11,7 +11,7 @@ import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
-import { fmtN, tfFrom, type Timeframe } from "./utils/dql";
+import { tfFrom } from "./utils/dql";
 import { FlowSankey } from "./components/FlowSankey";
 import { DeliveryChain } from "./components/DeliveryChain";
 import { Pulse } from "./components/Pulse";
@@ -339,14 +339,15 @@ export function App() {
           )}
           {tab === "flow" && jd && (
             <div className="stack">
+              {/* friction/onOpen retired with the audit: the prop was never
+                  read and the hand-off callback had no consumer */}
               <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={jd.sequences} appId={current || null}
-                transitions={jd.transitions} friction={jd.friction} views={jd.views} ux={uxMap}
+                transitions={jd.transitions} views={jd.views} ux={uxMap}
                 tf={tf}
                 cohort={state.coh === "unconverted" ? "unconverted" : null}
                 onCohortConsumed={() => set({ coh: null }, false)}
                 onBizScope={(picks) => set({ tab: "report", rt: picks.join("\t") })}
-                onPickApp={(id) => { setAppId(id); }}
-                onOpen={(_t, id) => { setAppId(id); setTab("chain"); }} /></Boundary>
+                onPickApp={(id) => { setAppId(id); }} /></Boundary>
             </div>
           )}
 
@@ -370,7 +371,6 @@ export function App() {
             <Boundary label="Report">
               <ReportView data={{ ...d, views: jd?.views ?? [], sequences: jd?.sequences ?? [],
                   transitions: jd?.transitions ?? [], friction: jd?.friction ?? [] }} scopeApp={current}
-                onRoutePicks={(picks) => set({ rt: picks.length ? picks.join("\t") : null }, false)}
                 routePicks={state.rt ? state.rt.split("\t").filter(Boolean) : null}
                 onClearRoutes={() => set({ rt: null }, false)}
                 cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}

@@ -136,7 +136,7 @@ export function verdictOf(v: VerdictInput): Verdict {
     return say("info", "no impact measured in this window");
 
   return say("good", hitRate > 0
-    ? `${pct(1 - hitRate)} ${of.replace("of ", "of ")} error-free`
+    ? `${pct(1 - hitRate)} ${of} error-free`
     : humansMeasured ? "no real user hit by an error" : "no session hit by an error");
 }
 

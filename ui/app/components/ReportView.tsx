@@ -19,14 +19,15 @@ import { useBizBreakdown } from "../hooks/useBizBreakdown";
 import { useDifficulty } from "../hooks/useDifficulty";
 import { useAppScope } from "../hooks/useAppScope";
 import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
-import { routeCtxOf } from "./FlowSankey";
-import { fmtMs, fmtN, type OutcomeDefs } from "../utils/dql";
+import { deepestOf, routeCtxOf } from "./FlowSankey";
+import { fmtMs, fmtN, fmtPct, type OutcomeDefs } from "../utils/dql";
 import { useGeo } from "../hooks/useGeo";
 import { GEO_WORD, geoBecause, geoJudge, geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
 
 type Dir = "good" | "bad" | "flat";
-const pct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
+/** the shared share formatter (utils/dql) — three copies had drifted */
+const pct = fmtPct;
 
 /** The ARROW is the direction the number moved; the COLOUR is whether that
  *  was good for the business. Risk rising = ▲ in red; risk falling = ▼ in
@@ -43,7 +44,6 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
 export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
-  defsUnreadable, savedJourneys, onDropJourney, onEditJourney, onStartDefine, onRoutePicks,
   routePicks, onClearRoutes, onGo }: {
   data: ChainData;
   /** The application this board reads — the header's own selector drives it,
@@ -58,21 +58,10 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   /** Customer-taught conversion definitions — they replace the keyword
    *  heuristic per application, and the hero says so. */
   outcomeDefs?: OutcomeDefs;
-  /** The definitions store could not be read — say so rather than claiming
-   *  the fallback is the customer's own rule. */
-  defsUnreadable?: boolean;
-  /** The journeys the reader defined, one at a time, on Journeys. The board
-   *  offers them back as filters — and here MORE THAN ONE can be combined,
-   *  because "what does converted mean" is authored singly while "how do
-   *  these journeys perform" is asked of several at once. */
-  savedJourneys?: string[][];
-  onDropJourney?: (journey: string[]) => void;
-  /** Re-pick this journey on the flow; saving there replaces it. */
-  onEditJourney?: (journey: string[]) => void;
-  /** Start the definition process — opens the flow already waiting for the
-   *  one click that is the reader's to make. */
-  onStartDefine?: () => void;
-  onRoutePicks?: (picks: string[]) => void;
+  /* six props (defsUnreadable, savedJourneys, onDropJourney, onEditJourney,
+     onStartDefine, onRoutePicks) were declared, documented, passed — and
+     never read in the body. They belonged to the unreachable definition
+     mode; removed with it (audit). */
   /** Routes picked on Journeys — the board recomputes its journey and brand
    *  figures for exactly those sessions. */
   routePicks?: string[] | null;
@@ -145,21 +134,13 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   const completeness = React.useMemo(() => {
     const mine = data.sequences.filter((q) => (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
     const total = mine.reduce((a, q) => a + q.sessions, 0);
-    /* NOT THE LONGEST ROUTE — the deepest one people actually reach. Measured
-     * here: the single deepest journey ran 25 views and exactly ONE session
-     * walked it, so "complete" meant 0.0% and the metric said nothing. One
-     * outlier cannot be the bar. The bar is the deepest depth that at least a
-     * tenth of the sessions still reach, which self-calibrates to any
-     * application — a three-screen signup and a twenty-screen checkout both
-     * get a bar their own traffic defines. */
-    const FLOOR = 0.1;
+    /* THE SAME FUNCTION the diagram draws with (FlowSankey.deepestOf) — the
+     * rule lived twice, and the flow's copy was the naive maximum, so one
+     * 9-screen outlier made its header read "2 of 1,171 finished (0.2%)"
+     * beside a board saying 49%. */
     const reach = (d: number) =>
       mine.filter((q) => q.journey.length >= d).reduce((a, q) => a + q.sessions, 0);
-    const maxDepth = mine.reduce((m, q) => Math.max(m, q.journey.length), 0);
-    let deepest = 2;
-    for (let d = maxDepth; d >= 2; d--) {
-      if (total && reach(d) / total >= FLOOR) { deepest = d; break; }
-    }
+    const deepest = deepestOf(mine);
     const full = deepest > 1 ? reach(deepest) : 0;
     return { deepest, total, full, share: total ? full / total : 0 };
   }, [data.sequences, scopeApp]);

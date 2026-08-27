@@ -2,7 +2,6 @@
 // problems, custom alerts and extension events.
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { fmtK, fmtMs, fmtN, perfScore } from "../utils/dql";
-import { insightsFor, type Insight } from "../utils/insights";
 import { appHomeHref, intentsAvailable, investigationPaths, kindOf,
   KIND_LABEL as ENTITY_WORD, open,
   type Persona, type Route } from "../utils/links";
@@ -2000,7 +1999,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                          style={{ ["--tone" as string]: TVAR[n.tone] }}
                          role="button" tabIndex={0}
                          onClick={() => setSel(`${selAll}-${i}`)}
-                         onKeyDown={(e) => { if (e.key === "Enter") setSel(`${selAll}-${i}`); }}>
+                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") {
+                           e.preventDefault(); setSel(`${selAll}-${i}`); } }}>
                       <span className="lrow__n">{n.nm}
                         {probs > 0 && <i className="lrow__tag lrow__tag--p"
                           title="Active Davis problems on this element">
@@ -2464,13 +2464,6 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     </div>
   );
 }
-
-const SEV_COLOR: Record<Insight["severity"], string> = {
-  critical: "var(--bad)", warning: "var(--warn)", notable: "var(--info)", good: "var(--good)",
-};
-const SEV_LABEL: Record<Insight["severity"], string> = {
-  critical: "critical", warning: "watch", notable: "context", good: "cleared",
-};
 
 const P_HUE: Record<Persona, string> = {
   technical: "var(--t-cyan)", tactical: "var(--t-violet)", executive: "var(--t-pink)",

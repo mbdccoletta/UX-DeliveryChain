@@ -10,7 +10,7 @@
 // (qRouteInfographic). Where the two differ, the poster says so with the
 // lift; where nothing differs it says "same as everyone", which is a finding.
 import React, { useEffect } from "react";
-import { fmtMs, fmtN } from "../utils/dql";
+import { fmtMs, fmtN, fmtPct } from "../utils/dql";
 import { vitalTitle } from "../utils/vitals";
 import { geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
@@ -64,7 +64,6 @@ export function convSegments(rows: InfoRow[], base: number, cohortCustomers: num
   };
 }
 
-const fmtPct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
 
 /**
  * WHAT STANDS OUT — the poster's insight layer.
@@ -206,7 +205,7 @@ function median(rows: InfoRow[], k: "p50dur" | "p50views", inCohort: boolean) {
 
 
 export function RouteInfographic({ rows, path, appName, cohort, total, biz, vitals,
-  convDef, savedJourneys, onAddJourney, stops, approx, onClose }: {
+  convDef, stops, approx, onClose }: {
   rows: InfoRow[] | "loading";
   /** The picked waypoints, in order, in words. */
   path: string[];
@@ -228,11 +227,6 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
    *  conversion" without ever saying 17% of WHAT; a rate whose rule is invisible
    *  is a number nobody can check. */
   convDef?: { taught: boolean; unreadable?: boolean; items: string[] } | null;
-  /** The journeys defined for this application — the same list the board
-   *  shows, so a reader checking a conversion figure on the poster does not
-   *  have to leave it to learn what conversion means here. */
-  savedJourneys?: string[][];
-  onAddJourney?: () => void;
   /** The screens this cohort ended on, busiest first. */
   stops?: StopRow[] | null;
   /** Figures were scaled from capped samples — worn as ≈ and said in the foot. */
@@ -243,6 +237,9 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
    * everyone" is not evidence the reader is reading — it is evidence they are
    * scrolling past. They stay one click away, never deleted. */
   const [exporting, setExporting] = React.useState(false);
+  /* a ref, like the board's export — querySelector(".rinfo") would grab the
+     wrong node the moment two posters coexist */
+  const posterRef = React.useRef<HTMLDivElement>(null);
   const [showFlat, setShowFlat] = React.useState(false);
 
   useEffect(() => {
@@ -263,7 +260,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
   return (
     <div className="ovl" onClick={onClose} role="dialog" aria-modal="true"
       aria-label={`Who takes this route through ${appName}`}>
-      <div className="rinfo" onClick={(e) => e.stopPropagation()}>
+      <div className="rinfo" ref={posterRef} onClick={(e) => e.stopPropagation()}>
         <header className="rinfo__hd">
           <span className="rinfo__eyebrow">
             {path.length === 1 && path[0] === "every journey on screen"
@@ -336,10 +333,11 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
             style={{ marginLeft: "auto", marginRight: 8 }}
             title="Download this poster as a PNG (2×) — full height, this button left out of the picture"
             onClick={async () => {
-              const el = document.querySelector(".rinfo") as HTMLElement | null;
+              const el = posterRef.current;
               if (!el) return;
               setExporting(true);
-              try { await exportImage(el, "journey-poster"); }
+              try { await exportImage(el,
+                `journey-poster-${(appName || "app").replace(/[^\w-]+/g, "-").toLowerCase()}`); }
               finally { setExporting(false); }
             }}>
             {exporting ? "rendering…" : "export image ↓"}
@@ -695,7 +693,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                                 style={{ width: `${(x.si / max) * 100}%` }} />
                             </span>
                             <b className="rinfo__bar-v">{fmtPct(x.si)}</b>
-                            <em className="rinfo__bar-d">{liftWord(l)}</em>
+                            <em className="rinfo__bar-d" title={liftWord(l)}>{liftWord(l)}</em>
                           </div>
                         );
                       })}
