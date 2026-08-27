@@ -179,6 +179,9 @@ interface Edge {
    *  null = still loading. Free — every count already sits in the rows the
    *  edge volumes come from. */
   bad?: number | null;
+  /** True when the app has failed calls that carry no domain — a leg whose
+   *  own count is 0 cannot claim "clean" while failures sit unattributed. */
+  blind?: boolean;
   /** The leg's median latency, when the same rows carry one (ns). */
   p50?: number;
   /** The tail — speaks when the median is 0 (measured: over half of the
@@ -270,11 +273,17 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       ? Math.min(Math.round(impacted.hitReal * (total / realSessions)), total) : 0;
   };
 
-  // rows arrive split by origin for the edges; cards aggregate per domain
+  // rows arrive split by origin for the edges; cards aggregate per domain.
+  // err now counts failed CALLS (fetch-source errors); on tenants whose
+  // error events carry no url.domain they arrive under domain "" — those
+  // failures are real but unattributable, so they gate the "clean" word
+  // instead of joining a domain's tally.
+  let unattribErr = 0;
   const domAgg = new Map<string, { domain: string; provider: string | null;
     reqs: number; p50: number; p90: number; err: number; bytes: number;
     late: number | null }>();
   for (const r of domains) {
+    if (!r.domain) { unattribErr += r.err; continue; }
     const cur = domAgg.get(r.domain);
     if (cur) {
       // the DOMINANT segment's p50 names the domain — max() once let a
@@ -629,7 +638,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
         tone: "info", domain: firstParty.domain, vol: firstParty.reqs,
         det: [["Requests", fmtN(firstParty.reqs)],
               ...latRows(firstParty.p50, firstParty.p90),
-              ["Errors", fmtN(firstParty.err)],
+              ["Failed calls", fmtN(firstParty.err)],
               ["Transferred", fmtK(Math.round(firstParty.bytes / 1048576)) + " MB"],
               // a promoted domain says WHY it sits here: RUM tagged it
               // third-party, the spans said otherwise
@@ -825,7 +834,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     }
     const di = idxIn(1, (e) => e.nm === r.domain);
     if (di !== null) edges.push({ s: [0, oi], t: [1, di], v: r.reqs, label: "requests",
-      bad: r.err, p50: r.p50, p90: r.p90, late: r.late ?? null });
+      bad: r.err, blind: unattribErr > 0, p50: r.p50, p90: r.p90, late: r.late ?? null });
   }
   // every origin also feeds the application itself
   for (const [oi, o] of layers[0].items.slice(0, NODE_CAP).entries()) {
@@ -844,10 +853,10 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     if (dcard.miss) continue;
     const agg = domAgg.get(dcard.nm);
     if (agg) edges.push({ s: [1, di], t: [2, 0], v: agg.reqs, label: "requests",
-      bad: agg.err, p50: agg.p50, p90: agg.p90, late: agg.late });
+      bad: agg.err, blind: unattribErr > 0, p50: agg.p50, p90: agg.p90, late: agg.late });
   }
   if (firstParty) edges.push({ s: [2, 0], t: [3, 0], v: firstParty.reqs,
-    label: "ingress requests", bad: firstParty.err, p50: firstParty.p50,
+    label: "ingress requests", bad: firstParty.err, blind: unattribErr > 0, p50: firstParty.p50,
     p90: firstParty.p90, late: firstParty.late });
   if (!unlinked) {
     // ingress → each rendered service, weighted by its observed traces
@@ -1243,8 +1252,11 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         const op = sel ? (touches ? 1 : 0.5) : 0.9;
         /* the hover carries the leg's facts: casualties and cost */
         const hurtWord = e.label === "sessions" ? "met an error" : "failed";
+        // "clean" is EARNED, not defaulted: a transport leg whose app has
+        // failed calls that carry no domain cannot claim it — silence there,
+        // never a false all-clear
         const hurt = e.bad == null || rate == null ? ""
-          : e.bad === 0 ? " · clean"
+          : e.bad === 0 ? (e.blind ? "" : " · clean")
           : ` · ${fmtN(e.bad)} ${hurtWord} (${(rate * 100).toFixed(rate >= 0.1 ? 0 : 1)}%)`;
         const lat = e.p50 && e.p50 > 0 ? ` · p50 ${fmtMs(e.p50)}`
           : e.p90 && e.p90 > 0 ? ` · p90 ${fmtMs(e.p90)} (the median reports 0)` : "";

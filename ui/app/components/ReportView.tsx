@@ -640,7 +640,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
         </label>
         {/* the board is a thing people paste into decks — export the whole
             of it, not a viewport crop */}
-        <button className="bc__export noexport" disabled={exporting}
+        <button className="export-btn noexport" disabled={exporting}
           title="Download this board as a PNG (2×) — the export button itself stays out of the picture"
           onClick={async () => {
             if (!bcRef.current) return;
@@ -648,7 +648,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             try { await exportImage(bcRef.current, `business-control-${data.tf.label.replace(/\W+/g, "-")}`); }
             finally { setExporting(false); }
           }}>
-          {exporting ? "rendering…" : "⬇ export image"}
+          {exporting ? "rendering…" : "export image ↓"}
         </button>
       </div>
 

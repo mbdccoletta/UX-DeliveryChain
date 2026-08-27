@@ -2924,6 +2924,29 @@ div:has(> header):has(main) > div {
 .tpick__c:hover { border-color: var(--accent); color: var(--ink-hi); }
 .tpick__more { font: 400 9.5px var(--mono); color: var(--ink-3); }
 
+/* a poster scan that failed — a sentence and a retry, never a silent
+   empty poster wearing a stale header */
+.rinfo--err { position: fixed; inset: 0; margin: auto; width: min(420px, 90vw);
+  height: max-content; padding: 22px; display: flex; flex-direction: column;
+  gap: 14px; align-items: flex-start; z-index: 60;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--ink); font: 500 13px var(--sans); }
+.rinfo--err > div { display: flex; gap: 10px; align-items: center; }
+
+/* the export button, SAID in words — a bare "⬇" reused the close-button
+   shape, rendered as tofu in some fonts, and the reader could not find the
+   download at all. One shared style for the poster and the board. */
+.export-btn { display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-field, 6px); cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font: 700 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent); white-space: nowrap; }
+.export-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--ink-hi); }
+.export-btn:disabled { opacity: .6; cursor: progress; }
+
 /* the drawer's ONE primary action — the technical route's first step worn as
    a real button, standing where three persona walls used to open */
 .drill-primary { display: block; margin: 10px 0 2px; padding: 9px 14px;

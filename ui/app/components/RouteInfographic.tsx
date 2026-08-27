@@ -323,14 +323,18 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
           )}
           <div className="rinfo__cohort">
             <b className="num">{approx ? "≈ " : ""}{fmtN(cohort)}</b>
-            <span>{cohort >= total ? "sessions — the whole flow"
+            <span>{rows !== "loading" && cohort === 0
+              ? "sessions matched this pick in the current window — the diagram may be older than the data; close and re-query"
+              : cohort >= total ? "sessions — the whole flow"
               : `sessions on this route · ${total ? fmtPct(cohort / total) : "—"} of ${fmtN(total)}`}</span>
           </div>
           {/* the poster is MADE for pasting into decks and tickets — export
-              the whole of it at 2×, chrome (this button, the ✕) excluded */}
-          <button className="drawer__x noexport" disabled={exporting}
-            style={{ marginLeft: 0 }}
-            title="Download this poster as a PNG (2×)"
+              the whole of it at 2×, chrome (this button, the ✕) excluded.
+              A WORDED button: the bare glyph rendered as tofu and the
+              reader could not find the download at all. */}
+          <button className="export-btn noexport" disabled={exporting}
+            style={{ marginLeft: "auto", marginRight: 8 }}
+            title="Download this poster as a PNG (2×) — full height, this button left out of the picture"
             onClick={async () => {
               const el = document.querySelector(".rinfo") as HTMLElement | null;
               if (!el) return;
@@ -338,7 +342,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               try { await exportImage(el, "journey-poster"); }
               finally { setExporting(false); }
             }}>
-            {exporting ? "…" : "⬇"}
+            {exporting ? "rendering…" : "export image ↓"}
           </button>
           <button className="drawer__x" onClick={onClose} aria-label="Close">✕</button>
         </header>
@@ -379,14 +383,18 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               ] as Array<[string, number, number, (v: number) => string, boolean]>)
                 .map(([label, a, b, f, isRate]) => {
                   const l = lift(a, b);
-                  const bad = isRate && l >= 1.15 && a > 0;
-                  const good = isRate && l <= 0.87;
+                  /* the WHOLE flow has no "everyone else" — comparing the
+                     cohort against its own empty complement printed
+                     "only on this route" and "everyone: 0ms" as findings */
+                  const bad = !whole && isRate && l >= 1.15 && a > 0;
+                  const good = !whole && isRate && l <= 0.87;
                   return (
                     <div className={`rinfo__kpi${bad ? " rinfo__kpi--bad" : good ? " rinfo__kpi--good" : ""}`}
                       key={label}>
                       <b className="num">{f(a)}</b>
                       <span className="rinfo__kpi-l">{label}</span>
-                      <em>{isRate ? liftWord(l) : `everyone: ${f(b)}`}</em>
+                      <em>{whole ? "across the whole flow"
+                        : isRate ? liftWord(l) : `everyone: ${f(b)}`}</em>
                     </div>
                   );
                 })}
