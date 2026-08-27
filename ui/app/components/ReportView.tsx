@@ -344,29 +344,72 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     const total = mine.reduce((a, q) => a + q.sessions, 0);
     const deep = completeness.deepest;
     if (!total || deep < 2) return null;
-    const steps: Array<{ d: number; n: number }> = [];
+    /* EVERY RUNG NAMES ITS SCREEN. "saw 2 screens" is a position, not a
+     * place: it tells a reader nothing they can open, act on, or recognise.
+     * The mine already knows WHICH screen the journeys at that depth are on,
+     * so the rung wears it — but only when one screen actually dominates the
+     * depth; naming a spread would be a lie with a majority's confidence. */
+    const steps: Array<{ d: number; n: number; view: string | null }> = [];
     for (let d = 1; d <= deep; d++) {
-      steps.push({ d, n: mine.filter((q) => q.journey.length >= d)
-        .reduce((a, q) => a + q.sessions, 0) });
+      const at = mine.filter((q) => q.journey.length >= d);
+      const n = at.reduce((a, q) => a + q.sessions, 0);
+      const byView = new Map<string, number>();
+      for (const q of at) {
+        const v = q.journey[d - 1];
+        if (v) byView.set(v, (byView.get(v) ?? 0) + q.sessions);
+      }
+      const top = [...byView.entries()].sort((x, y) => y[1] - x[1])[0];
+      steps.push({ d, n, view: top && n > 0 && top[1] / n >= 0.5 ? top[0] : null });
     }
-    // the single worst step: where the most journeys are lost
+    /* A RUNG NOBODY LEFT IS NOT A STEP. Measured on this board: "saw 2
+     * screens 860 · 76%" sat directly above "saw 3 screens 860 · 76%" — the
+     * identical number twice, because not one journey ended between those
+     * depths. It is one step wearing two names, so it is drawn as one row
+     * carrying both screens. Only exact zero-loss rungs merge, and never the
+     * arrival or the completion bar: a measured loss is never absorbed. */
+    const rows: Array<{ dFrom: number; dTo: number; n: number; views: string[];
+      absorbed: number }> = [];
+    /* Not "zero loss" but "no loss worth a row": measured here, one single
+     * journey ended between two rungs and bought itself a whole line —
+     * "↓ 1 leave here" between 861 and 860. Half a percent of arrivals is
+     * the floor, and whatever it absorbs is stated on the row rather than
+     * quietly dropped. */
+    const IMMATERIAL = Math.max(1, Math.round(total * 0.005));
+    steps.forEach((s, i) => {
+      const prev = rows[rows.length - 1];
+      const mergeable = i > 0 && i < steps.length - 1 && prev && rows.length > 1
+        && prev.n - s.n <= IMMATERIAL;
+      if (prev && mergeable) {
+        prev.absorbed += prev.n - s.n;
+        prev.dTo = s.d;
+        prev.n = s.n;
+        if (s.view && !prev.views.includes(s.view)) prev.views.push(s.view);
+      } else {
+        rows.push({ dFrom: s.d, dTo: s.d, n: s.n, views: s.view ? [s.view] : [],
+          absorbed: 0 });
+      }
+    });
+    /* WHERE THEY LEFT, on every drop and not just the worst one — that is
+     * the question the funnel exists to answer. A journey lost between two
+     * rungs ended on its own last screen, which the mine carries. */
+    const whereBetween = (dFrom: number, dTo: number) => {
+      const at = new Map<string, number>();
+      for (const q of mine) {
+        if (q.journey.length < dFrom || q.journey.length >= dTo) continue;
+        const v = q.journey[q.journey.length - 1];
+        if (v) at.set(v, (at.get(v) ?? 0) + q.sessions);
+      }
+      return [...at.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2)
+        .map(([v, n]) => ({ v, n }));
+    };
+    // the worst drop, measured over the rows actually drawn
     let worst = 0, worstLost = -1;
-    for (let i = 1; i < steps.length; i++) {
-      const lost = steps[i - 1].n - steps[i].n;
+    for (let i = 1; i < rows.length; i++) {
+      const lost = rows[i - 1].n - rows[i].n;
       if (lost > worstLost) { worstLost = lost; worst = i; }
     }
-    /* "view 1 → 2" is a position, not a place — it names nothing a reader can
-     * open. The journeys that die at that step ended ON a screen the mine
-     * knows by name: journey.length === worst, last view = journey[worst-1].
-     * The top screens carry the sentence. */
-    const at = new Map<string, number>();
-    for (const q of mine) {
-      if (q.journey.length !== worst) continue;
-      const v = q.journey[worst - 1];
-      if (v) at.set(v, (at.get(v) ?? 0) + q.sessions);
-    }
-    const where = [...at.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2)
-      .map(([v, n]) => ({ v, n }));
+    const where = rows.length > 1
+      ? whereBetween(rows[worst - 1]?.dTo ?? 1, rows[worst]?.dFrom ?? 2) : [];
     /* THE SEQUENCES THEMSELVES. The funnel compresses journeys into counts,
      * and the reader's next question is always "which pages, in which order".
      * The mine already has them — the busiest few, spelled out, completed
@@ -374,7 +417,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     const top = [...mine].sort((x, y) => y.sessions - x.sessions).slice(0, 5)
       .map((q) => ({ path: q.journey, n: q.sessions,
         done: q.journey.length >= deep }));
-    return { steps, total, worst, worstLost, where, top };
+    return { rows, whereBetween, total, worst, worstLost, where, top };
   }, [data.sequences, scopeApp, completeness.deepest]);
 
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
@@ -428,22 +471,42 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             where it happens, with the screens responsible named. */}
         {!isBrand && ladder && (
           <div className="bc__fun">
-            {ladder.steps.map((x, i) => {
+            {ladder.rows.map((x, i) => {
               const share = x.n / ladder.total;
-              const prev = i > 0 ? ladder.steps[i - 1].n : x.n;
-              const lost = prev - x.n;
-              const last = i === ladder.steps.length - 1;
+              const prevRow = i > 0 ? ladder.rows[i - 1] : null;
+              const lost = prevRow ? prevRow.n - x.n : 0;
+              const last = i === ladder.rows.length - 1;
+              /* the screens the leavers stopped on, named on EVERY drop —
+                 "271 leave here" without a place is half an answer */
+              const gone = prevRow && lost > 0
+                ? ladder.whereBetween(prevRow.dTo, x.dFrom) : [];
+              /* THE RUNG IS A PLACE, not a count of screens. Where the depth
+                 has no dominant screen the count is the honest fallback. */
+              const label = i === 0 ? "arrived"
+                : last ? (x.views[0] ? `completed at ${x.views[0]}` : "completed")
+                : x.views.length ? x.views.join(" → ")
+                : x.dFrom === x.dTo ? `saw ${x.dFrom} screens`
+                : `saw ${x.dFrom}–${x.dTo} screens`;
               return (
-                <React.Fragment key={x.d}>
+                <React.Fragment key={`${x.dFrom}-${x.dTo}`}>
                   {i > 0 && lost > 0 && (
                     <div className={i === ladder.worst ? "bc__fun-d bc__fun-d--worst" : "bc__fun-d"}>
-                      ↓ {fmtCount(lost)} leave here{i === ladder.worst && ladder.where.length
-                        ? <> — most on <b>{ladder.where[0].v}</b></> : null}
+                      ↓ {fmtCount(lost)} leave here{gone.length
+                        ? <> — most on <b>{gone[0].v}</b></> : null}
                     </div>
                   )}
                   <div className="bc__fun-r">
-                    <span className="bc__fun-l">
-                      {i === 0 ? "arrived" : last ? "completed" : `saw ${x.d} screens`}
+                    <span className="bc__fun-l" title={[
+                      x.views.length
+                        ? `Journeys still going at ${x.dFrom === x.dTo ? `screen ${x.dFrom}`
+                          : `screens ${x.dFrom}–${x.dTo}`} — most of them on ${x.views.join(", ")}`
+                        : null,
+                      x.absorbed > 0
+                        ? `${fmtCount(x.absorbed)} left between these screens — too few to`
+                          + " draw as a step of its own, and counted in the drop below"
+                        : null,
+                    ].filter(Boolean).join(". ") || undefined}>
+                      {label}
                     </span>
                     <span className="bc__fun-t">
                       <i className={last ? "bc__fun-b bc__fun-b--goal" : "bc__fun-b"}
