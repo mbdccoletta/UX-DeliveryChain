@@ -22,7 +22,7 @@ import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useDbEntity } from "../hooks/useDbEntity";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
-import { davisCategory, verdictOf, worseOf, type Tone } from "../utils/verdict";
+import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone } from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 import { aheadOf, type Forecast } from "../utils/forecast";
@@ -1229,14 +1229,14 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         const dst = tiers[e.t[0]]?.items[e.t[1]];
         if (!src || !dst) continue;
         const touches = sel === `${e.s[0]}-${e.s[1]}` || sel === `${e.t[0]}-${e.t[1]}`;
-        /* THE ROUTE'S OWN HEALTH, not just its endpoints'. A leg carrying a
-         * quarter of its traffic into failures is red whatever Davis thinks
-         * of the boxes at either end — same absolute floors the location
-         * verdict uses (geoVerdict: ≥10% warn, ≥25% bad), so every screen
-         * speaks one rule. */
+        /* THE ROUTE'S OWN HEALTH, not just its endpoints'. One rule with the
+         * CARDS the leg connects (utils/verdict HIT_BAD/HIT_WARN) — the old
+         * inline 25% floor turned a leg red while the card at its end, on
+         * the same numbers, stayed amber. Locations keep their own three-arm
+         * rule (geoVerdict); components and their legs speak verdict.ts. */
         const rate = e.bad != null && e.v > 0 ? e.bad / e.v : null;
         const own: Tone = rate == null ? "info"
-          : rate >= 0.25 ? "bad" : rate >= 0.10 ? "warn" : "info";
+          : rate >= HIT_BAD ? "bad" : rate >= HIT_WARN ? "warn" : "info";
         const RANK: Record<Tone, number> = { info: 0, good: 0, warn: 1, bad: 2 };
         const endp: Tone = src.tone === "bad" || dst.tone === "bad" ? "bad"
           : src.tone === "warn" || dst.tone === "warn" ? "warn" : "info";
@@ -2115,8 +2115,11 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 const d0 = (k: RegExp) =>
                   selElo.det.find(([kk]) => k.test(kk))?.[1] as string | undefined;
                 const v = (() => {
+                  // ONE verdict vocabulary (Critical/Warning/Healthy) — the
+                  // ledger box below says "Critical" and this sentence said
+                  // "Needs attention" for the same state
                   if (probs.length) return { t: "bad" as const,
-                    txt: `Needs attention — ${probs[0].name}`,
+                    txt: `Critical — ${probs[0].name}`,
                     sub: `${probs[0].display_id} · ${probs[0].category}`
                       + (probs.length > 1 ? ` · +${probs.length - 1} more` : "") };
                   if (selElo.tone === "bad" || selElo.tone === "warn") {
@@ -2127,7 +2130,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                       sub: "the evidence is below" };
                   }
                   if (sigs.length) return { t: "warn" as const,
-                    txt: `Watched — ${sigs[0].name}`,
+                    txt: `Warning — ${sigs[0].name} under watch`,
                     sub: `anomaly under watch${sigs.length > 1 ? ` · +${sigs.length - 1} more` : ""}; nothing failing yet` };
                   const short = (s?: string) => s && s.length <= 28 ? s : undefined;
                   const calls = short(d0(/^calls/i)); const p50 = short(d0(/^p50$/i));
@@ -2204,7 +2207,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     * homework. */}
                   {met.ready && (() => {
                     const rate = met.thr > 0 ? met.fails / met.thr : 0;
-                    const bad = rate >= 0.01, warn = rate > 0 && rate < 0.01;
+                    // one failure-rate rule with the overview card:
+                    // bad >= 1%, warn >= 0.1% — 'any failure = amber' made
+                    // one blip in a million wear a warning here only
+                    const bad = rate >= 0.01, warn = rate >= 0.001 && rate < 0.01;
                     const col = bad ? "var(--bad)" : warn ? "var(--warn)" : "var(--good)";
                     return (
                       <div className="trf">
@@ -2319,9 +2325,15 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 const rows = selElo.det;
                 const status = rows.find(([k]) => /^status$/i.test(k));
                 const rest = rows.filter(([k]) => !/^status$/i.test(k));
-                const tone = status && /warn/i.test(String(status[1])) ? "var(--warn)"
-                  : status && /(critical|down|fail)/i.test(String(status[1])) ? "var(--bad)"
-                  : "var(--good)";
+                /* the verdict WORD decides the colour — the old regex
+                 * defaulted everything else to green, so "No users" and
+                 * "Not measured" (info verdicts, not judgements) wore the
+                 * healthy colour. Info renders in ink, as everywhere. */
+                const sv = String(status?.[1] ?? "");
+                const tone = /^warning/i.test(sv) ? "var(--warn)"
+                  : /^critical/i.test(sv) || /(down|fail)/i.test(sv) ? "var(--bad)"
+                  : /^healthy/i.test(sv) ? "var(--good)"
+                  : "var(--ink-2)";
                 return (<>
                   {status && (
                     <div style={{ display: "flex", alignItems: "baseline", gap: 9,

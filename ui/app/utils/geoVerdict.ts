@@ -38,6 +38,15 @@ export interface GeoArms {
   level: number;
 }
 
+/** The absolute-arm floors, exported so every screen that judges a
+ *  location's error share (map, drill rows, board) imports THESE numbers
+ *  instead of retyping them. */
+export const GEO_ABS_BAD = 0.25;
+export const GEO_ABS_WARN = 0.10;
+/** Substance gate for the absolute arm — below this many sessions a rate
+ *  is an anecdote, not a verdict. */
+export const GEO_MIN_SESSIONS = 10;
+
 export const geoArms = (g: GeoArm, base: number): GeoArms => {
   const rate = g.sessions ? g.hit / g.sessions : 0;
   const lift = base > 0 ? rate / base : 0;
@@ -45,8 +54,8 @@ export const geoArms = (g: GeoArm, base: number): GeoArms => {
   const apx = rated > 0 ? (g.sat + g.tol / 2) / rated : null;
   const rel = g.sessions >= 30 && g.hit >= 5 && rate >= 0.02
     ? (lift >= 1.5 ? 2 : lift >= 1.15 ? 1 : 0) : 0;
-  const abs = g.sessions >= 10 && rate >= 0.25 ? 2
-    : g.sessions >= 10 && rate >= 0.10 ? 1 : 0;
+  const abs = g.sessions >= GEO_MIN_SESSIONS && rate >= GEO_ABS_BAD ? 2
+    : g.sessions >= GEO_MIN_SESSIONS && rate >= GEO_ABS_WARN ? 1 : 0;
   const spd = rated >= 30 && apx !== null
     ? (apx < 0.5 ? 2 : apx < 0.85 ? 1 : 0) : 0;
   return { rate, lift, apx, rel, abs, spd, level: Math.max(rel, abs, spd) };
