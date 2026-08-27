@@ -1173,6 +1173,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__seg-h { margin: 0 0 8px; font: 700 10px var(--mono); letter-spacing: 0.06em;
   text-transform: uppercase; }
 .bc__seg-h--good { color: var(--good); } .bc__seg-h--bad { color: var(--bad); }
+.bc__seg-h--warn { color: var(--warn); }
 .bc__seg-r { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px;
   align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border); }
 .bc__seg-r:first-of-type { border-top: none; }

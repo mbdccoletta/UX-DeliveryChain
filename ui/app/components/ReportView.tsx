@@ -301,6 +301,15 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   });
   const c = withCompleteness(scoped ? asFacts(cohort?.cur) : f(curP));
   const p = withCompleteness(scoped ? asFacts(cohort?.prev) : f(prevP));
+  /* EMPTY IS NOT ZERO. With no real customers in the window (a robot-only
+   * tenant, or no traffic at all) every people-based figure divides by
+   * nothing — the board once printed "reached first screen only 100%",
+   * "bounced 0" and "0 customers at risk" as if they were measurements.
+   * The people tiles say "•••" and why, exactly as the Apdex card does. */
+  const noPeople = c.customers === 0;
+  const NO_PEOPLE = "No real customers in this window — every session on record is "
+    + "robot or synthetic traffic (or none exists), so a people-based figure "
+    + "has nothing to measure.";
 
   /**
    * WHAT CHANGED — the first question anyone opens a monitoring app with, and
@@ -393,6 +402,13 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     /* Money is back, on a base that holds: a completed journey is a business
      * event the reader can point at in the diagram, so pricing it is honest
      * where pricing a keyword guess was not. */
+    if (isBrand && noPeople) return (
+      <div className="bc__hero" style={{ ["--ht" as string]: "var(--ink-2)" }}>
+        <span className="bc__hero-l">customers at risk</span>
+        <b className="bc__hero-v num" title={NO_PEOPLE}>•••</b>
+        <span className="bc__hero-s">{NO_PEOPLE}</span>
+      </div>
+    );
     const heroVal = isBrand ? c.customersAtRisk : c.conversion;
     const prevVal = isBrand ? p.customersAtRisk : c.conversion;
     const t = isBrand ? trend(heroVal, prevVal, false)
@@ -407,14 +423,19 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       : `${fmtCount(completeness.full)} of ${fmtCount(completeness.total)} journeys completed`
         + ` (${pct(completeness.share)})`
         + ` · complete = reaching ${completeness.deepest} views, the depth a tenth of this`
-        + " application's traffic still gets to";
+        + " application's traffic still gets to"
+        // the journeys figures are mined per APPLICATION — a route pick does
+        // not narrow them, and hiding that read as if it did
+        + (scoped ? " · whole application (route picks do not narrow the mining)" : "");
     return (
       <div className="bc__hero" style={{ ["--ht" as string]: TONE[t.dir] }}>
         <span className="bc__hero-l">{label}</span>
         <b className="bc__hero-v num">{fmt(heroVal)}</b>
         <span className="bc__hero-t" style={{ color: TONE[t.dir] }}>
-          {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "steady" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
-          <em> vs previous {data.tf.label}</em>
+          {isBrand ? <>
+            {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "steady" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
+            <em> vs the previous {data.tf.label.replace(/^last /i, "")}</em>
+          </> : <em>this window only — journeys are mined per window, so no previous exists</em>}
         </span>
         <span className="bc__hero-s">{sub}</span>
         {/* the funnel, drawn: one bar per depth, the completion bar marked,
@@ -494,7 +515,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     </div>
   );
 
-  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share, liveOnly }: {
+  const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share,
+    liveOnly, unmeasured }: {
     label: string; cur: number; prev: number; fmt: (v: number) => string;
     riseIsGood: boolean; tab: "home" | "flow" | "chain";
     /** A cohort intent passed to the Flow — opens its infographic directly. */
@@ -505,8 +527,23 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     share?: number;
     /** A live-only fact (open problems): no honest previous value exists. */
     liveOnly?: boolean;
+    /** The fact could not be measured (e.g. zero real users in the window) —
+     *  renders "•••" with this sentence, never a fabricated 0% or 100%. */
+    unmeasured?: string;
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
+    if (unmeasured) return (
+      // no caption here — captions carry percentages of the very base that
+      // could not be measured, and "0.0% of the customer base" under "•••"
+      // is the fabrication this branch exists to prevent
+      <div className="bc__stat" title={unmeasured}>
+        <span className="bc__stat-l">{label}</span>
+        <div className="bc__stat-row"><b className="bc__stat-v num">•••</b></div>
+        <div className="bc__stat-ft">
+          <span className="bc__stat-prev" title={unmeasured}>not measurable</span>
+        </div>
+      </div>
+    );
     const t = trend(cv, pv, riseIsGood);
     const drill = coh && scopeApp;
     return (
@@ -697,17 +734,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               : `${fmtN(cohort.cur.sessions)} sessions · ${fmtN(cohort.cur.customers)} customers`}
             {cohort?.sampled && " · scaled from a capped sample"}
           </span>
-          {/* EMPTY IS NOT ZERO. A journey saved days ago may simply not have
-              been walked inside the window on screen, and then every figure
-              below reads 0 — which a reader is entitled to mistake for "we
-              measured, and it was nothing". Say which of the two it is. */}
-          {cohort !== null && cohort.cur.sessions === 0 && (
-            <span className="bc__scoped-none">
-              nobody walked {routePicks && routePicks.length > 1 ? "these journeys" : "this journey"}
-              {" "}in this window — the figures below are EMPTY, not zero. Widen the timeframe
-              {" "}or hand the board back the whole application.
-            </span>
-          )}
+          {/* (an empty cohort never reaches here — emptyPick catches it above
+              and its banner carries the "EMPTY, not zero" sentence) */}
           <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
             whole application ✕
           </button>
@@ -749,6 +777,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           <Hero front="brand" />
           <div className="bc__stats">
             <Stat label="customers hit by a failure" cur={c.customersAtRisk} prev={p.customersAtRisk}
+              unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="home"
               caption={`${pct(c.customers ? c.customersAtRisk / c.customers : 0)} of the customer base`}
               share={c.customers ? c.customersAtRisk / c.customers : 0} />
@@ -766,6 +795,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                 count it is — 18 customers waited where 5 met a failure, two
                 different harms that no longer hide inside one saturated 100. */}
             <Stat label="customers made to wait" cur={c.waited} prev={p.waited}
+              unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="chain"
               caption="an action took longer than 3s — the platform's own satisfaction threshold"
               share={c.customers ? c.waited / c.customers : 0} />
@@ -789,13 +819,13 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                 measured on the mined routes, and calling those sessions
                 "customers" would mix two populations in one sentence. */}
             <Stat label="journeys completed" cur={c.converted} prev={p.converted}
-              fmt={fmtCount} riseIsGood={true} tab="flow"
+              fmt={fmtCount} riseIsGood={true} tab="flow" liveOnly
               caption={`${pct(c.conversion)} of journeys reached the full depth`}
               share={c.conversion} />
             <Stat label="journeys cut short"
               cur={completeness.total - completeness.full}
               prev={completeness.total - completeness.full}
-              fmt={fmtCount} riseIsGood={false} tab="flow"
+              fmt={fmtCount} riseIsGood={false} tab="flow" liveOnly
               caption="stopped before the depth the rest of the traffic reaches"
               share={completeness.total
                 ? (completeness.total - completeness.full) / completeness.total : 0}
@@ -807,11 +837,13 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                 no money figure without a conversion to price, so the slot
                 carries a fact the board can actually stand behind. */}
             <Stat label="reached first screen only" cur={1 - c.engagedShare} prev={1 - p.engagedShare}
+              unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={pct} riseIsGood={false} tab="flow"
               caption="never saw a second screen" share={1 - c.engagedShare} />
             <Stat label="customers who bounced"
               cur={Math.max(0, c.customers - c.realEngaged)}
               prev={Math.max(0, p.customers - p.realEngaged)}
+              unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="flow"
               caption="came, saw one screen, left" />
             {entries && (
@@ -1080,7 +1112,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           <section className="bc__front" style={{ ["--fh" as string]: "var(--t-cyan)" }}>
             <h2 className="bc__ftitle">Where the customers are</h2>
             <div className="bc__seg">
-              <h3 className={`bc__seg-h bc__seg-h--${lead ? "bad" : "good"}`}>
+              {/* the heading wears the LEAD'S OWN tone — painting a merely
+                  tolerating country red contradicted its row two lines down */}
+              <h3 className={`bc__seg-h bc__seg-h--${lead ? lead.tone : "good"}`}>
                 {lead
                   ? `${geoName(lead.g.country)} is ${GEO_WORD[lead.tone]} — ${geoBecause(lead.g, base)}`
                   : "no location stands out — every country reads satisfied under the map's own rule"}

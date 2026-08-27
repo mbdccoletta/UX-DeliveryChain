@@ -347,9 +347,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
             const people = estate.real > 0;
             const d = people ? estate.real : estate.s;
             const n = people ? estate.realHit : estate.h;
+            // no sessions at all = nothing to rate, never "0% error-free"
+            if (!d) return <>estate <b className="num">•••</b> — no sessions to rate</>;
             return <>estate <b className="num">
               {/* floored, exactly as the estate table floors it */}
-              {d ? Math.floor((1 - n / d) * 100) : 0}%</b>{" "}
+              {Math.floor((1 - n / d) * 100)}%</b>{" "}
               {people ? "of real users" : ""} error-free</>;
           })() : "…"}
           {" "}· <b className="num">{data.problems.length}</b> active problems
