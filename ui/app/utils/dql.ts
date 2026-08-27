@@ -181,16 +181,21 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 
 /** Application names from the entity inventory. */
 /**
- * Names for every kind of RUM application, not just web. `dt.rum.application.id`
- * carries mobile apps too (a UUID there, an 8-byte hex for web), so the lookup
- * has to cover the mobile and custom entity types or those apps show up as
- * "Application 4f2a…" with no name.
+ * Names for every kind of RUM application, not just web.
+ *
+ * SMARTSCAPE, not the classic model: a Playground/dev tenant answers
+ * `fetch dt.entity.application` with UNKNOWN_DATA_OBJECT ("isn't a valid data
+ * object") and every application on screen fell back to "Application 656efe54"
+ * — the classic objects are being retired. One FRONTEND node type replaces all
+ * three classic ones (application, mobile_application, custom_application) and
+ * is strictly better here: it carries `id_classic` for the entity joins the
+ * chain already does AND `dt.rum.instrumentation.id`, which IS
+ * `dt.rum.application.id`. That makes the MOBILE join exact — the classic path
+ * had to guess it from a UUID's first half.
  */
 export const qAppNames = () => `
-fetch dt.entity.application
-| fields id, name = entity.name
-| append [ fetch dt.entity.mobile_application | fields id, name = entity.name ]
-| append [ fetch dt.entity.custom_application | fields id, name = entity.name ]
+smartscapeNodes "FRONTEND"
+| fields id = id_classic, name, rumId = dt.rum.instrumentation.id
 | limit 400`;
 
 /**
@@ -1328,23 +1333,29 @@ fetch user.events, from: now()-10m
  * Service Flow screen draws. No volume comes with it, only membership.
  */
 export const qAppServicesTopo = (rumAppId: string) => `
-fetch dt.entity.application
-| filter id == "APPLICATION-${rumAppId.replace(/["\\]/g, "").toUpperCase()}"
-| expand svc = calls[dt.entity.service]
-| join [ fetch dt.entity.service | fields id, nm = entity.name ],
-    on: { left[svc] == right[id] }, fields: { nm }
-| summarize name = takeAny(nm), by: { svc }
+smartscapeEdges "calls"
+| filter target_type == "SERVICE"
+| filter source_id in [ smartscapeNodes "FRONTEND"
+    | filter dt.rum.instrumentation.id == "${rumAppId.replace(/["\\]/g, "")}"
+    | fields id ]
+| lookup [ smartscapeNodes "SERVICE" | fields id, nm = name ],
+    sourceField: target_id, lookupField: id, fields: { nm }
+| summarize name = takeAny(nm), by: { svc = target_id }
 | fieldsAdd traces = 0
 | limit 60`;
 
-/** The mobile twin of the classic bridge — same relationship, other entity. */
+/** The same bridge, entered by CLASSIC ENTITY ID instead of the RUM id —
+ *  one node type now serves web and mobile alike, so this is the same walk
+ *  with a different key, not a second relationship. */
 export const qAppServicesTopoMobile = (entityId: string) => `
-fetch dt.entity.mobile_application
-| filter id == "${entityId.replace(/["\\]/g, "")}"
-| expand svc = calls[dt.entity.service]
-| join [ fetch dt.entity.service | fields id, nm = entity.name ],
-    on: { left[svc] == right[id] }, fields: { nm }
-| summarize name = takeAny(nm), by: { svc }
+smartscapeEdges "calls"
+| filter target_type == "SERVICE"
+| filter source_id in [ smartscapeNodes "FRONTEND"
+    | filter id_classic == "${entityId.replace(/["\\]/g, "")}"
+    | fields id ]
+| lookup [ smartscapeNodes "SERVICE" | fields id, nm = name ],
+    sourceField: target_id, lookupField: id, fields: { nm }
+| summarize name = takeAny(nm), by: { svc = target_id }
 | fieldsAdd traces = 0
 | limit 60`;
 
@@ -1914,11 +1925,11 @@ timeseries { rt = avg(dt.service.request.response_time),
  * screen — the defect this project keeps hunting, in a new place.
  */
 export const qAppsGen2 = () => `
-fetch dt.entity.application, from: now()-2h
-| fields id, name = entity.name, seed = calls[dt.entity.service]
-| append [ fetch dt.entity.mobile_application, from: now()-2h
-           | fields id, name = entity.name, seed = calls[dt.entity.service] ]
-| filter isNotNull(seed)
+smartscapeNodes "FRONTEND"
+| filter id in [ smartscapeEdges "calls"
+    | filter source_type == "FRONTEND" and target_type == "SERVICE"
+    | fields source_id ]
+| fields id = id_classic, name, rumId = dt.rum.instrumentation.id
 | limit 200`;
 
 /**
@@ -1935,17 +1946,13 @@ fetch dt.entity.application, from: now()-2h
 export const qAppSeedGen2 = (entityId: string) => {
   const e = entityId.replace(/["\\]/g, "");
   return `
-fetch dt.entity.application, from: now()-2h
-| filter id == "${e}"
-| fields id, seed = calls[dt.entity.service]
-| append [ fetch dt.entity.mobile_application, from: now()-2h
-           | filter id == "${e}"
-           | fields id, seed = calls[dt.entity.service] ]
-| filter isNotNull(seed)
-| expand seed
-| join [ fetch dt.entity.service, from: now()-2h | fields id, nm = entity.name ],
-    on: { left[seed] == right[id] }, fields: { nm }
-| fields svc = seed, name = nm
+smartscapeEdges "calls"
+| filter target_type == "SERVICE"
+| filter source_id in [ smartscapeNodes "FRONTEND"
+    | filter id_classic == "${e}" | fields id ]
+| lookup [ smartscapeNodes "SERVICE" | fields id, nm = name ],
+    sourceField: target_id, lookupField: id, fields: { nm }
+| fields svc = target_id, name = nm
 | limit 40`;
 };
 
