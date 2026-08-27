@@ -322,8 +322,12 @@ export function App() {
                   // application; standalone (no intent bus) falls back to the
                   // in-app Journey view
                   const a = d.apps.find((x) => x.appId === current);
-                  if (intentsAvailable() && a) {
-                    openIntent(sessionsLink(tf, feNames?.get(a.entity ?? "") ?? a.name,
+                  const fe = a ? feNames?.get(a.entity ?? "") : undefined;
+                  /* RESOLVED frontend name only — the inventory-name fallback
+                   * filled the bar with a name the store never uses and the
+                   * list read "no sessions" (documented failure) */
+                  if (intentsAvailable() && a && fe) {
+                    openIntent(sessionsLink(tf, fe,
                       uxMap?.get(current)?.sessions ?? a.sessions));
                   } else { setAppId(current); set({ tab: "flow", sel: null }); }
                 }} />

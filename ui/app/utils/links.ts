@@ -268,9 +268,10 @@ export const sessionsLink = (
  * bare. Note the vocabulary shift: the chain's card says "Robots" (RUM's
  * user_type is "robot"), the bar says "Bots". This map absorbs it.
  *
- * Synthetic and real users are ABSENT deliberately: their facet values have
- * not been observed yet. Add them here from a url, never from a guess — those
- * segments open the frontend-wide list until then.
+ * Synthetic is ABSENT deliberately: its facet value has not been observed
+ * yet ("Real Users" WAS observed 2026-08-25 and feeds Browsers). Add entries
+ * here from a url, never from a guess — chip-less segments open the
+ * frontend-wide list with a label that admits it.
  */
 const SESSION_SEGMENT_CHIP: Record<string, [chip: string, label: string]> = {
   Robots: ['"User Type" = Bots', "See these bot sessions"],
@@ -278,7 +279,11 @@ const SESSION_SEGMENT_CHIP: Record<string, [chip: string, label: string]> = {
    * the geo hand-off carries): the Browsers card now opens PEOPLE, not the
    * frontend-wide list with bots and monitors mixed in */
   Browsers: ['"User Type" = "Real Users"', "See these real-user sessions"],
-  Mobile: ['"User Type" = "Real Users"', "See these real-user sessions"],
+  /* Mobile deliberately ABSENT: no mobile-device facet has been observed in
+   * the bar, and the "Real Users" chip opened desktop people while excluding
+   * the card's own mobile robots — a list that matched neither the count nor
+   * the subject. Until a real chip is read off a url, the Mobile card gets
+   * the frontend-wide door with a label that says so. */
 };
 
 /**
@@ -1050,13 +1055,16 @@ export function investigationPaths(
       // see the pod. "Start where it surfaces" is an incident move: it leads
       // only when users are actually feeling something.
       if (appStart && !healthy) tech.unshift(appStart);
-      tech.push(
+      /* CLASSIC id or NO LINK. The Smartscape routing key resolves the
+       * intent, navigates, and lands on a 404 — which reads as working
+       * (documented above); falling back to it reintroduced that exact
+       * failure whenever the classic id was missing. */
+      const kClassic = pod ? podClassic : nodeClassic;
+      if (kClassic) tech.push(
         eLink(pod ? "Open the pod" : "Open the node",
           "Its workload, placement and resource pressure.",
-          // pods are addressed by their classic entity id, not the Smartscape
-          // routing key — that key matched no app at all
           pod ? "dt.entity.cloud_application_instance" : "dt.entity.kubernetes_node",
-          (pod ? podClassic : nodeClassic) ?? k, "kubernetes",
+          kClassic, "kubernetes",
           !pod ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined),
         // pods and nodes are named, not keyed, in log records. SINGLE
         // elements only: a GROUP card's `name` is its display label, and the
@@ -1153,12 +1161,17 @@ export function investigationPaths(
        * been observed in that bar. A wrong chip opens the explorer unfiltered
        * and reads as a working button — the exact failure the Error
        * Inspector hand-off had. Mobile chains get the Vitals hop below. */
-      if (sessions && sessions > 0 && scopedAppName
-          && !scopedEntity?.startsWith("MOBILE_APPLICATION-")) {
+      /* THE RESOLVED FRONTEND NAME ONLY. Falling back to the inventory name
+       * while useFrontendNames was still scanning re-created the documented
+       * failure ("EasyTrade Live Debugger" vs "EasyTrade_Live_Debugger" —
+       * empty list that reads as "no sessions"), so with no resolved name
+       * there is no link: a missing button is honest, a wrong filter lies.
+       * The entity gate also requires a KNOWN entity — undefined once passed
+       * the mobile test and offered a mobile app to the web-only bar. */
+      if (sessions && sessions > 0 && scopedFrontend && scopedEntity
+          && !scopedEntity.startsWith("MOBILE_APPLICATION-")) {
         const seg = SESSION_SEGMENT_CHIP[name];
-        // the FRONTEND name when known — the inventory name filled this chip
-        // with "EasyTrade Live Debugger" and the bar matched nothing
-        tech.push(sessionsLink(tf, scopedFrontend ?? scopedAppName, sessions,
+        tech.push(sessionsLink(tf, scopedFrontend, sessions,
           seg?.[0], seg?.[1]));
       }
       // The Synthetic segment's own app: its traffic IS monitors, and the
@@ -1167,17 +1180,15 @@ export function investigationPaths(
       // prop dt.synthetic.monitored_entity_ids (array). Fed the scoped
       // application's entity, it lists precisely the monitors generating
       // this segment, not the whole estate.
-      if (name === "Synthetic") {
-        tech.push(scopedEntity
-          ? link("Open the monitors", "Synthetic · monitors of this application",
-              withTf(tf, { "dt.synthetic.monitored_entity_ids": [scopedEntity] }),
-              { keyProperties: ["dt.synthetic.monitored_entity_ids"],
-                app: "Synthetic", appId: "dynatrace.synthetic",
-                intentId: "view_monitor_list_filtered_by_entity_ids",
-                proves: "the monitors watching this application — their runs, results and failures" })
-          : link("Open the monitors", "Synthetic · runs & results", {},
-              { app: "Synthetic", href: appHomeHref("dynatrace.synthetic"),
-                proves: "the monitors generating this traffic — their runs, results and failures" }));
+      /* No entity, no door: the fallback opened the Synthetic app HOME —
+       * the whole estate's monitors wearing a scoped label. */
+      if (name === "Synthetic" && scopedEntity) {
+        tech.push(link("Open the monitors", "Synthetic · monitors of this application",
+          withTf(tf, { "dt.synthetic.monitored_entity_ids": [scopedEntity] }),
+          { keyProperties: ["dt.synthetic.monitored_entity_ids"],
+            app: "Synthetic", appId: "dynatrace.synthetic",
+            intentId: "view_monitor_list_filtered_by_entity_ids",
+            proves: "the monitors watching this application — their runs, results and failures" }));
       }
       /* The mobile segment has an entity where the others have none: the
        * scoped mobile application itself. Experience Vitals declares
@@ -1274,14 +1285,10 @@ export function investigationPaths(
   // The reader's rule again: when Davis already holds the computed root
   // cause, no other app is "most appropriate" — the problem leads the route.
   if (prob) tech.unshift(prob);
-  // An element wearing anomaly flags earns the app that OWNS baselining
-  // (dynatrace.davis.anomalydetection, registry-verified): the thresholds and
-  // history behind the amber marks, and where to tune them.
-  if (signals > 0) {
-    tech.push(link("See its baselines", `${signals} anomal${signals > 1 ? "ies" : "y"} under watch`, {},
-      { app: "Anomaly Detection", href: appHomeHref("dynatrace.davis.anomalydetection"),
-        proves: "the baselining behind the anomaly flags — thresholds, history and tuning" }));
-  }
+  /* "See its baselines" REMOVED (audit). The destination was the Anomaly
+   * Detection app HOME — no scoping to the element, no timeframe — wearing
+   * a per-element label ("N anomalies under watch"). An unfiltered door is
+   * not a drilldown. Restore only with an OBSERVED per-entity url/intent. */
   if (assist) {
     tech.push(healthy
       ? aLink("Ask Assist", "where is the easy win",
@@ -1326,13 +1333,16 @@ export function investigationPaths(
           "dt.entity.service", svc!, "services", SERVICE_RESPONSE_TIME));
       }
       break;
-    case "pod": case "node":
-      tac.push(eLink("What shares this node",
+    case "pod": case "node": {
+      // classic id or no link — the Smartscape key 404s (see above)
+      const shareId = node ? nodeClassic : podClassic;
+      if (shareId) tac.push(eLink("What shares this node",
         "The workloads a node-level event would take down together.",
         node ? "dt.entity.kubernetes_node" : "dt.entity.cloud_application_instance",
-        (node ? nodeClassic ?? node : podClassic ?? pod)!, "kubernetes",
+        shareId, "kubernetes",
         node ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined));
       break;
+    }
     case "host":
       // Topology is the question. The Gen3 Smartscape declares nothing for
       // `dt.entity.host`, but it DOES answer view_topology_in_context for a
@@ -1546,7 +1556,6 @@ export function rowDrilldown(
             appId: "dynatrace.services", intentId: SERVICE_RESPONSE_TIME.intentId,
             app: "Services", proves: "how this service spends the time it takes" });
   }
-  if (!appEntity) return null;
   /* Percentiles are a performance question, so they open the performance app.
    *
    * A VIEW lands scoped to itself. Experience Vitals declares a second intent,
@@ -1558,7 +1567,11 @@ export function rowDrilldown(
    * A DOMAIN has no such property in any intent, so it opens the application's
    * vitals and the label says so rather than implying a filter that is not
    * there. */
+  /* appEntity gates ONLY the branch that puts it in the payload — the old
+   * top-of-function gate also killed the Error Inspector branches below,
+   * which need the display NAME and never the entity. */
   if (lens === "time" && kind === "views") {
+    if (!appEntity) return null;
     return link("Where the time goes", `${row.name} · frontend performance`,
       withTf(tf, {
         frontend: appEntity,

@@ -28,7 +28,9 @@ function load(): Promise<Map<string, string>> {
         return m;
       })
       .catch(() => {
-        // no map: callers fall back to the inventory name, degraded but alive
+        // no map: sessions links stay HIDDEN (callers gate on a resolved
+        // name — the inventory-name fallback was retired by the audit);
+        // the next mount retries the scan
         inflight = null;
         return new Map<string, string>();
       });
