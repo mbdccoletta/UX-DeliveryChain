@@ -302,12 +302,37 @@ export function App() {
         </div>
       )}
 
-      {d.errors.length > 0 && (
-        <div className="banner">
-          <b>Failed queries ({d.errors.length}):</b> {d.errors.slice(0, 3).join(" · ")}
-          {d.errors.length > 3 && " …"} — check the app scopes in <span className="num">app.config.json</span>.
-        </div>
-      )}
+      {d.errors.length > 0 && (() => {
+        /* A FAILURE SHOULD NAME ITS OWN CAUSE. The banner blamed the app
+           scopes for everything, and on a Playground tenant that was simply
+           wrong: the classic `dt.entity.*` objects are RETIRED there
+           (UNKNOWN_DATA_OBJECT), which is an environment fact no scope can
+           fix. The two kinds are separated, and the raw DQL — three
+           paragraphs of syntax error — moves into the tooltip where a reader
+           can still reach it. */
+        const retired = d.errors.filter((e) => /UNKNOWN_DATA_OBJECT/i.test(e));
+        const other = d.errors.filter((e) => !/UNKNOWN_DATA_OBJECT/i.test(e));
+        const label = (e: string) => e.split(":")[0].trim();
+        return (
+          <div className="banner" title={d.errors.join("\n\n")}>
+            {retired.length > 0 && (
+              <>
+                <b>Not available on this environment ({retired.length}):</b>{" "}
+                {retired.map(label).slice(0, 4).join(" · ")} — these read the classic
+                entity model, which this tenant has retired. Everything Smartscape
+                and Grail can answer is on screen; only the classic fallbacks are
+                missing.{other.length > 0 ? " " : ""}
+              </>
+            )}
+            {other.length > 0 && (
+              <>
+                <b>Failed queries ({other.length}):</b> {other.map(label).slice(0, 4).join(" · ")}
+                {" "}— check the app scopes in <span className="num">app.config.json</span>.
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {d.loading ? (
         <div className="loading"><i />querying Grail and Smartscape…</div>

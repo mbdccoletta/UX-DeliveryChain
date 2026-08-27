@@ -195,8 +195,11 @@ svg { shape-rendering: geometricPrecision; }
                    letter-spacing: 0.08em; color: var(--ink-3); }
 .pad { padding: 14px 16px; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
+/* bounded: the raw DQL of a failed query ran to three paragraphs and pushed
+   the whole page down — the sentence stays, the syntax lives in the title */
 .banner { border: 1px solid var(--border); border-left: 3px solid var(--warn); padding: 10px 14px;
-          font-size: 12px; color: var(--ink-2); margin-bottom: 14px; }
+          font-size: 12px; color: var(--ink-2); margin-bottom: 14px;
+          max-height: 5.4em; overflow: hidden; }
 .loading { display: flex; align-items: center; gap: 10px; padding: 40px 16px; color: var(--ink-2);
            font: 500 12px var(--mono); }
 .loading i { width: 8px; height: 8px; background: var(--accent); display: inline-block;
