@@ -89,7 +89,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * entity, "Astroshop_Android" the frontend — and the wrong one is accepted
    * silently and matches nothing. */
   const feNames = useFrontendNames();
-  const feName = (app && (feNames?.get(app.entity ?? "") ?? app.name)) || "";
+  /* the RESOLVED frontend name, or "" — callers gate their sessions links
+   * on it, because the inventory-name fallback re-created the documented
+   * empty-list failure while the name scan was still in flight */
+  const feName = (app && feNames?.get(app.entity ?? "")) || "";
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
   const [geoSel, setGeoSel] = useState<string | null>(null);
@@ -735,7 +738,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             : x.d === "os version" ? SESSION_CHIP.osVersion(x.b) : null;
                           return facet ? (
                           <button type="button" className="geo__who-r geo__who-r--go" key={`${x.d}${x.b}`}
-                            onClick={() => app && openIntent(sessionsLink(data.tf, feName, x.n,
+                            onClick={() => app && feName && openIntent(sessionsLink(data.tf, feName, x.n,
                               chips(SESSION_CHIP.location(enName(geoSel!)), SESSION_CHIP.realUsers(),
                                 facet, SESSION_CHIP.withErrors()),
                               `${geoSel} · ${x.b} sessions with errors`))}
@@ -772,7 +775,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           const Tag = facet ? "button" : "span";
                           return (
                             <Tag {...(facet ? { type: "button" as const,
-                                onClick: () => app && openIntent(sessionsLink(data.tf, feName, 0,
+                                onClick: () => app && feName && openIntent(sessionsLink(data.tf, feName, 0,
                                   chips(SESSION_CHIP.location(enName(geoSel!)),
                                     SESSION_CHIP.realUsers(), facet),
                                   `${geoSel} · ${x.b} sessions`)) } : {})}
@@ -794,8 +797,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   const chasing = !!selRow && selRow.hit > 0;
                   const realScreen = !!geoViewSel && geoViewSel !== Q.NO_SCREEN;
                   return (<>
-                  <button className="geo__drill-go"
-                    title={chasing && realScreen
+                  <button className="geo__drill-go" disabled={!feName}
+                    title={!feName ? "resolving the sessions app's own name for this frontend…"
+                      : chasing && realScreen
                       ? `The Sessions bar has no screen facet, so this opens EVERY ${geoSel} session that met an error — the ${geoViewSel} ones among them, but also app-level failures like ANR. For the screen alone, use the red button.`
                       : undefined}
                     onClick={() => {
@@ -829,7 +833,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     <a className="geo__drill-go geo__drill-go--err"
                       href={errorsExplorerHref(data.tf, app.name, geoViewSel!)}
                       target="_blank" rel="noreferrer"
-                      title={`${fmtN(selRow!.hit)} ${geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all frontends' hits on this view.`}>
+                      title={`${fmtN(selRow!.hit)} ${geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all countries' hits on this view.`}>
                       inspect {geoViewSel} errors in Error Inspector →
                     </a>
                   )}
@@ -1543,10 +1547,16 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
            * looked like three different offers. The name comes from the metric
            * store's own spelling, because the Smartscape label this panel
            * renders can differ from what dt.service.name holds. */
-          const svcHref = servicesExplorerHref(tf, v?.name ?? r.name);
+          /* the anchor waits for the metric-store name — the Smartscape
+           * label can differ from dt.service.name, and a link built on it
+           * opened an Explorer filtered to nothing that read as working */
+          const svcHref = v?.name ? servicesExplorerHref(tf, v.name) : undefined;
           return (
-            <a key={r.id} href={svcHref} target="_blank" rel="noreferrer"
-              title={`${r.name} — open in the Services Explorer`}
+            <a key={r.id} href={svcHref} target={svcHref ? "_blank" : undefined}
+              rel="noreferrer"
+              title={svcHref ? `${r.name} — open in the Services Explorer`
+                : `${r.name} — resolving its Explorer name…`}
+              aria-disabled={svcHref ? undefined : true}
               className={`svcf__row svcf__row--go${failRising ? " svcf__row--warn" : ""}`}>
               <span className="svcf__nm" title={r.name}>{r.name}</span>
               <span className="svcf__bar" aria-hidden="true">
