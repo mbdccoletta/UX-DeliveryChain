@@ -2,7 +2,7 @@
   "environmentUrl": "https://bwm98081.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "Smartscape delivery chain crossed with RUM, Davis, alerts and extensions.",
     "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",
@@ -13,7 +13,7 @@
       },
       {
         "name": "storage:user.sessions:read",
-        "comment": "frontend.name per application \u2014 the name Users & Sessions filters by (differs from the entity name)"
+        "comment": "frontend.name per application — the name Users & Sessions filters by (differs from the entity name)"
       },
       {
         "name": "storage:events:read",
@@ -57,11 +57,11 @@
       },
       {
         "name": "storage:spans:read",
-        "comment": "Opens one specific request in Distributed Tracing \u2014 that app accepts a trace id and nothing else."
+        "comment": "Opens one specific request in Distributed Tracing — that app accepts a trace id and nothing else."
       },
       {
         "name": "storage:metrics:read",
-        "comment": "Throughput forecast per service rides the metric store \u2014 orders cheaper than re-scanning 24h of spans."
+        "comment": "Throughput forecast per service rides the metric store — orders cheaper than re-scanning 24h of spans."
       }
     ]
   }
