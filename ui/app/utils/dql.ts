@@ -1419,6 +1419,10 @@ fetch dt.davis.events, from: now()-24h
 
 export const num = (v: unknown): number => (v == null ? 0 : Number(v));
 export const fmtN = (n: number) => n.toLocaleString("en-US");
+/** ONE share formatter (0..1): a decimal below 10%, none above — three
+ *  byte-identical copies had drifted across the board, the poster and the
+ *  flow, and Pulse inlined a fourth with a different rule. */
+export const fmtPct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
 export const fmtK = (n: number) =>
   n >= 1000 ? (n / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "k" : fmtN(n);
 /** ns → human-readable duration. */

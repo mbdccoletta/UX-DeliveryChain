@@ -14,10 +14,10 @@
 // classic entity id, not by the Smartscape routing key.
 import { getIntentLink, sendIntent } from "@dynatrace-sdk/navigation";
 import { getEnvironmentUrl } from "@dynatrace-sdk/app-environment";
-import { type Timeframe } from "./dql";
+import { fmtN, type Timeframe } from "./dql";
 import {
   intentFor, K8S_NODE_BY_APP, SERVICE_RESPONSE_TIME,
-  SESSION_CLASSIC, SESSION_GEN3, SESSIONS_LIST, TRACES_LIST, type IntentRef,
+  SESSION_GEN3, SESSIONS_LIST, TRACES_LIST, type IntentRef,
 } from "./intents";
 import type { AppMap, Capability } from "../hooks/useApps";
 
@@ -240,7 +240,7 @@ export const sessionsLink = (
   segmentLabel?: string,
 ): DeepLink =>
   link(segmentLabel ?? "Analyze user sessions",
-    `Users & Sessions · ${sessions.toLocaleString()} sessions · ${tf.label}`,
+    `Users & Sessions · ${fmtN(sessions)} sessions · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
       "explorer.properties": {
@@ -417,7 +417,7 @@ export const errorsExplorerHref = (
  * filter string at all.
  */
 export const errorsLink = (tf: Timeframe, appName: string, errors: number): DeepLink =>
-  link("Inspect errors", `Error Inspector · ${errors.toLocaleString()} errors · ${tf.label}`,
+  link("Inspect errors", `Error Inspector · ${fmtN(errors)} errors · ${tf.label}`,
     {}, { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
       proves: "every error of this application, ranked by users affected" });
 
@@ -459,18 +459,6 @@ function safeLink(payload: IntentPayload, appId?: string, intentId?: string): st
   if (!useless) return viaSdk;
   return appId && intentId ? intentUrl(appId, intentId, payload) : "#";
 }
-
-/**
- * One session in the platform's own viewer — the verified
- * session-details-from-event pair (dt.rum.session.id + start_time), the same
- * payload the routes' "Open an impacted session" step already sends.
- */
-export const sessionViewerLink = (sid: string, start: string): DeepLink =>
-  link("Open this session", sid,
-    { "dt.rum.session.id": sid, "start_time": start },
-    { keyProperties: ["dt.rum.session.id"], app: "Users & Sessions",
-      appId: SESSION_GEN3.appId, intentId: SESSION_GEN3.intentId,
-      proves: "this session, event by event, in the platform's own viewer" });
 
 /**
  * An app's own front door — `/ui/apps/<id>` — absolute so it survives the
@@ -1127,7 +1115,7 @@ export function investigationPaths(
        * then the vitals. */
       if (kind === "mobileApp" && crashes && crashes > 0) {
         tech.unshift(link("Inspect the crashes",
-          `Error Inspector · ${crashes.toLocaleString()} crashes · ${tf.label}`, {},
+          `Error Inspector · ${fmtN(crashes)} crashes · ${tf.label}`, {},
           { app: "Error Inspector",
             href: errorsExplorerHref(tf, name, undefined, "Crash"),
             proves: "every crash, ranked by users affected" }));
@@ -1452,17 +1440,6 @@ export function investigationPaths(
   }
 
   return out;
-}
-
-/** The app that owns an entity type, for the node label. */
-function appNameFor(field: string): string {
-  const map: Record<string, string> = {
-    "dt.entity.service": "Services",
-    "dt.entity.host": "Infrastructure",
-    "dt.entity.application": "Web application",
-    "dt.entity.process_group_instance": "Processes",
-  };
-  return map[field] ?? "Entity app";
 }
 
 /**
