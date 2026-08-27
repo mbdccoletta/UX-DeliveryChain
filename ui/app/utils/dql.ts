@@ -229,6 +229,52 @@ ${norm(VIEW_NAME, "v")}
 | sort sessions desc | limit 120`;
 
 /** Navigation sequences — path mining, one ordered path per session. */
+const VIEW_NAME = "coalesce(view.name, view.detected_name)";
+
+/**
+ * COLLAPSING IDENTIFIERS — one block, shared by every journey-mining query.
+ *
+ * It lived twice, byte for byte, in qSequences and qPathSessions; the mining
+ * and the poster's membership test MUST see the same screen names or a picked
+ * route matches nothing.
+ *
+ * Each rule is anchored on structure a real word cannot have: the hyphen
+ * groups of a UUID, a pure-integer segment, or an alphanumeric run of six or
+ * more carrying BOTH a digit and a letter. That last one replaced an
+ * upper-case-only rule that let Astroshop's lowercase SKUs through and drew
+ * six bands of the same route ("/ → /product/*vchsjnup → /cart → …" once per
+ * SKU). Measured on both tenants before shipping: every name it collapses is
+ * a product id, and "/checkout", "/api/v2/orders" and
+ * "/orange-booking-finish.jsf" pass through untouched.
+ */
+const COLLAPSE_IDS = `
+| fieldsAdd v = replacePattern(${VIEW_NAME},
+    "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
+// servlet session ids ride the PATH (";jsessionid=<hex>.route") and dodge
+// every shape here — measured: hundreds of one-session rows, each burning a
+// row of the limit before the client-side merge could collapse them
+| fieldsAdd v = splitString(v, ";jsessionid")[0]
+// The mixed-case id rule runs BEFORE the INT rule, not after: "'/' INT"
+// collapses the LEADING DIGITS of a segment, so "/product/0puk6v6ev0"
+// became "/product/*puk6v6ev0" — no longer alphanumeric, invisible to this
+// rule, and still one band per SKU on the diagram (browser-verified).
+// matchesRegex is a FULL match here, hence the surrounding [A-Za-z0-9]*.
+| fieldsAdd _seg = splitString(v, "/")
+| fieldsAdd _n = arraySize(_seg)
+| fieldsAdd _last = arrayElement(_seg, _n - 1)
+| fieldsAdd v = if(_n > 1 and stringLength(_last) >= 6
+    and matchesRegex(_last, "[A-Za-z0-9]*[0-9][A-Za-z0-9]*")
+    and matchesRegex(_last, "[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*"),
+  concat(arrayToString(arraySlice(_seg, to: _n - 1), delimiter: "/"), "/*"), else: v)
+// pure-integer segments ("/orders/12345") — shorter than the rule above needs
+| fieldsAdd v = replacePattern(v, "'/' INT", "/*")
+// Hard cap on depth. Any shape rule can be dodged by an id that does not look
+// like one; truncating past the third segment bounds the cardinality whatever
+// the ids look like. Screen names with no "/" are untouched.
+| fieldsAdd _seg = splitString(v, "/")
+| fieldsAdd v = if(arraySize(_seg) > 3, concat("/", _seg[1], "/", _seg[2], "/*"), else: v)
+| fieldsRemove _seg, _n, _last`;
+
 export const qSequences = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // UNION of navigation and view_summary, because coverage inverts between
@@ -243,24 +289,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // Identifiers are collapsed HERE, before the aggregation, because the limit
 // below is applied after it: leaving one order UUID uncollapsed fragments a
 // 900-session journey into 900 rows of one, and the biggest journeys fall off
-// the end. Each pattern is anchored on structure a real word cannot have — the
-// hyphen groups of a UUID, or an upper-case run containing a digit — so
-// "/cart/checkout" and "/api/v2/orders" pass through untouched.
-| fieldsAdd v = replacePattern(${VIEW_NAME},
-    "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
-| fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
-| fieldsAdd v = replacePattern(v, "'/' INT", "/*")
-// servlet session ids ride the PATH (";jsessionid=<hex>.route") and dodge all
-// three shapes above — measured: hundreds of one-session rows, each burning a
-// row of the limit before the client-side merge could collapse them
-| fieldsAdd v = splitString(v, ";jsessionid")[0]
-// Hard cap on depth. The patterns above recognise ids by shape, and any shape
-// rule can be dodged by an id that does not look like one. Truncating past the
-// third segment bounds the cardinality no matter what the ids look like, which
-// is what keeps the diagram readable. Screen names with no "/" are untouched.
-| fieldsAdd seg = splitString(v, "/")
-| fieldsAdd v = if(arraySize(seg) > 3, concat("/", seg[1], "/", seg[2], "/*"), else: v)
-| fieldsRemove seg
+// the end.${COLLAPSE_IDS}
 | sort start_time asc
 | summarize path = collectArray(v), by: { appId = dt.rum.application.id, session = dt.rum.session.id }
 | summarize sessions = count(), by: { appId, journey = path }
@@ -290,17 +319,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter (characteristics.classifier == "navigation"
     or characteristics.classifier == "view_summary")
   and isNotNull(${VIEW_NAME})
-| fieldsAdd v = replacePattern(${VIEW_NAME},
-    "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
-| fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
-| fieldsAdd v = replacePattern(v, "'/' INT", "/*")
-// servlet session ids ride the PATH (";jsessionid=<hex>.route") and dodge all
-// three shapes above — measured: hundreds of one-session rows, each burning a
-// row of the limit before the client-side merge could collapse them
-| fieldsAdd v = splitString(v, ";jsessionid")[0]
-| fieldsAdd seg = splitString(v, "/")
-| fieldsAdd v = if(arraySize(seg) > 3, concat("/", seg[1], "/", seg[2], "/*"), else: v)
-| fieldsRemove seg
+${COLLAPSE_IDS}
 | sort start_time asc
 | summarize path = collectArray(v), start = min(start_time),
   by: { sid = dt.rum.session.id }
@@ -911,7 +930,7 @@ export function normalizeView(name: string): string {
  * drill-downs aligned. Every journey query keyed on detected_name alone was
  * silently dropping the mobile estate into "No page telemetry".
  */
-const VIEW_NAME = "coalesce(view.name, view.detected_name)";
+
 
 const norm = (src: string, out = "v") => `
 | fieldsAdd ${out} = replacePattern(${src},
@@ -983,7 +1002,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | summarize res = takeAny(concat(device.screen.width, "×", device.screen.height)),
     dpr = takeAny(toString(browser.window.device_pixel_ratio)),
     orient = takeAny(device.orientation),
-    agent = takeAny(dt.rum.agent.type), utype = takeAny(dt.rum.user_type),
+    agent = takeAny(dt.rum.agent.type),
+    // deterministic: 157 measured sessions carry two user_type values, and
+    // takeAny flipped their origin between runs (same fix as qImpacted)
+    utype = if(countIf(dt.rum.user_type == "robot") > 0, "robot",
+      else: if(countIf(dt.rum.user_type == "synthetic") > 0, "synthetic",
+      else: takeAny(dt.rum.user_type))),
     views = countIf(characteristics.classifier == "view_summary"),
   by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
 | summarize sessions = count(), views = sum(views),
@@ -1960,7 +1984,12 @@ export const qOrigins = (tf: Timeframe, session?: string | null) => {
   const mid = tfMid(tf);
   return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
-| summarize agent = takeAny(dt.rum.agent.type), utype = takeAny(dt.rum.user_type),
+| summarize agent = takeAny(dt.rum.agent.type),
+    // deterministic, like qDevices: a session carrying both robot and human
+    // events must land in the SAME origin every run
+    utype = if(countIf(dt.rum.user_type == "robot") > 0, "robot",
+      else: if(countIf(dt.rum.user_type == "synthetic") > 0, "synthetic",
+      else: takeAny(dt.rum.user_type))),
     res = takeAny(concat(device.screen.width, "×", device.screen.height)),
     views = countIf(characteristics.classifier == "view_summary"),
     // start_time, NOT timestamp: measured, timestamp is null on every

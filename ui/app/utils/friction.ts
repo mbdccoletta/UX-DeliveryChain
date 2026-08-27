@@ -33,7 +33,8 @@ export function edgeHealth(t: TransitionRow): EdgeHealth {
     const what = t.abandoned >= t.timeouts ? "closed the tab mid-action" : "the action timed out";
     return {
       health: "losing",
-      note: `${fmtN(lost)} of ${fmtN(t.sessions)} ${what}`,
+      // "8 of 3" was possible: lost counts ACTIONS, sessions counts SESSIONS
+      note: `${fmtN(lost)} ${what} · ${fmtN(t.sessions)} sessions on this move`,
     };
   }
   const inpShare = t.actions ? t.slowInp / t.actions : 0;
