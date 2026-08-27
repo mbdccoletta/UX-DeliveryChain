@@ -417,6 +417,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         hitSessions={impacted?.hit ?? 0}
         loadP50={app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? apdexOf(uxRow) : null}
+        apdexNote={uxRow && apdexOf(uxRow) === null
+          ? (uxRow.realSessions === 0 && uxRow.sessions > 0
+            ? "No people to rate: every session this window is robot or synthetic traffic, and Apdex scores real users only."
+            : "No rated user actions in this window.")
+          : undefined}
         apdexBands={uxRow ? { sat: uxRow.satisfied, tol: uxRow.tolerating,
           fru: uxRow.frustrated, fruErr: uxRow.fruErr } : null}
         realErrors={uxRow ? uxRow.realErrors : null}
@@ -854,6 +859,9 @@ interface CardProps {
   requests: number; reqFail: number; loadP50: number;
   /** Apdex over this application's user actions, or null when none were rated. */
   apdex: number | null;
+  /** Why the score is absent, when it is — "•••" alone made a robot-only
+   *  application on the dev tenant read as a rendering bug. */
+  apdexNote?: string;
   /** The bands behind it — what the words under the score are built from. */
   apdexBands: { sat: number; tol: number; fru: number; fruErr: number } | null;
   /** Errors that reached a real person, and the third-party share of all of
@@ -1094,7 +1102,8 @@ function CleanCard(p: CardProps) {
                 two disagree often, and an application that is fast and broken
                 should have to say both out loud. */}
             <Stat v={fmtApdex(p.apdex)} l="apdex"
-              tone={p.apdex === null ? undefined : apdexTone(p.apdex)} />
+              tone={p.apdex === null ? undefined : apdexTone(p.apdex)}
+              title={p.apdex === null ? p.apdexNote : undefined} />
           </div>
 
           {p.apdex !== null && (() => {
@@ -1244,7 +1253,7 @@ error series, read at the same width the window is drawn in.`}>
             <Stat v={fmtK(p.requests)} l="web requests" />
             <Stat v={p.requests > 0
                 ? `${((p.reqFail / p.requests) * 100).toFixed(1)}%` : "—"}
-              l="error rate" tone={p.reqFail > 0 ? "bad" : undefined} />
+              l="calls failed" tone={p.reqFail > 0 ? "bad" : undefined} />
           </div>
           <div className="tk-note">load p50 {fmtMs(p.loadP50)}</div>
           {p.domNames.slice(0, 2).map((n) => (

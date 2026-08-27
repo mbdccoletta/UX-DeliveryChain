@@ -761,7 +761,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
       views = countDistinct(if(characteristics.classifier == "navigation"
         or characteristics.classifier == "view_summary", _vn, else: null)),
       dur = max(toLong(duration)),
-      isReal = takeAny(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")),
+      /* min, not takeAny — 157 measured sessions carry two user_type values
+       * and takeAny flips the customer count between runs */
+      isReal = min(if(not(dt.rum.user_type == "robot")
+        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
     by: { sid = dt.rum.session.id }
 | fields sid, reached, errs, waited, crash, views, dur, isReal, entry,
     measured, ttfbMs, lcpMs, fcpMs,
@@ -985,20 +988,36 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | sort sessions desc | limit 20`;
 
 /** Contacted domains (layer 02). */
-export const qDomains = (tf: Timeframe) => `
+export const qDomains = (tf: Timeframe) => {
+  /* On a shifted/absolute window tfMid is null — emit a literal null so the
+   * client keeps its "no forecast" contract. The old fallback "now()" turned
+   * unknown into a hard 0 and every leg forecast "heading to ≈0". */
+  const mid = tfMid(tf);
+  return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
-| filter characteristics.classifier == "request" and isNotNull(url.domain)
-| summarize reqs = count(), p50 = percentile(toLong(duration), 50),
+/* Requests UNION failed calls. Request records carry only 200/201 on both
+ * measured tenants (bwm: 445k requests, statuses {200, 0, null}) — every
+ * failed call is filed as an error with source "fetch", so counting
+ * status >= 400 here was a structural 0 wearing "clean". The error rows ride
+ * the same scan; on gru they carry url.domain (99%), on bwm they do not —
+ * those group under domain "" and the client reports them as unattributable
+ * instead of pretending zero. */
+| filter (characteristics.classifier == "request" and isNotNull(url.domain))
+    or (characteristics.classifier == "error" and error.source == "fetch")
+| fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
+| summarize reqs = countIf(_req == 1),
+    p50 = percentile(if(_req == 1, toLong(duration)), 50),
     // p90 rides along (free column) because the audit measured p50 = 0 on
     // 916k first-party requests — over half report zero duration, and a
     // bare "0ms" was truth wearing the clothes of nonsense
-    p90 = percentile(toLong(duration), 90),
-    err = countIf(toLong(http.response.status_code) >= 400),
-    bytes = sum(toLong(performance.transfer_size)),
-    late = countIf(start_time >= ${tfMid(tf) ?? "now()"}),
-  by: { appId = dt.rum.application.id, domain = url.domain, provider = url.provider,
-        utype = dt.rum.user_type, agent = dt.rum.agent.type }
+    p90 = percentile(if(_req == 1, toLong(duration)), 90),
+    err = countIf(_req == 0),
+    bytes = sum(if(_req == 1, toLong(performance.transfer_size))),
+    late = ${mid ? `countIf(_req == 1 and start_time >= ${mid})` : "toLong(null)"},
+  by: { appId = dt.rum.application.id, domain = coalesce(url.domain, ""),
+        provider = url.provider, utype = dt.rum.user_type, agent = dt.rum.agent.type }
 | sort reqs desc | limit 160`;
+};
 
 /**
  * Users hit by errors, and the one session worth opening.
@@ -1147,8 +1166,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     starts = countIf(characteristics.classifier == "app_start"),
     actions = countIf(characteristics.classifier == "user_action"),
     requests = countIf(characteristics.classifier == "request"),
-    reqfail = countIf(characteristics.classifier == "request"
-      and toLong(http.response.status_code) >= 400),
+    // failed CALLS, not status codes — request records carry only 200/201
+    // on both measured tenants; failures are filed as fetch-source errors
+    reqfail = countIf(characteristics.classifier == "error"
+      and error.source == "fetch"),
     exceptions = countIf(error.type == "exception"),
   by: { os = os.name, osv = os.version, man = device.manufacturer,
         model = device.model.identifier, ver = app.short_version,
@@ -1342,12 +1363,17 @@ fetch user.events, from: now()-30m
 
 export const qDomMetrics = (rumAppId: string, domain: string) => `
 fetch user.events, from: now()-30m
+/* failed CALLS ride as fetch-source errors, not status >= 400 on request
+ * records (those carry only 200/201 — measured on both tenants) */
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
-    and characteristics.classifier == "request"
     and url.domain == "${domain.replace(/["\\]/g, "")}"
-| summarize p50 = percentile(toLong(duration), 50), p90 = percentile(toLong(duration), 90),
-    p95 = percentile(toLong(duration), 95), thr = count(),
-    fails = countIf(toLong(http.response.status_code) >= 400)
+    and (characteristics.classifier == "request"
+      or (characteristics.classifier == "error" and error.source == "fetch"))
+| fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
+| summarize p50 = percentile(if(_req == 1, toLong(duration)), 50),
+    p90 = percentile(if(_req == 1, toLong(duration)), 90),
+    p95 = percentile(if(_req == 1, toLong(duration)), 95), thr = countIf(_req == 1),
+    fails = countIf(_req == 0)
 | limit 1`;
 
 /** Events per provider — separates Davis AI, custom alerts and extensions. */
@@ -1684,8 +1710,10 @@ fetch user.sessions, from: now()-24h
  */
 export const qLambdaPlacement = (fnIds: string[]) => `
 smartscapeNodes "AWS_LAMBDA_FUNCTION"
-| filter in(id, {${fnIds.slice(0, 40)
-  .map((f) => `"${f.replace(/["\\]/g, "")}"`).join(",")}})
+/* toSmartscapeId, ALWAYS — a Smartscape id compared to a raw string is
+ * false on every row (project rule #1), so this filter matched nothing */
+| filter ${fnIds.slice(0, 40)
+  .map((f) => `id == toSmartscapeId("${f.replace(/["\\]/g, "")}")`).join(" or ")}
 | fields fn = id, name, region = aws.region, account = aws.account.id
 | limit 40`;
 
@@ -1931,7 +1959,9 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
   by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
 | summarize sessions = count(), views = sum(views),
     profiles = countDistinct(res),
-    late = countIf(t0 >= ${mid ?? "now()"}),
+    /* null (not now()) on shifted windows — "unknown" must stay unknown,
+     * or every origin forecasts "falling to 0" on an absolute range */
+    late = ${mid ? `countIf(t0 >= ${mid})` : "toLong(null)"},
     hitSessions = sum(hit),
   by: { appId, agent, utype }
 | filter not(startsWith(appId, "APPLICATION-")) and isNotNull(appId) and appId != ""
@@ -2014,7 +2044,9 @@ export const qGeoWho = (tf: Timeframe, rumAppId: string, iso: string) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
 | summarize
-    inC = takeAny(if(geo.country.iso_code == "${iso.replace(/["\\]/g, "")}", 1, else: 0)),
+    /* max, not takeAny — membership is "ANY event in this country", and
+     * takeAny flipped it per run for sessions with mixed/null geo rows */
+    inC = max(if(geo.country.iso_code == "${iso.replace(/["\\]/g, "")}", 1, else: 0)),
     hit = countIf(characteristics.classifier == "error"),
     os = takeAny(os.name), browser = takeAny(browser.name),
     isp = takeAny(client.isp), devtype = takeAny(device.type),

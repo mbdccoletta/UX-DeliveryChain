@@ -10,14 +10,20 @@ import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
  *  (which already carries window, app and definitions), so a re-open costs
  *  nothing and two callers in flight share one request. A failure forgets
  *  its key — the next click retries instead of caching the error. */
-const dqlMemo = new Map<string, Promise<Array<Record<string, unknown>>>>();
+/* Memoised per query TEXT — and the text carries a RELATIVE timeframe
+ * ("now()-2h"), so the key never changes as the clock walks. Without an
+ * expiry, a poster reopened hours later served the first open's sessions
+ * against a freshly-mined diagram: disjoint session ids, "0 sessions on
+ * this route" beside a flow bar full of them. Five minutes keeps the
+ * reopen-free win and lets the data stay the window it claims to be. */
+const DQL_MEMO_TTL = 5 * 60_000;
+const dqlMemo = new Map<string, { at: number; p: Promise<Array<Record<string, unknown>>> }>();
 function memoDql(q: string, limit: number): Promise<Array<Record<string, unknown>>> {
-  let p = dqlMemo.get(q);
-  if (!p) {
-    p = runDql<Record<string, unknown>>(q, limit)
-      .catch((e) => { dqlMemo.delete(q); throw e; });
-    dqlMemo.set(q, p);
-  }
+  const hit = dqlMemo.get(q);
+  if (hit && Date.now() - hit.at < DQL_MEMO_TTL) return hit.p;
+  const p = runDql<Record<string, unknown>>(q, limit)
+    .catch((e) => { dqlMemo.delete(q); throw e; });
+  dqlMemo.set(q, { at: Date.now(), p });
   return p;
 }
 
@@ -626,7 +632,7 @@ export function FlowSankey({
   /* The route's INFOGRAPHIC — the poster the reader asked for, opened by the
    * button on the path band and laid over the screen. null = closed;
    * "loading" while the two scans run (the cohort's ids, then its portrait). */
-  const [info, setInfo] = useState<null | "loading" | InfoRow[]>(null);
+  const [info, setInfo] = useState<null | "loading" | "error" | InfoRow[]>(null);
   const [infoStops, setInfoStops] = useState<null | StopRow[]>(null);
   const [infoCohort, setInfoCohort] = useState(0);
   /** Whether the OPEN poster shows the unconverted cohort (set per open —
@@ -1243,7 +1249,9 @@ export function FlowSankey({
           p50dur: med(a.durs), p50views: med(a.views) };
       });
       if (seq === infoSeq.current) setInfo(info);
-    } catch { if (seq === infoSeq.current) setInfo([]); }
+    // a failed scan must SAY so — rendering [] here dressed the failure as
+    // an empty poster whose stale header still counted sessions
+    } catch { if (seq === infoSeq.current) setInfo("error"); }
   };
 
   /* the lit-path ids belong to one model; changing mode invalidates them */
@@ -1648,8 +1656,23 @@ export function FlowSankey({
         );
       })()}
 
+      {/* a scan that failed says so, with its retry — never an empty poster */}
+      {info === "error" && (
+        <div className="rinfo rinfo--err" role="alertdialog"
+          aria-label="The portrait failed to load">
+          <p>The portrait could not be drawn — a scan behind it failed.</p>
+          <div>
+            <button className="export-btn"
+              onClick={() => void openInfographic(infoIsCohort ? "unconverted" : undefined)}>
+              try again
+            </button>
+            <button className="drawer__x" aria-label="Close"
+              onClick={() => { setInfo(null); cohortRef.current = null; }}>✕</button>
+          </div>
+        </div>
+      )}
       {/* the route's portrait, over everything — closes on Esc or outside */}
-      {info !== null && (() => {
+      {info !== null && info !== "error" && (() => {
         const app = appId ? apps.find((a) => a.appId === appId) : undefined;
         const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0);
         const all = mine.reduce((a, q) => a + q.sessions, 0);
