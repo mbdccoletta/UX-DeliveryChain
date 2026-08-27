@@ -189,15 +189,37 @@ function topBuckets(rows: InfoRow[], dim: string, n = 5) {
   return { buckets, inTot, outTot };
 }
 
-/** A rate over both sides, from any one dimension's rows. */
+/**
+ * THE DIMENSION THE WHOLE COHORT ANSWERS. Every rate below is computed over
+ * ONE dimension's rows (each dimension partitions the same sessions), so the
+ * dimension picked decides the denominator — and `rows[0].dim` picked
+ * whichever happened to be first, silently dropping the sessions that carry
+ * no value for it. The best-covered dimension is the honest partition.
+ */
+function baseDim(rows: InfoRow[], inCohort: boolean): string | undefined {
+  const tot = new Map<string, number>();
+  for (const x of rows) {
+    if (x.inCohort !== inCohort) continue;
+    tot.set(x.dim, (tot.get(x.dim) ?? 0) + x.sessions);
+  }
+  return [...tot.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+/** A rate over both sides, from the best-covered dimension's rows. */
 function rate(rows: InfoRow[], k: "hit" | "fatal", inCohort: boolean) {
-  const dim = rows[0]?.dim;
+  const dim = baseDim(rows, inCohort);
   const r = rows.filter((x) => x.dim === dim && x.inCohort === inCohort);
   const n = r.reduce((a, x) => a + x.sessions, 0);
   return n ? r.reduce((a, x) => a + x[k], 0) / n : 0;
 }
-function median(rows: InfoRow[], k: "p50dur" | "p50views", inCohort: boolean) {
-  const dim = rows[0]?.dim;
+/**
+ * A session-weighted MEAN of per-bucket medians — not a true median, which
+ * cannot be recovered from bucket medians. Labelled "typical" on the poster
+ * for that reason: calling it "median" was a statistic wearing a stronger
+ * name than it earns.
+ */
+function typicalOf(rows: InfoRow[], k: "p50dur" | "p50views", inCohort: boolean) {
+  const dim = baseDim(rows, inCohort);
   const r = rows.filter((x) => x.dim === dim && x.inCohort === inCohort);
   const n = r.reduce((a, x) => a + x.sessions, 0);
   return n ? r.reduce((a, x) => a + x[k] * x.sessions, 0) / n : 0;
@@ -385,8 +407,8 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               {([
                 ["hit by errors", rate(rows, "hit", true), rate(rows, "hit", false), fmtPct, true],
                 ["crash / ANR", rate(rows, "fatal", true), rate(rows, "fatal", false), fmtPct, true],
-                ["median session", median(rows, "p50dur", true), median(rows, "p50dur", false), fmtMs, false],
-                ["median views", median(rows, "p50views", true), median(rows, "p50views", false),
+                ["typical session", typicalOf(rows, "p50dur", true), typicalOf(rows, "p50dur", false), fmtMs, false],
+                ["typical views", typicalOf(rows, "p50views", true), typicalOf(rows, "p50views", false),
                   (v: number) => v.toFixed(1), false],
               ] as Array<[string, number, number, (v: number) => string, boolean]>)
                 .map(([label, a, b, f, isRate]) => {
