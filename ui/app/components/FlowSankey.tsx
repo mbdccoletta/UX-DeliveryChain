@@ -38,6 +38,7 @@ const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic";
 import type { AppRow, FrictionRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
+import { HIT_BAD, HIT_WARN } from "../utils/verdict";
 
 type Tone = "good" | "warn" | "bad" | "info";
 interface Node {
@@ -201,7 +202,18 @@ export function matchesRoutes(journey: string[], pk: string[], ctx: RouteCtx | n
 const routeId = (journey: string[]) => "jp-" + journey.join("\u0001");
 
 /** Builds nodes and ribbons from sessions per application and mined sequences. */
-export function buildModel(apps: AppRow[], seqs: SeqRow[]) {
+/* ONE application-health rule with every other screen (utils/verdict):
+ * sessions hit by an error over sessions. The old inline errors-per-view
+ * ratio drew GREEN an app where every session met one error across three
+ * views, while the Overview called the same app Critical. Without a ux row
+ * the health is unknown — info, never a guessed green. */
+const appTone = (u: { sessions: number; hit: number } | undefined | null): Tone =>
+  !u || u.sessions === 0 ? "info"
+  : u.hit / u.sessions >= HIT_BAD ? "bad"
+  : u.hit / u.sessions >= HIT_WARN ? "warn" : "good";
+
+export function buildModel(apps: AppRow[], seqs: SeqRow[],
+  ux?: Map<string, { sessions: number; hit: number }> | null) {
   const nodes: Node[] = [];
   const links: Link[] = [];
   const stageTot = new Map<string, { nm: string; tone: Tone; sub: string; v: number }>();
@@ -215,9 +227,7 @@ export function buildModel(apps: AppRow[], seqs: SeqRow[]) {
   const envDeepest = deepestOf(seqs);
 
   for (const a of apps) {
-    // tone states measured health, never size: errors per view decides it
-    const ratio = a.views ? a.errors / a.views : 0;
-    const tone: Tone = ratio > 1 ? "bad" : ratio > 0.5 ? "warn" : "good";
+    const tone: Tone = appTone(ux?.get(a.appId));
     nodes.push({ id: "a-" + a.appId, c: 0, nm: a.name, v: a.sessions, tone,
       sub: `${share(a.sessions)} · ${fmtN(a.views)} views`, appId: a.appId });
 
@@ -269,7 +279,8 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
   /** Stage vocabulary from the FULL mine — when the model is rebuilt from a
    *  picked subset, deciding outcomes/deepest from the remainder made the
    *  drawn stages disagree with the pick matcher's (audit). */
-  vocab?: { outcomes: boolean; deepest: number }) {
+  vocab?: { outcomes: boolean; deepest: number },
+  uxRow?: { sessions: number; hit: number } | null) {
   const nodes: Node[] = [];
   const links: Link[] = [];
   // Window fragments — sessions whose only in-window content is one stray
@@ -282,9 +293,8 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
     .filter((s) => s.appId === app.appId)
     .sort((a, b) => b.sessions - a.sessions);
 
-  const ratio = app.views ? app.errors / app.views : 0;
   nodes.push({ id: "a-" + app.appId, c: 0, nm: app.name, v: journeyable,
-    tone: ratio > 1 ? "bad" : ratio > 0.5 ? "warn" : "good",
+    tone: appTone(uxRow),
     sub: `${fmtN(mine.length)} paths discovered`
       + (fragments > 0 ? ` · ${fmtN(fragments)} window fragments excluded` : ""),
     appId: app.appId });
@@ -506,20 +516,27 @@ export function buildStepModel(app: AppRow, seqs: SeqRow[], trans: TransitionRow
 function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
   const scope = appId ? seqs.filter((s) => s.appId === appId) : seqs;
   if (!scope.length) return null;
-  const measured = scope.reduce((a, s) => a + s.sessions, 0);
-  const done = scope.filter((s) => doneOf(s.journey))
-    .reduce((a, s) => a + s.sessions, 0);
+  /* ONE RULE with the stage column beside it: finished = reached the deepest
+   * journey (depth, no vocabulary). The header once counted by outcome
+   * KEYWORD while the stages counted by depth — the same screen printed
+   * "570 finished" over a stage node saying 569, and the reader caught the
+   * off-by-one before anyone could explain it. Base = journeyed sessions,
+   * the same population the stage nodes stand on. */
+  const journeyed = scope.filter((s) => s.journey.length > 0);
+  const deepest = deepestOf(journeyed);
+  const measured = journeyed.reduce((a, s) => a + s.sessions, 0);
+  const done = deepest > 1 ? journeyed.filter((s) => s.journey.length >= deepest)
+    .reduce((a, s) => a + s.sessions, 0) : 0;
   // where the biggest group of unfinished sessions gave up
   const byLast = new Map<string, number>();
-  for (const s of scope) {
-    if (doneOf(s.journey) || !s.journey.length) continue;
+  for (const s of journeyed) {
+    if (s.journey.length >= deepest && deepest > 1) continue;
     const last = s.journey[s.journey.length - 1];
     byLast.set(last, (byLast.get(last) ?? 0) + s.sessions);
   }
   const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
-  const outcomes = scope.some((s) => doneOf(s.journey));
   return {
-    measured, done, outcomes,
+    measured, done, outcomes: deepest > 1,
     pct: measured ? (done / measured) * 100 : 0,
     dropView: worst?.[0] ?? null,
     dropSessions: worst?.[1] ?? 0,
@@ -569,7 +586,7 @@ export function FlowSankey({
   onBizScope?: (picks: string[]) => void;
   transitions?: TransitionRow[]; friction?: FrictionRow[];
   /** Per-app UX aggregate — the funnel reads window-fragment counts from it. */
-  ux?: Map<string, { fragments: number }> | null;
+  ux?: Map<string, { fragments: number; sessions: number; hit: number }> | null;
   /** Per-view measurement from view_summary — the only event that knows how
    *  long a view actually took, because it is emitted when the view ends. */
   views?: ViewRow[];
@@ -745,11 +762,12 @@ export function FlowSankey({
     // stays on screen so a second and third route can be chosen, and the bar
     // carries the narrowed cohort in words.
     const isoApp = app;
-    const built = !app ? { ...buildModel(apps, seqs),
+    const built = !app ? { ...buildModel(apps, seqs, ux),
                            cols: ["Application", "Furthest stage reached", "Session outcome"] }
       : stepMode ? buildStepModel(app, seqsIn, transitions)
       : { ...buildAppModel(isoApp!, seqsIn, fragmentsOf(app.appId),
-            pathCtx ? { outcomes: pathCtx.outcomes, deepest: pathCtx.deepest } : undefined),
+            pathCtx ? { outcomes: pathCtx.outcomes, deepest: pathCtx.deepest } : undefined,
+            ux?.get(app.appId)),
           cols: ["Application", "Navigation path", "Furthest stage reached"] };
     const { nodes, links, cols } = built;
 
@@ -1406,9 +1424,10 @@ export function FlowSankey({
    */
   const a11yModel = React.useMemo(() => {
     const app = appId ? apps.find((a) => a.appId === appId) : undefined;
-    if (!app) return buildModel(apps, seqs);
+    if (!app) return buildModel(apps, seqs, ux);
     return mode === "steps" ? buildStepModel(app, seqs, transitions)
-      : buildAppModel(app, seqs, ux?.get(app.appId)?.fragments ?? 0);
+      : buildAppModel(app, seqs, ux?.get(app.appId)?.fragments ?? 0,
+          undefined, ux?.get(app.appId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apps, seqs, appId, mode, transitions, ux, defsKey]);
 
@@ -1443,7 +1462,7 @@ export function FlowSankey({
         </div>
         {sum && (
           <span className="flow-hd__a"
-            title="Journeyed sessions — robots and synthetic included, no-telemetry excluded. Business Control counts real customers over all sessions, so its conversion figures differ by design.">
+            title="Journeyed sessions — robots and synthetic included, no-telemetry excluded. Finished = reached the deepest journey, the same depth rule the stage column uses. Business Control's conversion uses its own declared depth (the ConvRule strip states it) over the same mined journeys.">
             {sum.outcomes ? (
               <>
                 <b>{fmtN(sum.done)}</b> of {fmtN(sum.measured)} sessions finished
@@ -1486,7 +1505,10 @@ export function FlowSankey({
           const end = /^(done|exit)-(\d+)$/.exec(id);
           if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
           const m = /^n(\d+)-([\s\S]*)$/.exec(id);
-          return m ? `${Number(m[1]) + 1}º ${m[2]}` : id;
+          // English ordinal, like every other UI string ("1º" leaked in)
+          const nth = (n: number) => `${n}${["th", "st", "nd", "rd"][
+            (n % 100 > 10 && n % 100 < 14) ? 0 : Math.min(n % 10, 4) % 4] ?? "th"}`;
+          return m ? `${nth(Number(m[1]) + 1)} ${m[2]}` : id;
         };
         const orderly = steps ? [...picks].sort((a, b) => {
           const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);

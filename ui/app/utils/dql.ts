@@ -811,7 +811,10 @@ export const qBizKpis = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | 
   | summarize isReal = min(if(real, 1, else: 0)), conv = max(done1),
       errs = countIf(characteristics.classifier == "error"),
       fatal = countIf(error.type == "crash" or error.type == "anr"),
-      views = countIf(characteristics.classifier == "view_summary"),
+      // DISTINCT SCREENS over nav∪view_summary — the one engagement rule
+      // (see qUxByApp); event-counting overstated bounces on soft-nav apps
+      views = countDistinct(if((characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary") and vn != "", vn, else: null)),
       acts = countIf(characteristics.classifier == "user_action"),
       // WEB-ONLY by construction: the mobile agent never emits page_hide
       // (measured — its complete_reason is always "completed"), so a mobile
@@ -1079,7 +1082,14 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
         or (error.type == "csp" and isNotNull(csp.blocked_uri.provider)
           and csp.blocked_uri.provider != "first_party"))),
     // Errors that reached a person, split the same way.
-    views = countIf(characteristics.classifier == "view_summary"),
+    // DISTINCT SCREENS, not view_summary events — the median session emits
+    // one view_summary while walking two screens, and 42% emit none
+    // (measured); event-counting understated engagement on soft-nav apps
+    views = countDistinct(if((characteristics.classifier == "navigation"
+      or characteristics.classifier == "view_summary")
+      and isNotNull(coalesce(view.name, view.detected_name)),
+      lower(coalesce(view.name, view.detected_name)), else: null)),
+    viewEvs = countIf(characteristics.classifier == "view_summary"),
     acts = countIf(characteristics.classifier == "user_action"),
     aband = countIf(user_action.complete_reason == "page_hide"),
     navs = countIf(characteristics.classifier == "navigation"),
@@ -1109,7 +1119,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     realErrors = sum(if(robotEv == 0 and synthEv == 0 and synth == 0, errs, else: 0)),
     // app_start/user_interaction are activity too — without them 20 of the
     // mobile app's 27 "fragments" were real users who launched and tapped
-    fragments = countIf(navs == 0 and views == 0 and acts == 0 and reqs == 0 and mob == 0),
+    fragments = countIf(navs == 0 and viewEvs == 0 and acts == 0 and reqs == 0 and mob == 0),
   by: { appId }
 // APDEX, in its own leg at VIEW-INSTANCE grain, because Dynatrace's rule —
 // "user actions with reported errors are rated as Frustrated" — needs the

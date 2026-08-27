@@ -16,7 +16,8 @@ import { fmtK, fmtMs, fmtN } from "../utils/dql";
 import * as Q from "../utils/dql";
 import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
-import { GEO_COL, GEO_WORD, geoArms, geoBecause, geoEnName, geoJudge, geoName,
+import { GEO_ABS_BAD, GEO_ABS_WARN, GEO_COL, GEO_MIN_SESSIONS, GEO_WORD,
+  geoArms, geoBecause, geoEnName, geoJudge, geoName,
   type GeoArm } from "../utils/geoVerdict";
 import type { ChainData } from "../hooks/useChainData";
 import type { Timeframe as TimeframeT } from "../utils/dql";
@@ -674,14 +675,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                    * same colour, so the eye needs no second read. */
                   const cTot = geoDetail.reduce((a, d) => a + d.sessions, 0) || 1;
                   const cRate = geoDetail.reduce((a, d) => a + d.hit, 0) / cTot;
+                  /* THE MAP'S OWN FLOORS, imported — this drill once had a
+                   * fourth rule (any hit = tolerating, no substance gates)
+                   * that called one error in a thousand "tolerating" while
+                   * the legend above said tolerating starts at 10%. */
                   const toneOf = (d: { sessions: number; hit: number }) => {
-                    if (d.hit === 0) return "good";
                     const r = d.hit / Math.max(d.sessions, 1);
-                    // same absolute floor as the map: a quarter of sessions
-                    // erroring is red even when the whole country runs hot
-                    return (cRate > 0 && r >= cRate * 2) || r >= 0.25 ? "bad" : "warn";
+                    if (d.sessions >= GEO_MIN_SESSIONS
+                      && ((cRate > 0 && r >= cRate * 2) || r >= GEO_ABS_BAD)) return "bad";
+                    if (d.sessions >= GEO_MIN_SESSIONS && r >= GEO_ABS_WARN) return "warn";
+                    return "good";
                   };
-                  const BAR = { good: "#4cc38a", warn: "#e8c34a", bad: "#ff7a8a" } as const;
+                  const BAR = GEO_COL;
                   return (
                     <div className="geo__drill-rows">
                       {geoDetail.map((d) => {
@@ -701,9 +706,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 background: `color-mix(in srgb, ${BAR[t]} 55%, transparent)` }} /></span>
                             <b className="num">{fmtN(d.sessions)}</b>
                             <em className={`geo__h geo__h--${t}`}>
-                              {d.hit === 0 ? "satisfied"
-                                : t === "bad" ? `${fmtN(d.hit)} hit · frustrated`
-                                : `${fmtN(d.hit)} hit · tolerating`}</em>
+                              {d.hit === 0 ? GEO_WORD.good
+                                : `${fmtN(d.hit)} hit · ${GEO_WORD[t]}`}</em>
                           </button>
                         );
                       })}
@@ -1560,7 +1564,10 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
                   judge it against. */}
               <span className="svcf__tr">
                 {v ? <>p50 {fmtMs(v.p50)} · p90 {fmtMs(v.p90)} ·{" "}
-                  <b style={{ color: v.p95 > 1e9 ? "var(--warn)" : "var(--ink-2)" }}>
+                  {/* amber at the platform's own satisfaction threshold T
+                      (3s) — the view panel above ambers there, and 1s made
+                      the same latency two colours on one screen */}
+                  <b style={{ color: v.p95 > 3e9 ? "var(--warn)" : "var(--ink-2)" }}>
                     p95 {fmtMs(v.p95)}</b></>
                   : <em className="dim">measuring…</em>}
               </span>

@@ -358,10 +358,20 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               <section className="rinfo__worth">
                 <span className="rinfo__worth-l">WHAT THIS ROUTE IS WORTH</span>
                 <div className="rinfo__worth-row">
-                  <div className="rinfo__kpi rinfo__kpi--worth">
+                  <div className="rinfo__kpi rinfo__kpi--worth"
+                    /* the RULE behind "the goal", spelled out — a rate whose
+                       rule is invisible is a number nobody can check (this is
+                       the poster's own vocabulary rule, distinct from the
+                       board's depth rule, and now it says so) */
+                    title={convDef
+                      ? `goal = ${convDef.taught ? "your taught rule" : "a screen naming"} `
+                        + `${convDef.items.slice(0, 6).join(", ")}`
+                        + (convDef.items.length > 6 ? ", …" : "")
+                        + (convDef.unreadable ? " (your saved rule could not be read — keyword fallback)" : "")
+                      : undefined}>
                     <b className="num">{fmtN(biz.customers)}</b>
                     <span className="rinfo__kpi-l">customers</span>
-                    <em>{fmtN(biz.converted)} reached the goal</em>
+                    <em>{fmtN(biz.converted)} reached the goal{convDef ? " ⓘ" : ""}</em>
                   </div>
                   <div className={`rinfo__kpi rinfo__kpi--worth${biz.hit > 0 ? " rinfo__kpi--bad" : ""}`}>
                     <b className="num">{fmtN(biz.hit)}</b>
