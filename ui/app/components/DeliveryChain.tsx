@@ -1825,6 +1825,17 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   .filter((n) => !n.miss && (n.tone === "bad" || n.tone === "warn"))
                   .sort((a, b) => (a.tone === "bad" ? 0 : 1) - (b.tone === "bad" ? 0 : 1))
                   .map((n) => n.nm).slice(0, 2);
+                /* EMPTY RENDERED AS ONE — worse than zero. A tier that found
+                 * nothing still holds ONE card ("No measured link", "No
+                 * coverage"), and the summary printed the LIST's length: a
+                 * mobile app with no trace reaching any service read
+                 * "Services 1 · Runtime 1 · Infrastructure 1" beside a
+                 * diagram that correctly drew no line to the backend. The
+                 * count is a count of things found, so when nothing was
+                 * found it says so, in that card's own words. */
+                const allMiss = mine.length > 0 && mine.every((n) => n.miss);
+                const shownValue = allMiss ? "—" : value;
+                const shownSub = allMiss ? (mine[0]?.mt ?? "nothing measured here") : sub;
                 return (
                   <div key={label}
                     className={`bsum__row bsum__row--ent bsum__row--${tone}`}
@@ -1840,10 +1851,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     <span className="bsum__l">{label}
                       {rProbs > 0 && <b className="bsum__pb"> ⚠ {rProbs}</b>}
                     </span>
-                    <b className="bsum__v">{value}</b>
-                    {(aching.length > 0 || sub) && (
+                    <b className={`bsum__v${allMiss ? " bsum__v--none" : ""}`}>{shownValue}</b>
+                    {(aching.length > 0 || shownSub) && (
                       <em className={`bsum__s${aching.length ? " bsum__s--hurt" : ""}`}>
-                        {aching.length ? aching.join(" · ") : sub}
+                        {aching.length ? aching.join(" · ") : shownSub}
                       </em>
                     )}
                     {/* THE READER'S RULE, stated after the audit: an
