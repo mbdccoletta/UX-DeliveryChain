@@ -163,12 +163,16 @@ export function App() {
   // the flow page reads its technical vitals from the INFOGRAPHIC now, where
   // they answer the filtered question; only the chain needs this scan
 
-  // The classic model and RUM both key a mobile app's entity as
-  // MOBILE_APPLICATION-…, whichever of the two named it — verified against
-  // every mobile app currently listed. A web app's entity never starts this
-  // way, so absence defaults an app into "Web" rather than hiding it.
-  const mobileApps = d.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-"));
-  const webApps = d.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-"));
+  /* THE PLATFORM'S OWN CLASSIFICATION FIRST. This used to infer the kind
+   * from a MOBILE_APPLICATION- entity prefix, and defaulted to "Web" when the
+   * entity was absent — so on fxz0998d, where dt.rum.application.entity comes
+   * back null, a native Android app was listed under Web (the reader caught
+   * it). Smartscape's FRONTEND node states frontend.type as a fact; the
+   * prefix stays as the fallback for apps that have no such node. */
+  const isMobile = (a: { kind?: string; entity?: string }) =>
+    a.kind ? a.kind === "mobile" : !!a.entity?.startsWith("MOBILE_APPLICATION-");
+  const mobileApps = d.apps.filter(isMobile);
+  const webApps = d.apps.filter((a) => !isMobile(a));
 
   const view = TABS.find(([id]) => id === tab);
 

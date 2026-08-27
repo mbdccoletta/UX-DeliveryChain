@@ -195,7 +195,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
  */
 export const qAppNames = () => `
 smartscapeNodes "FRONTEND"
-| fields id = id_classic, name, rumId = dt.rum.instrumentation.id
+// frontend.type ("web" | "mobile") is the platform's OWN classification —
+// the picker used to infer it from a MOBILE_APPLICATION- id prefix and, when
+// dt.rum.application.entity came back null (measured on fxz0998d), filed a
+// native Android app under "Web".
+| fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
+    kind = frontend.type
 | limit 400`;
 
 /**
@@ -1929,7 +1934,8 @@ smartscapeNodes "FRONTEND"
 | filter id in [ smartscapeEdges "calls"
     | filter source_type == "FRONTEND" and target_type == "SERVICE"
     | fields source_id ]
-| fields id = id_classic, name, rumId = dt.rum.instrumentation.id
+| fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
+    kind = frontend.type
 | limit 200`;
 
 /**

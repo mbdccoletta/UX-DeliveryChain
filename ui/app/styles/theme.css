@@ -2937,6 +2937,10 @@ div:has(> header):has(main) > div {
   background: var(--bg); color: var(--ink); font: 500 13px var(--sans); }
 .rinfo--err > div { display: flex; gap: 10px; align-items: center; }
 
+/* a tier that found nothing shows a dash, in ink — not a verdict colour,
+   because "nothing measured" is not a health judgement */
+.bsum__v--none { color: var(--ink-3); }
+
 /* the export button, SAID in words — a bare "⬇" reused the close-button
    shape, rendered as tofu in some fonts, and the reader could not find the
    download at all. One shared style for the poster and the board. */
