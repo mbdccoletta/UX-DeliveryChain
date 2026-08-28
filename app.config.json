@@ -2,7 +2,7 @@
   "environmentUrl": "https://bwm98081.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
-    "version": "0.1.8",
+    "version": "0.1.9",
     "description": "Smartscape delivery chain crossed with RUM, Davis, alerts and extensions.",
     "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",

@@ -789,13 +789,28 @@ export function FlowSankey({
       // it leaves — otherwise volume stops being comparable across columns
       const maxCount = Math.max(...byCol.map((a) => a.length), 1);
       const avail = h - padT - padB - gap * Math.max(0, maxCount - 1);
+      /* THE FLOOR HAS TO BE PAID FOR. Every node gets at least 5px so a
+       * one-session route stays clickable — but that floor was granted on top
+       * of a pool already fully distributed, so a column with one dominant
+       * route (measured: 1,962 of 1,971 sessions in a single band) overflowed
+       * the canvas by roughly one floor+gap per tail route, and the last
+       * labels were drawn below the bottom edge and clipped.
+       *
+       * The column that needs the most decides a single shrink factor, applied
+       * everywhere — so the one-scale invariant holds (a ribbon stays exactly
+       * as wide as the node it leaves) and nothing lands outside the box. */
+      const rawH = (n: Node) => Math.max(5, (n.v / total) * avail);
+      const needed = Math.max(1, ...byCol.map((arr) =>
+        arr.reduce((a, n) => a + rawH(n), 0) + gap * Math.max(0, arr.length - 1)));
+      const room = h - padT - padB;
+      const fit = needed > room ? room / needed : 1;
       const placed: Array<Node & { x: number; y: number; h: number; inY: number; outY: number }> = [];
       byCol.forEach((arr, ci) => {
         let y = padT;
         for (const n of arr) {
-          const hh = Math.max(5, (n.v / total) * avail);
+          const hh = Math.max(3, rawH(n) * fit);
           placed.push({ ...n, x: colX[ci], y, h: hh, inY: y, outY: y });
-          y += hh + gap;
+          y += hh + gap * fit;
         }
       });
       hitRef.current = placed;
