@@ -99,6 +99,39 @@ const aLink = (
 
 
 
+/**
+ * EXPLAIN THIS PAGE — the whole screen handed to Assist, grounded.
+ *
+ * The chain's routes ask Assist about ONE element. A reader looking at the
+ * diagram or the board has a different question — "what is this telling me" —
+ * and answering it means giving Assist the page's own measured facts rather
+ * than letting it guess from a title. So the caller passes the numbers it is
+ * already showing, verbatim, and the instruction forbids inventing any other.
+ *
+ * Assist opens beside the page (see open()), so the reader keeps the screen
+ * the answer is about.
+ */
+export function explainStep(subject: string, facts: string): DeepLink {
+  return link(`Explain ${subject}`, "Assist reads what is on this page", {
+    prompt: (`Explain what this ${subject} is telling me, in plain business `
+      + "language. Say what stands out, what it means for customers, and what "
+      + "I should look at next.").slice(0, PROMPT_MAX),
+    execute: false,
+    contexts: [
+      { type: "supplementary", value: facts.slice(0, SUPP_MAX) },
+      { type: "instruction", value:
+        "Every number you cite must come from the facts below — never invent "
+        + "one, never estimate, and say plainly when something is not measured "
+        + "there. Lead with what the reader should care about, keep it to a "
+        + "few short bullets, and name the specific screens, routes or "
+        + "countries involved rather than giving generic advice." },
+      { type: "document-retrieval", value: "dynatrace" },
+      { type: "origin-app", value: "my.deliverychain.ux" },
+    ],
+  }, { keyProperties: ["prompt"], proves: "what this page measures, read back in words",
+       ...ASSIST });
+}
+
 type IntentPayload = Record<string, unknown>;
 
 /**

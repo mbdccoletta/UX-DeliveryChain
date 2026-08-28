@@ -24,6 +24,7 @@ import { fmtMs, fmtN, fmtPct, type OutcomeDefs } from "../utils/dql";
 import { useGeo } from "../hooks/useGeo";
 import { GEO_WORD, geoBecause, geoJudge, geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
+import { ExplainButton } from "./ExplainButton";
 
 type Dir = "good" | "bad" | "flat";
 /** the shared share formatter (utils/dql) — three copies had drifted */
@@ -731,6 +732,61 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           }}>
           {exporting ? "rendering…" : "export image ↓"}
         </button>
+        {/* THE BOARD, READ BACK IN WORDS. Built at click time from the same
+            figures the tiles render — including the ones that could NOT be
+            measured, stated as such, so Assist never fills a gap with a
+            plausible number. */}
+        <ExplainButton subject="board" className="export-btn noexport"
+          facts={() => {
+            const lines = [
+              `Application: ${nameOf(scopeApp) || "unknown"}`,
+              `Window: ${data.tf.label} (compared with the window of the same`
+                + " length immediately before it)",
+              scoped ? "The reader has narrowed the brand figures to picked routes"
+                : "Scope: the whole application",
+              "",
+              "PROTECT THE BRAND",
+              noPeople
+                ? `  NOT MEASURABLE: ${NO_PEOPLE}`
+                : `  Customers (real users): ${fmtCount(c.customers)}\n`
+                  + `  Customers hit by a failure: ${fmtCount(c.customersAtRisk)}`
+                  + ` (was ${fmtCount(p.customersAtRisk)})\n`
+                  + `  Customers made to wait (an action over 3s): ${fmtCount(c.waited)}`
+                  + ` (was ${fmtCount(p.waited)})\n`
+                  + `  Customers who bounced: ${fmtCount(Math.max(0, c.customers - c.realEngaged))}`,
+              `  Sessions lost to a crash or freeze: ${fmtCount(c.crashed)}`,
+              `  Open incidents on this application's chain: ${
+                chainProblems === null ? "still resolving" : fmtN(chainProblems)}`,
+              "",
+              "DELIVER PERSONALISED JOURNEYS",
+              `  Conversion: ${pct(completeness.share)} — ${fmtCount(completeness.full)} of`
+                + ` ${fmtCount(completeness.total)} mined journeys completed`,
+              `  A journey counts as complete when it reaches ${completeness.deepest} screens,`
+                + " the depth a tenth of this application's own traffic still reaches",
+              "  (journeys are mined per window, so there is no previous window to compare)",
+              ladder ? "  The funnel, rung by rung:" : "",
+              ...(ladder ? ladder.rows.map((x, i) => {
+                const prev = i > 0 ? ladder.rows[i - 1] : null;
+                const lost = prev ? prev.n - x.n : 0;
+                const where = prev && lost > 0 ? ladder.whereBetween(prev.dTo, x.dFrom) : [];
+                const name = i === 0 ? "arrived"
+                  : x.views.length ? x.views.join(" -> ")
+                  : `${x.dFrom} screens`;
+                return `    ${name}: ${fmtCount(x.n)}`
+                  + (lost > 0 ? ` (${fmtCount(lost)} left before this`
+                    + (where.length ? `, most on ${where[0].v}` : "") + ")" : "");
+              }) : []),
+              "",
+              geoRows && geoRows.length ? "WHERE THE CUSTOMERS ARE" : "",
+              ...(geoRows ?? []).slice(0, 6).map((g) => {
+                const tot = (geoRows ?? []).reduce((a, x) => a + x.sessions, 0) || 1;
+                const base = (geoRows ?? []).reduce((a, x) => a + x.hit, 0) / tot;
+                return `  ${geoName(g.country)}: ${fmtN(g.sessions)} sessions,`
+                  + ` ${GEO_WORD[geoJudge(g, base)]} — ${geoBecause(g, base)}`;
+              }),
+            ];
+            return lines.filter(Boolean).join("\n");
+          }} />
       </div>
 
       {/* WHAT CHANGED — first, because it is the first question. */}

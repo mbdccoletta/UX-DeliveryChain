@@ -38,6 +38,7 @@ const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic";
 import type { AppRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
+import { ExplainButton } from "./ExplainButton";
 import { HIT_BAD, HIT_WARN } from "../utils/verdict";
 
 type Tone = "good" | "warn" | "bad" | "info";
@@ -1491,6 +1492,43 @@ export function FlowSankey({
                 : <>{fmtN(all)} sessions on screen · click {mode === "steps" ? "views" : "routes or stages"} to narrow</>}
             </span>
             <div className="spacer" />
+            {/* THE PAGE, READ BACK IN WORDS. The facts are built at click
+                time from what is on screen right now — the narrowed cohort if
+                the reader narrowed it — so Assist explains the diagram they
+                are actually looking at. */}
+            <ExplainButton subject="journey diagram" className="flow-sel__b"
+              facts={() => {
+                const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0)
+                  .sort((a, b) => b.sessions - a.sessions);
+                const lines = [
+                  `Application: ${app?.name ?? "unknown"}`,
+                  `Window: ${tf?.label ?? "unknown"}`,
+                  `Sessions with a mined journey on screen: ${fmtN(all)}`,
+                  picks.length
+                    ? `The reader has NARROWED the diagram to ${fmtN(iso)} of those sessions`
+                      + ` (${all > 0 ? pct100((iso / all) * 100) : "—"}), picking: `
+                      + orderly.map(word).join(" ; ")
+                    : "No narrowing: the whole flow is on screen",
+                  sum ? (sum.outcomes
+                    ? `Finished (reached the deepest journey, the depth a tenth of this`
+                      + ` application's traffic still reaches): ${fmtN(sum.done)} of`
+                      + ` ${fmtN(sum.measured)} (${pct100(sum.pct)})`
+                    : `${fmtN(sum.measured)} sessions with a recorded view; no completion`
+                      + " depth could be established") : "",
+                  sum?.dropView
+                    ? `Biggest single loss: ${fmtN(sum.dropSessions)} sessions ended on ${sum.dropView}`
+                    : "",
+                  "",
+                  "The routes, busiest first (each is an exact sequence of screens):",
+                  ...mine.slice(0, 8).map((q) =>
+                    `  ${fmtN(q.sessions)} sessions · ${q.journey.join(" -> ")}`),
+                  mine.length > 8 ? `  (+${mine.length - 8} more routes, smaller)` : "",
+                  "",
+                  "Note: these counts include robot and synthetic traffic; sessions that"
+                  + " recorded no view at all are excluded from the mined journeys.",
+                ];
+                return lines.filter(Boolean).join("\n");
+              }} />
             {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
                 narrowed one; the reader's rule: characteristics refer to
                 everything the screen currently shows */}
