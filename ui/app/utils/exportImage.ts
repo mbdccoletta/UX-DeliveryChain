@@ -24,10 +24,27 @@ export async function exportImage(el: HTMLElement, filename: string): Promise<vo
   el.querySelectorAll<HTMLElement>("*").forEach((n) => {
     const r = n.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return;
-    fullW = Math.max(fullW, Math.round(r.left - rect.left) + n.scrollWidth);
-    fullH = Math.max(fullH, Math.round(r.top - rect.top) + n.scrollHeight);
+    /* TWO measurements per descendant, because either can be the larger and
+     * each misses what the other catches:
+     *   left + scrollWidth  — a node that CLIPS its own content (a rail with
+     *                         overflow:auto): its rect stops at the clip, its
+     *                         scrollWidth knows the truth.
+     *   right               — a node that OVERFLOWS its parent visibly: its
+     *                         scrollWidth equals its clientWidth and says
+     *                         nothing, but its rect is already out there.
+     * Measuring only the first cut boards whose widest element was the second
+     * kind. Both, always, and take the larger. */
+    fullW = Math.max(fullW,
+      Math.round(r.left - rect.left) + n.scrollWidth,
+      Math.round(r.right - rect.left));
+    fullH = Math.max(fullH,
+      Math.round(r.top - rect.top) + n.scrollHeight,
+      Math.round(r.bottom - rect.top));
   });
-  fullW = Math.min(fullW, 4200); fullH = Math.min(fullH, 16000);
+  /* A hair of slack. A sub-pixel layout (the board's rects land on .34 of a
+   * pixel) rounds down into a one-pixel shave of the rightmost border, which
+   * reads as "cut" on a card that ends flush with the edge. */
+  fullW = Math.min(fullW + 2, 4200); fullH = Math.min(fullH + 2, 16000);
   /* THE CLONE MUST STAND AT THE ORIGIN. The poster centres itself with the
    * classic `position:absolute; inset:0; margin:auto` — so the clone kept
    * resolving those auto margins and was rendered OFFSET inside the canvas,
