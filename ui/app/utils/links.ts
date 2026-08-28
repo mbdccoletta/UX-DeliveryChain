@@ -706,6 +706,13 @@ export function kindOf(
   const ids = e.ids ?? [];
   if (ids.some((i) => i.startsWith("MOBILE_APPLICATION-"))) return "mobileApp";
   if (ids.some((i) => /^(?:CUSTOM_)?APPLICATION-/.test(i))) return "webApp";
+  /* Smartscape's own id for a RUM application. Tenants that retired the
+   * classic model carry FRONTEND- and nothing else, and without this line a
+   * RUM application fell through to "element" — losing the entire app route,
+   * Error Inspector included, on an app whose verdict read "20% of real-user
+   * sessions hit by errors" (the reader caught it). The classic branches
+   * stay first: they distinguish mobile from web, which this id cannot. */
+  if (ids.some((i) => i.startsWith("FRONTEND-"))) return "webApp";
   if (ids.some((i) => i.startsWith("SERVICE-"))) return "service";
   if (ids.some((i) => i.startsWith("HOST-"))) return "host";
   if (ids.some((i) => i.startsWith("K8S_POD-"))) return "pod";
