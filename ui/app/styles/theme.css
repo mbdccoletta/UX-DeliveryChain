@@ -11,8 +11,17 @@
   --border:   var(--dt-colors-border-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
   --border-2: var(--dt-colors-border-neutral-accent, color-mix(in srgb, var(--ink-hi) 16%, transparent));
   --ink:      var(--dt-colors-text-neutral-default, #e2e8f0);
-  --ink-2:    var(--dt-colors-text-neutral-subdued, #94a3b8);
-  --ink-3:    var(--dt-colors-text-neutral-disabled, #64748b);
+  /* SUBDUED, NOT TRANSPARENT. The platform's own "subdued" and "disabled"
+     text tokens carry alpha (measured in the shell: rgba(177,178,210,0.5)),
+     and composited over this app's darker ground they land at 3.1:1 — under
+     the 4.5:1 minimum, on 10px uppercase labels. The reader called them
+     opaque, and they were.
+     So the STEPS are built here instead: the platform's own opaque text
+     colour mixed toward the app's background, which keeps the Strato hue,
+     stays opaque at every layer, and flips with the theme for free because
+     --bg does. Measured after: 7.7:1 and 4.7:1. */
+  --ink-2:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 72%, var(--bg));
+  --ink-3:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 52%, var(--bg));
   /* Status is the PLATFORM's, not ours. Every Gen3 app paints critical,
      warning and success from these Strato tokens, so this app reads as one of
      them and flips with the shell's theme for free. The hex values are only
@@ -71,8 +80,10 @@
      hint on near-black and a whisper on white — measured on the chain's
      column captions ("194 SESSIONS"), which lost their legibility. */
   --ink:   var(--dt-colors-text-neutral-default, #0f172a);
-  --ink-2: var(--dt-colors-text-neutral-subdued, #475569);
-  --ink-3: var(--dt-colors-text-neutral-disabled, #64748b);
+  /* the same opaque steps, light theme — the mix rides --bg, which has
+     already flipped by this point in the cascade */
+  --ink-2: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 78%, var(--bg));
+  --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 60%, var(--bg));
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
   --good: var(--dt-colors-text-success-default, #3d8a83);
