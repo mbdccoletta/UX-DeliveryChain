@@ -28,11 +28,19 @@ export async function exportImage(el: HTMLElement, filename: string): Promise<vo
     fullH = Math.max(fullH, Math.round(r.top - rect.top) + n.scrollHeight);
   });
   fullW = Math.min(fullW, 4200); fullH = Math.min(fullH, 16000);
+  /* THE CLONE MUST STAND AT THE ORIGIN. The poster centres itself with the
+   * classic `position:absolute; inset:0; margin:auto` — so the clone kept
+   * resolving those auto margins and was rendered OFFSET inside the canvas,
+   * overflowing the right edge by exactly the left gap. Invisible on a narrow
+   * window (27px each side) and ruinous on a wide one (~370px), which is why
+   * it survived the first horizontal fix. Neutralised here, on the clone
+   * only — the live element is never touched. */
   const url = await toPng(el, {
     width: fullW,
     height: fullH,
     style: { maxHeight: "none", maxWidth: "none", height: `${fullH}px`,
-      width: `${fullW}px`, overflow: "visible" },
+      width: `${fullW}px`, overflow: "visible",
+      position: "static", inset: "auto", margin: "0", transform: "none" },
     pixelRatio: 2,
     // chrome that only makes sense on screen (the export button itself, a
     // close ✕) stays out of the picture
