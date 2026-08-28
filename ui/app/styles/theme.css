@@ -820,11 +820,32 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   color: var(--ink-2); }
 .bc__seqs-r b.num { flex: none; min-width: 2.6rem; text-align: right;
   font: 700 11px var(--mono); color: var(--ink-hi); font-variant-numeric: tabular-nums; }
-.bc__seqs-p { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
-.bc__seqs-p i { font-style: normal; color: var(--ink-3); padding: 0 3px; }
+/* A PATH IS A LIST, NOT A WORD. This read as one unbroken wall —
+   "/→/about-orange.jsf→/privacy-orange.jsf→/legal-orange.jsf" — because the
+   segments were only 3px apart, the arrows carried no air, and
+   `overflow-wrap: anywhere` let a line break INSIDE a screen name, splitting
+   "/privacy-orange.jsf" across two rows. Contrast was never the problem (the
+   text measures 12:1); the spacing was.
+
+   So the segments become items: each one unbreakable, wrapped as a flex row
+   so a long path breaks BETWEEN screens, with the arrows given room and the
+   names a touch more weight than the punctuation between them. */
+.bc__seqs-p { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 2px 5px; line-height: 1.55; }
+.bc__seqs-p > span { white-space: nowrap; font-weight: 500;
+  /* a very long single screen name is still allowed to break — but only when
+     it alone cannot fit, which is the one case where breaking helps */
+  overflow-wrap: anywhere; }
+.bc__seqs-p i { font-style: normal; color: var(--ink-3); padding: 0 2px;
+  /* the arrow is punctuation: present, never competing with the names */
+  font-size: 0.92em; }
 .bc__seqs-r em { flex: none; font: 700 9.5px var(--mono); font-style: normal;
   color: var(--good); white-space: nowrap; }
-.bc__seqs-r--done .bc__seqs-p { color: var(--ink); }
+/* the completed route is the one the reader is looking for — it gets the
+   brightest ink and the others sit a step behind it, which is a hierarchy
+   rather than a fog */
+.bc__seqs-r--done .bc__seqs-p { color: var(--ink-hi); }
+.bc__seqs-r:not(.bc__seqs-r--done) .bc__seqs-p { color: var(--ink); }
 /* the accent at 10px on a raised panel measured 3.5:1 — the hue is the
    platform's, the WEIGHT of it is ours: mixed toward the page's brightest
    ink it stays recognisably the accent and becomes readable */
