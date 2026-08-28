@@ -20,8 +20,8 @@
      colour mixed toward the app's background, which keeps the Strato hue,
      stays opaque at every layer, and flips with the theme for free because
      --bg does. Measured after: 7.7:1 and 4.7:1. */
-  --ink-2:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 72%, var(--bg));
-  --ink-3:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 52%, var(--bg));
+  --ink-2:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 82%, var(--bg));
+  --ink-3:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 66%, var(--bg));
   /* Status is the PLATFORM's, not ours. Every Gen3 app paints critical,
      warning and success from these Strato tokens, so this app reads as one of
      them and flips with the shell's theme for free. The hex values are only
@@ -82,8 +82,8 @@
   --ink:   var(--dt-colors-text-neutral-default, #0f172a);
   /* the same opaque steps, light theme — the mix rides --bg, which has
      already flipped by this point in the cascade */
-  --ink-2: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 78%, var(--bg));
-  --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 60%, var(--bg));
+  --ink-2: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 86%, var(--bg));
+  --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 72%, var(--bg));
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
   --good: var(--dt-colors-text-success-default, #3d8a83);
@@ -196,7 +196,11 @@ svg { shape-rendering: geometricPrecision; }
 .seg button { background: transparent; border: none; color: var(--ink-3); font: 600 12px var(--mono);
               letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 13px; cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--border); }
-.seg button.on { background: var(--accent-dim); color: var(--accent); }
+/* accent ON accent-dim measured 4.2:1 — the selected tab of a two-way switch
+   has to be the readable one, so the label is lifted toward the brightest ink
+   while the fill keeps saying which side is chosen */
+.seg button.on { background: var(--accent-dim);
+  color: color-mix(in srgb, var(--accent) 55%, var(--ink-hi)); }
 
 /* panels */
 .panel { background: var(--panel); border: 1px solid var(--border); }
@@ -419,7 +423,11 @@ svg { shape-rendering: geometricPrecision; }
 .flow-sel__b--teach { border-color: color-mix(in srgb, var(--good) 60%, var(--border));
   color: var(--good); }
 .flow-sel__b--teach:hover { background: color-mix(in srgb, var(--good) 12%, transparent); }
-.flow-sel__b--on { background: var(--accent); color: var(--bg, #0b0b12); }
+/* the filled button: --bg on --accent measured 3.9:1. The fill is the
+   platform's accent and stays; the label goes darker than the page ground so
+   the pair clears the bar. */
+.flow-sel__b--on { background: var(--accent);
+  color: color-mix(in srgb, var(--bg, #0b0b12) 25%, #000); }
 
 /* two-column layout: canvas on the left, detail docked on the right */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 10px var(--side-w, 380px);
@@ -630,8 +638,14 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__ftitle-note { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
   text-transform: none; letter-spacing: 0; }
 .bc__front { --fh: var(--accent); }
+/* THE FRONT'S HUE, BRIGHT ENOUGH TO BE A HEADING. --fh is the front's accent
+   (pink for the brand, cyan for journeys) and at full saturation on the page
+   ground it measured 4.1:1 — a section title nobody could read at a glance.
+   Lifted toward the brightest ink: the hue still names the front, the title
+   now behaves like one. */
 .bc__ftitle { margin: 0 0 10px; font: 700 15px var(--mono); letter-spacing: 0.1em;
-  text-transform: uppercase; color: var(--fh); }
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fh) 68%, var(--ink-hi)); }
 .bc__row { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 14px;
   align-items: stretch; }
 /* the hero: one number the board reads first */
@@ -811,8 +825,12 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__seqs-r em { flex: none; font: 700 9.5px var(--mono); font-style: normal;
   color: var(--good); white-space: nowrap; }
 .bc__seqs-r--done .bc__seqs-p { color: var(--ink); }
+/* the accent at 10px on a raised panel measured 3.5:1 — the hue is the
+   platform's, the WEIGHT of it is ours: mixed toward the page's brightest
+   ink it stays recognisably the accent and becomes readable */
 .bc__seqs-go { align-self: flex-start; background: none; border: none; cursor: pointer;
-  padding: 2px 0; font: 700 10px var(--mono); color: var(--accent); }
+  padding: 2px 0; font: 700 10px var(--mono);
+  color: color-mix(in srgb, var(--accent) 62%, var(--ink-hi)); }
 .bc__seqs-go:hover { text-decoration: underline; }
 /* the biggest single loss, sized in the board's own unit */
 .bc__loss { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline;
@@ -2955,12 +2973,14 @@ div:has(> header):has(main) > div {
 /* the export button, SAID in words — a bare "⬇" reused the close-button
    shape, rendered as tofu in some fonts, and the reader could not find the
    download at all. One shared style for the poster and the board. */
+/* the accent at 10.5px measured 3.9:1 on the bar — same treatment as the
+   other accent-coloured microtype: the hue stays, the weight rises */
 .export-btn { display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: var(--r-field, 6px); cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   font: 700 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase;
-  color: var(--accent); white-space: nowrap; }
+  color: color-mix(in srgb, var(--accent) 62%, var(--ink-hi)); white-space: nowrap; }
 .export-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--ink-hi); }
