@@ -20,8 +20,8 @@
      colour mixed toward the app's background, which keeps the Strato hue,
      stays opaque at every layer, and flips with the theme for free because
      --bg does. Measured after: 7.7:1 and 4.7:1. */
-  --ink-2:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 82%, var(--bg));
-  --ink-3:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 66%, var(--bg));
+  --ink-2:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 93%, var(--bg));
+  --ink-3:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 82%, var(--bg));
   /* Status is the PLATFORM's, not ours. Every Gen3 app paints critical,
      warning and success from these Strato tokens, so this app reads as one of
      them and flips with the shell's theme for free. The hex values are only
@@ -82,8 +82,8 @@
   --ink:   var(--dt-colors-text-neutral-default, #0f172a);
   /* the same opaque steps, light theme — the mix rides --bg, which has
      already flipped by this point in the cascade */
-  --ink-2: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 86%, var(--bg));
-  --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 72%, var(--bg));
+  --ink-2: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 94%, var(--bg));
+  --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 85%, var(--bg));
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
   --good: var(--dt-colors-text-success-default, #3d8a83);
@@ -645,7 +645,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    now behaves like one. */
 .bc__ftitle { margin: 0 0 10px; font: 700 15px var(--mono); letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--fh) 68%, var(--ink-hi)); }
+  color: color-mix(in srgb, var(--fh) 52%, var(--ink-hi)); }
 .bc__row { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 14px;
   align-items: stretch; }
 /* the hero: one number the board reads first */
@@ -851,7 +851,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    ink it stays recognisably the accent and becomes readable */
 .bc__seqs-go { align-self: flex-start; background: none; border: none; cursor: pointer;
   padding: 2px 0; font: 700 10px var(--mono);
-  color: color-mix(in srgb, var(--accent) 62%, var(--ink-hi)); }
+  color: color-mix(in srgb, var(--accent) 45%, var(--ink-hi)); }
 .bc__seqs-go:hover { text-decoration: underline; }
 /* the biggest single loss, sized in the board's own unit */
 .bc__loss { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline;
@@ -1064,7 +1064,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .rinfo__so-r--dn i { color: var(--warn); }
 .rinfo__so-r em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
   text-align: right; white-space: nowrap; }
-.rinfo__so-r em u { text-decoration: none; opacity: 0.6; }
+.rinfo__so-r em u { text-decoration: none; color: var(--ink-3); }
 .rinfo__so-v { grid-column: 1 / -1; font: 400 10px var(--mono); color: var(--ink-2);
   padding: 1px 0 2px; line-height: 1.45; }
 .rinfo__so-v u { text-decoration: none; color: var(--ink-3); }
@@ -1321,7 +1321,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
                                      border-color: var(--accent); }
 .dl__t { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
          font: 600 12px var(--sans); color: var(--accent); }
-.dl__t i { font-style: normal; font-size: 12px; opacity: 0.7; }
+.dl__t i { font-style: normal; font-size: 12px; color: var(--ink-3); }
 .dl__w { font: 400 12px var(--mono); color: var(--ink-3); text-align: right;
          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -3001,7 +3001,7 @@ div:has(> header):has(main) > div {
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   font: 700 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent) 62%, var(--ink-hi)); white-space: nowrap; }
+  color: color-mix(in srgb, var(--accent) 45%, var(--ink-hi)); white-space: nowrap; }
 .export-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--ink-hi); }
