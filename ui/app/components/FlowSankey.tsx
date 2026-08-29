@@ -1500,29 +1500,59 @@ export function FlowSankey({
               facts={() => {
                 const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0)
                   .sort((a, b) => b.sessions - a.sessions);
+                /* THE SELECTION IS THE SUBJECT. This used to SAY the diagram
+                 * was narrowed and then hand over the whole application's
+                 * routes anyway — Assist would explain the flow the reader had
+                 * just filtered away. The cohort is resolved with the same
+                 * predicate the diagram draws with, so what is explained is
+                 * what is on screen. */
+                const scope = picks.length
+                  ? mine.filter((q) => matchesMode(q.journey, picks)) : mine;
+                const scopeN = scope.reduce((a, q) => a + q.sessions, 0);
+                const deep = deepestOf(mine); // the app's own completion depth
+                const doneN = deep > 1
+                  ? scope.filter((q) => q.journey.length >= deep)
+                    .reduce((a, q) => a + q.sessions, 0) : 0;
+                // where the unfinished ones in THIS cohort stopped
+                const byLast = new Map<string, number>();
+                for (const q of scope) {
+                  if (deep > 1 && q.journey.length >= deep) continue;
+                  const v = q.journey[q.journey.length - 1];
+                  if (v) byLast.set(v, (byLast.get(v) ?? 0) + q.sessions);
+                }
+                const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
                 const lines = [
                   `Application: ${app?.name ?? "unknown"}`,
                   `Window: ${tf?.label ?? "unknown"}`,
-                  `Sessions with a mined journey on screen: ${fmtN(all)}`,
                   picks.length
-                    ? `The reader has NARROWED the diagram to ${fmtN(iso)} of those sessions`
-                      + ` (${all > 0 ? pct100((iso / all) * 100) : "—"}), picking: `
-                      + orderly.map(word).join(" ; ")
-                    : "No narrowing: the whole flow is on screen",
-                  sum ? (sum.outcomes
-                    ? `Finished (reached the deepest journey, the depth a tenth of this`
-                      + ` application's traffic still reaches): ${fmtN(sum.done)} of`
-                      + ` ${fmtN(sum.measured)} (${pct100(sum.pct)})`
-                    : `${fmtN(sum.measured)} sessions with a recorded view; no completion`
-                      + " depth could be established") : "",
-                  sum?.dropView
-                    ? `Biggest single loss: ${fmtN(sum.dropSessions)} sessions ended on ${sum.dropView}`
+                    ? `THE READER HAS NARROWED THE DIAGRAM. Everything below describes`
+                      + ` ONLY that selection — ${fmtN(scopeN)} of the application's`
+                      + ` ${fmtN(all)} journeyed sessions`
+                      + ` (${all > 0 ? pct100((scopeN / all) * 100) : "—"}).`
+                      + ` Picked: ${orderly.map(word).join(" ; ")}`
+                    : `No narrowing: the whole flow is on screen —`
+                      + ` ${fmtN(scopeN)} sessions with a mined journey`,
+                  deep > 1
+                    ? `Completed within this${picks.length ? " selection" : " flow"}:`
+                      + ` ${fmtN(doneN)} of ${fmtN(scopeN)}`
+                      + ` (${scopeN > 0 ? pct100((doneN / scopeN) * 100) : "—"}).`
+                      + ` Complete = reaching ${deep} screens, the depth a tenth of the`
+                      + " APPLICATION's own traffic still reaches (an app-level rule,"
+                      + " not recomputed for the selection)"
+                    : "No completion depth could be established for this application",
+                  worst
+                    ? `Biggest single loss inside it: ${fmtN(worst[1])} sessions ended on ${worst[0]}`
                     : "",
                   "",
-                  "The routes, busiest first (each is an exact sequence of screens):",
-                  ...mine.slice(0, 8).map((q) =>
+                  picks.length
+                    ? "The routes INSIDE the selection, busiest first (each an exact"
+                      + " sequence of screens):"
+                    : "The routes, busiest first (each an exact sequence of screens):",
+                  ...scope.slice(0, 8).map((q) =>
                     `  ${fmtN(q.sessions)} sessions · ${q.journey.join(" -> ")}`),
-                  mine.length > 8 ? `  (+${mine.length - 8} more routes, smaller)` : "",
+                  scope.length > 8 ? `  (+${scope.length - 8} more, smaller)` : "",
+                  scope.length === 0
+                    ? "  (the selection matched no mined journey in this window)" : "",
                   "",
                   "Note: these counts include robot and synthetic traffic; sessions that"
                   + " recorded no view at all are excluded from the mined journeys.",
