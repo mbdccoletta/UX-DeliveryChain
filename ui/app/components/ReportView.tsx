@@ -445,13 +445,15 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     const fmt = isBrand ? fmtCount : pct;
     const sub = isBrand
       ? `${fmtCount(c.customersAtRisk)} customers met a failure · ${pct(1 - c.reputationIndex)} of the base`
+      /* THE RULE IS STATED ONCE. The ConvRule strip sits directly above this
+       * card and spells out what counts as converted; repeating it here put
+       * two paragraphs of prose between the reader and the funnel, for a
+       * definition they had just read. The card says the count, and nothing
+       * the line above it already said. */
       : `${fmtCount(completeness.full)} of ${fmtCount(completeness.total)} journeys completed`
-        + ` (${pct(completeness.share)})`
-        + ` · complete = reaching ${completeness.deepest} views, the depth a tenth of this`
-        + " application's traffic still gets to"
         // the journeys figures are mined per APPLICATION — a route pick does
         // not narrow them, and hiding that read as if it did
-        + (scoped ? " · whole application (route picks do not narrow the mining)" : "");
+        + (scoped ? " · whole application, not the picked routes" : "");
     return (
       <div className="bc__hero" style={{ ["--ht" as string]: TONE[t.dir] }}>
         <span className="bc__hero-l">{label}</span>
@@ -460,7 +462,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           {isBrand ? <>
             {t.arrow} {t.rel === null ? "new" : t.dir === "flat" ? "steady" : `${Math.abs(t.rel * 100).toFixed(0)}%`}
             <em> vs the previous {data.tf.label.replace(/^last /i, "")}</em>
-          </> : <em>this window only — journeys are mined per window, so no previous exists</em>}
+          </> : <em>no previous window — journeys are mined per window</em>}
         </span>
         <span className="bc__hero-s">{sub}</span>
         {/* the funnel, drawn: one bar per depth, the completion bar marked,
