@@ -1503,11 +1503,19 @@ export function FlowSankey({
                 /* THE SELECTION IS THE SUBJECT. This used to SAY the diagram
                  * was narrowed and then hand over the whole application's
                  * routes anyway — Assist would explain the flow the reader had
-                 * just filtered away. The cohort is resolved with the same
-                 * predicate the diagram draws with, so what is explained is
-                 * what is on screen. */
-                const scope = picks.length
-                  ? mine.filter((q) => matchesMode(q.journey, picks)) : mine;
+                 * just filtered away.
+                 *
+                 * And "selected" means EITHER of the two ways this diagram
+                 * narrows: the route chips (picks), or a single node clicked
+                 * from the canvas or the list (sel), which dims everything
+                 * else on screen and is just as much a selection to the person
+                 * looking at it. Reading only the first explained the whole
+                 * flow while the reader stared at one lit band. */
+                const selCohort = !picks.length && sel
+                  && /^(jp-|jg-|j-rest$|st-|n\d+-|done-|exit-)/.test(sel) ? [sel] : [];
+                const active = picks.length ? picks : selCohort;
+                const scope = active.length
+                  ? mine.filter((q) => matchesMode(q.journey, active)) : mine;
                 const scopeN = scope.reduce((a, q) => a + q.sessions, 0);
                 const deep = deepestOf(mine); // the app's own completion depth
                 const doneN = deep > 1
@@ -1524,16 +1532,16 @@ export function FlowSankey({
                 const lines = [
                   `Application: ${app?.name ?? "unknown"}`,
                   `Window: ${tf?.label ?? "unknown"}`,
-                  picks.length
+                  active.length
                     ? `THE READER HAS NARROWED THE DIAGRAM. Everything below describes`
                       + ` ONLY that selection — ${fmtN(scopeN)} of the application's`
                       + ` ${fmtN(all)} journeyed sessions`
                       + ` (${all > 0 ? pct100((scopeN / all) * 100) : "—"}).`
-                      + ` Picked: ${orderly.map(word).join(" ; ")}`
+                      + ` Picked: ${(picks.length ? orderly : active).map(word).join(" ; ")}`
                     : `No narrowing: the whole flow is on screen —`
                       + ` ${fmtN(scopeN)} sessions with a mined journey`,
                   deep > 1
-                    ? `Completed within this${picks.length ? " selection" : " flow"}:`
+                    ? `Completed within this${active.length ? " selection" : " flow"}:`
                       + ` ${fmtN(doneN)} of ${fmtN(scopeN)}`
                       + ` (${scopeN > 0 ? pct100((doneN / scopeN) * 100) : "—"}).`
                       + ` Complete = reaching ${deep} screens, the depth a tenth of the`
@@ -1544,7 +1552,7 @@ export function FlowSankey({
                     ? `Biggest single loss inside it: ${fmtN(worst[1])} sessions ended on ${worst[0]}`
                     : "",
                   "",
-                  picks.length
+                  active.length
                     ? "The routes INSIDE the selection, busiest first (each an exact"
                       + " sequence of screens):"
                     : "The routes, busiest first (each an exact sequence of screens):",
