@@ -472,60 +472,67 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             numbers is an analyst's chart. Rows read like a story: each one a
             sentence with its own bar, and the loss between two rows written
             where it happens, with the screens responsible named. */}
-        {!isBrand && ladder && (
-          <div className="bc__fun">
-            {ladder.rows.map((x, i) => {
-              const share = x.n / ladder.total;
-              const prevRow = i > 0 ? ladder.rows[i - 1] : null;
-              const lost = prevRow ? prevRow.n - x.n : 0;
-              const last = i === ladder.rows.length - 1;
-              /* the screens the leavers stopped on, named on EVERY drop —
-                 "271 leave here" without a place is half an answer */
-              const gone = prevRow && lost > 0
-                ? ladder.whereBetween(prevRow.dTo, x.dFrom) : [];
-              /* THE RUNG IS A PLACE, not a count of screens. Where the depth
-                 has no dominant screen the count is the honest fallback. */
-              const label = i === 0 ? "arrived"
-                : last ? (x.views[0] ? `completed at ${x.views[0]}` : "completed")
-                : x.views.length ? x.views.join(" → ")
-                : x.dFrom === x.dTo ? `saw ${x.dFrom} screens`
-                : `saw ${x.dFrom}–${x.dTo} screens`;
-              return (
-                <React.Fragment key={`${x.dFrom}-${x.dTo}`}>
-                  {i > 0 && lost > 0 && (
-                    <div className={i === ladder.worst ? "bc__fun-d bc__fun-d--worst" : "bc__fun-d"}>
-                      ↓ {fmtCount(lost)} leave here{gone.length
-                        ? <> — most on <b>{gone[0].v}</b></> : null}
-                    </div>
-                  )}
-                  <div className="bc__fun-r">
-                    <span className="bc__fun-l" title={[
-                      x.views.length
-                        ? `Journeys still going at ${x.dFrom === x.dTo ? `screen ${x.dFrom}`
-                          : `screens ${x.dFrom}–${x.dTo}`} — most of them on ${x.views.join(", ")}`
-                        : null,
-                      x.absorbed > 0
-                        ? `${fmtCount(x.absorbed)} left between these screens — too few to`
-                          + " draw as a step of its own, and counted in the drop below"
-                        : null,
-                    ].filter(Boolean).join(". ") || undefined}>
-                      {label}
-                    </span>
-                    <span className="bc__fun-t">
-                      <i className={last ? "bc__fun-b bc__fun-b--goal" : "bc__fun-b"}
-                        style={{ width: `${Math.max(2, share * 100)}%` }} />
-                    </span>
-                    <b className="num">{fmtCount(x.n)}</b>
-                    <em className="num">{pct(share)}</em>
-                  </div>
-                </React.Fragment>
-              );
-            })}
-          </div>
-        )}
       </div>
     );
   };
+
+  /* THE FUNNEL IS A DATA BLOCK, NOT A CAPTION. It lived inside the hero, which
+   * made that column eight rungs tall — so the stat tiles beside it stretched
+   * to match and stood mostly empty, and the rungs themselves were squeezed
+   * into 340px with screen names wrapping mid-path. Out here it gets the full
+   * width it needs and the hero goes back to being one number and one line. */
+  const Funnel = () => (!ladder ? null : (
+          
+            <div className="bc__fun">
+              {ladder.rows.map((x, i) => {
+                const share = x.n / ladder.total;
+                const prevRow = i > 0 ? ladder.rows[i - 1] : null;
+                const lost = prevRow ? prevRow.n - x.n : 0;
+                const last = i === ladder.rows.length - 1;
+                /* the screens the leavers stopped on, named on EVERY drop —
+                   "271 leave here" without a place is half an answer */
+                const gone = prevRow && lost > 0
+                  ? ladder.whereBetween(prevRow.dTo, x.dFrom) : [];
+                /* THE RUNG IS A PLACE, not a count of screens. Where the depth
+                   has no dominant screen the count is the honest fallback. */
+                const label = i === 0 ? "arrived"
+                  : last ? (x.views[0] ? `completed at ${x.views[0]}` : "completed")
+                  : x.views.length ? x.views.join(" → ")
+                  : x.dFrom === x.dTo ? `saw ${x.dFrom} screens`
+                  : `saw ${x.dFrom}–${x.dTo} screens`;
+                return (
+                  <React.Fragment key={`${x.dFrom}-${x.dTo}`}>
+                    {i > 0 && lost > 0 && (
+                      <div className={i === ladder.worst ? "bc__fun-d bc__fun-d--worst" : "bc__fun-d"}>
+                        ↓ {fmtCount(lost)} leave here{gone.length
+                          ? <> — most on <b>{gone[0].v}</b></> : null}
+                      </div>
+                    )}
+                    <div className="bc__fun-r">
+                      <span className="bc__fun-l" title={[
+                        x.views.length
+                          ? `Journeys still going at ${x.dFrom === x.dTo ? `screen ${x.dFrom}`
+                            : `screens ${x.dFrom}–${x.dTo}`} — most of them on ${x.views.join(", ")}`
+                          : null,
+                        x.absorbed > 0
+                          ? `${fmtCount(x.absorbed)} left between these screens — too few to`
+                            + " draw as a step of its own, and counted in the drop below"
+                          : null,
+                      ].filter(Boolean).join(". ") || undefined}>
+                        {label}
+                      </span>
+                      <span className="bc__fun-t">
+                        <i className={last ? "bc__fun-b bc__fun-b--goal" : "bc__fun-b"}
+                          style={{ width: `${Math.max(2, share * 100)}%` }} />
+                      </span>
+                      <b className="num">{fmtCount(x.n)}</b>
+                      <em className="num">{pct(share)}</em>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+  ));
 
   /**
    * WHAT THIS BOARD CALLS A CONVERSION — said out loud, above the number.
@@ -957,6 +964,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               own: the tiles above pack and stretch evenly, and the prose below
               gets the full width it was already taking. */}
           <div className="bc__band">
+            <Funnel />
             {entries && (
               <div className="bc__entry">
                 <span className="bc__entry-l">where they come in decides how far they go</span>

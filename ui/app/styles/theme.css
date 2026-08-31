@@ -713,7 +713,11 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
      beside them was taller — the second hole the reader circled */
   grid-auto-rows: minmax(min-content, 1fr); }
 /* the prose under the numbers — full width, its own rhythm */
-.bc__band { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+/* the band is a THIRD item in the row's two-column grid, so it must say so —
+   without this it dropped into the left column and the funnel came out the
+   width of the hero it had just been freed from */
+.bc__band { grid-column: 1 / -1; display: flex; flex-direction: column;
+  gap: 10px; margin-top: 4px; }
 /* the two columns of a front are independent heights, so the shorter one ends
    where its content ends — but the ROW keeps them tied at the top and the
    band below runs the full width, which is what makes the block read as one */
@@ -835,11 +839,16 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__entry-ft { font: 400 11px var(--mono); color: var(--ink-3); line-height: 1.5; }
 /* the funnel as rows — each row a sentence with its own bar; the loss between
    rows is written where it happens, with the screen responsible named */
-.bc__fun { margin-top: 14px; display: flex; flex-direction: column; gap: 3px; }
-.bc__fun-r { display: grid; grid-template-columns: minmax(0, 7.2rem) 1fr auto auto;
+.bc__fun { display: flex; flex-direction: column; gap: 3px; 
+  padding: 12px 14px; border-radius: 12px; background: var(--panel-2);
+  border: 1px solid var(--border); }
+/* the label column can breathe now that the block owns the page width */
+.bc__fun-r { display: grid; grid-template-columns: minmax(0, 15rem) 1fr auto auto;
   align-items: center; gap: 9px; }
 /* the rung NAMES a screen now, so clipping it to "completed at /car…" throws
    away the one word the row exists to say — it wraps instead */
+/* full width now, so the rung's name gets a column that fits it and the bar
+   gets the room it was never going to have inside a 340px hero */
 .bc__fun-l { font: 500 11px var(--mono); color: var(--ink-2);
   overflow-wrap: anywhere; line-height: 1.35; }
 .bc__fun-t { height: 13px; border-radius: 3px;
