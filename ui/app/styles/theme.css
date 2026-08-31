@@ -1859,9 +1859,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .cc-bars { display: flex; align-items: flex-end; gap: 2px; height: 22px;
   flex: 1; min-width: 60px; overflow: hidden; }
 .cc-bars i { display: block; width: 3px; flex: none; border-radius: 1px; }
+/* WRAPS, NEVER CUTS. One forced line with an ellipsis turned "all from this
+   application's own code or APIs" into "all from this app…" — a caption cut
+   before its verb, in a column that was simply narrower than the sentence.
+   Flex is kept so the icon variant still aligns; it wraps now instead. */
 .tk-note { font: 500 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 80%, transparent); padding-top: 4px;
-  display: flex; align-items: center; gap: 6px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px;
+  white-space: normal; line-height: 1.4; }
 .tk-note svg { width: 13px; height: 13px; flex: none; }
 .tk-note--bad { color: var(--ink-hi); background: color-mix(in srgb, var(--bad) 45%, transparent);
   border-radius: 6px; padding: 3px 8px; margin-top: 6px; }
@@ -2812,9 +2816,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
     minmax(150px, 1fr) minmax(20px, 40px)
     minmax(320px, clamp(340px, 24vw, 560px)) minmax(20px, 40px)
     minmax(150px, 1fr); }
-  /* the footnotes read as one line rather than a paragraph */
-  .cc .tk-apdex, .cc .tk-note { white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; }
+  /* THE FOOTNOTES WRAP RATHER THAN VANISH. Forcing one line with an ellipsis
+     turned "all from this application's own code or APIs" into "all from this
+     app…" — a caption cut before its verb. Two lines is the budget; past that
+     the text is too long for a footnote and belongs in a tooltip, which is
+     where the Apdex scale went. */
+  .cc .tk-apdex, .cc .tk-note { white-space: normal; line-height: 1.4; }
 }
 
 /* The bars in the header, beside the title. They belong to the card's subject
