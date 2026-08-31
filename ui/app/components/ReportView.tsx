@@ -521,9 +521,26 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                       ].filter(Boolean).join(". ") || undefined}>
                         {label}
                       </span>
+                      {/* TWO SEGMENTS, ONE TRACK. The bar was a single grey
+                          fill, so the funnel's own subject — the leaving —
+                          was legible only as a number in the gap between
+                          rows. Now each track carries who CONTINUED and,
+                          immediately after it, how many left at this step;
+                          together they equal the bar above, so a row reads
+                          "this much of the previous rung survived, that much
+                          did not". The step that loses the most wears the
+                          critical colour, the rest a warning one, and the
+                          completion bar the good one — colour saying which
+                          part of the story it is, never decorating. */}
                       <span className="bc__fun-t">
                         <i className={last ? "bc__fun-b bc__fun-b--goal" : "bc__fun-b"}
                           style={{ width: `${Math.max(2, share * 100)}%` }} />
+                        {lost > 0 && (
+                          <i className={i === ladder.worst
+                            ? "bc__fun-x bc__fun-x--worst" : "bc__fun-x"}
+                            title={`${fmtCount(lost)} left between the rung above and this one`}
+                            style={{ width: `${(lost / ladder.total) * 100}%` }} />
+                        )}
                       </span>
                       <b className="num">{fmtCount(x.n)}</b>
                       <em className="num">{pct(share)}</em>
