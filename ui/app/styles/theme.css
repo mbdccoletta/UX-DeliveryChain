@@ -10,6 +10,23 @@
   --panel-2:  var(--dt-colors-background-container-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
   --border:   var(--dt-colors-border-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
   --border-2: var(--dt-colors-border-neutral-accent, color-mix(in srgb, var(--ink-hi) 16%, transparent));
+  /* THE TYPE LADDER, NAMED. The app had grown 25 distinct sizes, including
+     8.5, 9.5, 10.5 and 11.5px — half-pixels are not a decision, they are what
+     happens when each rule picks its own number. These are the rungs that
+     survived, and new code should reach for one of them rather than invent a
+     twenty-sixth. Sizes stay in px because this UI is dense by design and a
+     rem ladder would fight the platform shell's own root size. */
+  --fs-micro: 9px;    /* uppercase eyebrows, tag chips              */
+  --fs-mini:  10px;   /* captions, table cells, chart labels        */
+  --fs-small: 11px;   /* secondary rows, metadata                   */
+  --fs-body:  12px;   /* the app's default reading size             */
+  --fs-lead:  13px;   /* emphasised body, drawer prose              */
+  --fs-title: 15px;   /* card and section titles                    */
+  --fs-head:  18px;   /* panel headings                             */
+  --fs-sub:   22px;   /* secondary display numbers                  */
+  --fs-num:   30px;   /* display numbers                            */
+  --fs-hero:  44px;   /* the one number a screen leads with         */
+
   --ink:      var(--dt-colors-text-neutral-default, #e2e8f0);
   /* SUBDUED, NOT TRANSPARENT. The platform's own "subdued" and "disabled"
      text tokens carry alpha (measured in the shell: rgba(177,178,210,0.5)),
@@ -179,11 +196,11 @@ svg { shape-rendering: geometricPrecision; }
 /* header */
 .top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
-.brand h1 { margin: 0; font: 700 14px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; }
+.brand h1 { margin: 0; font: 700 15px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; }
 .brand em { font-style: normal;
             background: linear-gradient(90deg, var(--t-cyan), var(--t-violet));
             -webkit-background-clip: text; background-clip: text; color: transparent; }
-.brand span { color: var(--t-cyan); font: 700 16px var(--mono); }
+.brand span { color: var(--t-cyan); font: 700 15px var(--mono); }
 .spacer { flex: 1; }
 .tabs { display: flex; border: 1px solid var(--border); }
 .tab { background: transparent; border: none; color: var(--ink-3); font: 600 12px var(--mono);
@@ -223,7 +240,7 @@ svg { shape-rendering: geometricPrecision; }
 
 /* flow (sankey) */
 .flow-shell { height: clamp(360px,
-    max(calc(100vh - 240px), calc(var(--flow-rows, 10) * 34px + 96px)),
+    max(calc(100vh - 240px), calc(var(--flow-rows, 10) * 30px + 96px)),
     1500px); padding: 0; overflow: hidden;
               display: flex; flex-direction: column; }
 .flow-shell canvas { display: block; width: 100%; flex: 1; min-height: 0; }
@@ -338,7 +355,7 @@ svg { shape-rendering: geometricPrecision; }
 .rinfo__arrow { font-style: normal; color: color-mix(in srgb, var(--accent) 80%, var(--ink-hi)); }
 .rinfo__cohort { grid-area: cohort; display: flex; align-items: baseline; gap: 10px;
   font: 500 12px var(--mono); color: var(--ink-2); }
-.rinfo__cohort .num { font-size: 34px; color: var(--ink-hi); line-height: 1;
+.rinfo__cohort .num { font-size: 30px; color: var(--ink-hi); line-height: 1;
   text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 25%, transparent); }
 .rinfo__loading { padding: 40px; text-align: center; font: 600 12px var(--mono);
   color: var(--ink-2); }
@@ -380,7 +397,7 @@ svg { shape-rendering: geometricPrecision; }
   min-width: 0; overflow-wrap: anywhere; }
 .rinfo__flat em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
 .rinfo__bar > * { min-width: 0; }
-/* four columns, all shrinkable: an `auto` lift column pushed 17px past the
+/* four columns, all shrinkable: an `auto` lift column pushed 18px past the
    card on a 311px block and the text was clipped (measured). The lift keeps
    its own ellipsis and its full text in the title attribute. */
 .rinfo__bar { display: grid;
@@ -402,7 +419,7 @@ svg { shape-rendering: geometricPrecision; }
   padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent); }
 @media (max-width: 760px) {
   .rinfo__strip { grid-template-columns: repeat(2, 1fr); }
-  .rinfo__path { font-size: 17px; }
+  .rinfo__path { font-size: 18px; }
 }
 
 /* the custom path's own band: each waypoint a removable chip */
@@ -427,7 +444,7 @@ svg { shape-rendering: geometricPrecision; }
    platform's accent and stays; the label goes darker than the page ground so
    the pair clears the bar. */
 .flow-sel__b--on { background: var(--accent);
-  color: color-mix(in srgb, var(--bg, #0b0b12) 25%, #000); }
+  color: color-mix(in srgb, var(--bg) 25%, #000); }
 
 /* two-column layout: canvas on the left, detail docked on the right */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 10px var(--side-w, 380px);
@@ -468,7 +485,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .side__body::-webkit-scrollbar { width: 8px; }
 .side__body::-webkit-scrollbar-thumb { background: var(--border-2); }
 .side .dd { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
-.side .dd__kv { font-size: 16px; }
+.side .dd__kv { font-size: 15px; }
 .side .db { grid-template-columns: 96px 1fr 68px; gap: 8px; font-size: 12px; }
 .side .dt td, .side .dt th { padding: 5px 6px; font-size: 12px; }
 .side .chain__node { font-size: 12px; padding: 4px 9px; }
@@ -542,7 +559,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    motion IS the data: 70k requests visibly outrun 900 sessions, and a
    boundary with no measured flow does not move at all. */
 .gapcol { width: 44px; flex: none; }
-.duct { width: 34px; flex: none; align-self: stretch; margin: 44px 0 0;
+.duct { width: 30px; flex: none; align-self: stretch; margin: 44px 0 0;
         display: flex; flex-direction: column; justify-content: center; gap: 9px; }
 .duct i { display: block; height: 3px; border-radius: 2px;
           background: repeating-linear-gradient(90deg,
@@ -579,7 +596,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    down. It is separated by a rule instead. */
 .sum { padding: 2px 4px 9px; text-align: center; background: none; border: none;
        border-bottom: 1px solid color-mix(in srgb, var(--tone) 22%, transparent); }
-.sum__n { display: block; font: 800 20px var(--mono); letter-spacing: -0.5px; color: var(--tone);
+.sum__n { display: block; font: 800 22px var(--mono); letter-spacing: -0.5px; color: var(--tone);
           font-variant-numeric: tabular-nums; line-height: 1.1; }
 .sum__l { display: block; font: 500 12px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
           color: var(--ink-3); }
@@ -599,7 +616,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
           padding: 10px 12px; background: color-mix(in srgb, var(--sv) 6%, var(--panel-2)); }
 .ins__h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
 .ins__s { font: 700 12px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--sv); flex: none; }
-.ins__t { font: 600 14px var(--sans); line-height: 1.3; }
+.ins__t { font: 600 15px var(--sans); line-height: 1.3; }
 .ins__b { font: 400 12px var(--sans); color: var(--ink-2); line-height: 1.5; }
 .ins__e { font: 400 12px var(--mono); color: var(--ink-3); line-height: 1.45; margin-top: 6px;
           padding-left: 9px; border-left: 1px solid var(--border-2); }
@@ -617,9 +634,9 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__ticket { display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--mono);
   color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--border-2);
   border-radius: 8px; padding: 3px 8px; }
-.bc__cov input { width: 34px; text-align: right; }
+.bc__cov input { width: 30px; text-align: right; }
 .bc__cov span { font-size: 10px; }
-.bc__ex-note { color: var(--warn, #e8b04b); font-weight: 700; }
+.bc__ex-note { color: var(--warn); font-weight: 700; }
 .bc__ticket input { width: 100px; background: none; border: none; color: var(--ink);
   font: 600 12px var(--mono); outline: none; }
 .bc__ticket select { background: none; border: none; color: var(--ink-2);
@@ -668,7 +685,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__hero-l { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
   color: color-mix(in srgb, var(--ink-hi) 72%, transparent); }
 .bc__hero-v { font-size: 52px; line-height: 1.05; color: var(--ink-hi); }
-.bc__hero-t { font: 700 14px var(--mono); display: flex; align-items: baseline; gap: 7px;
+.bc__hero-t { font: 700 15px var(--mono); display: flex; align-items: baseline; gap: 7px;
   margin-top: 4px; }
 .bc__hero-t em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
 .bc__hero-s { font: 400 12px var(--mono); color: var(--ink-2); margin-top: 6px; }
@@ -714,7 +731,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__fc-l { font: 700 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--ink-3); }
 .bc__fc-item { font: 500 13px var(--mono); color: var(--ink-2); }
-.bc__fc-item b { color: var(--ink-hi); font-size: 16px; }
+.bc__fc-item b { color: var(--ink-hi); font-size: 15px; }
 .bc__fc-item em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 11px; }
 .bc__fc-wait { font: 400 12px var(--mono); color: var(--ink-3); }
 /* what failure costs */
@@ -727,7 +744,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__cost-k span { font: 600 10px var(--mono); text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--ink-3); max-width: 160px; }
 .bc__cost-vs { font: 700 12px var(--mono); color: var(--ink-3); font-style: normal; }
-.bc__cost-verdict { margin-left: auto; text-align: right; font: 500 14px var(--mono);
+.bc__cost-verdict { margin-left: auto; text-align: right; font: 500 15px var(--mono);
   color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
 .bc__cost-verdict b { font-size: 22px; color: var(--bad); }
 .bc__cost-verdict em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
@@ -776,7 +793,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__chg-r { display: inline-flex; align-items: baseline; gap: 6px;
   font: 400 11px var(--mono); color: var(--ink-2); }
 .bc__chg-r i { font-style: normal; color: var(--good); font-size: 10px; }
-.bc__chg-r b.num { font-size: 14px; color: var(--good); font-variant-numeric: tabular-nums; }
+.bc__chg-r b.num { font-size: 15px; color: var(--good); font-variant-numeric: tabular-nums; }
 .bc__chg-r em { font-style: normal; color: var(--ink-3); font-size: 10px; }
 .bc__chg-r--bad i, .bc__chg-r--bad b.num { color: var(--bad); }
 /* where they come in decides how far they go — the two ends of a journey,
@@ -795,7 +812,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__entry-w--bad b.num { color: var(--bad); }
 .bc__entry-x { font: 700 10px var(--mono); font-style: normal; color: var(--ink-2);
   padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-2); white-space: nowrap; }
-.bc__entry-ft { font: 400 10.5px var(--mono); color: var(--ink-3); line-height: 1.5; }
+.bc__entry-ft { font: 400 11px var(--mono); color: var(--ink-3); line-height: 1.5; }
 /* the funnel as rows — each row a sentence with its own bar; the loss between
    rows is written where it happens, with the screen responsible named */
 .bc__fun { margin-top: 14px; display: flex; flex-direction: column; gap: 3px; }
@@ -803,14 +820,14 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   align-items: center; gap: 9px; }
 /* the rung NAMES a screen now, so clipping it to "completed at /car…" throws
    away the one word the row exists to say — it wraps instead */
-.bc__fun-l { font: 500 10.5px var(--mono); color: var(--ink-2);
+.bc__fun-l { font: 500 11px var(--mono); color: var(--ink-2);
   overflow-wrap: anywhere; line-height: 1.35; }
 .bc__fun-t { height: 13px; border-radius: 3px;
   background: color-mix(in srgb, var(--ink-hi) 5%, transparent); }
 .bc__fun-b { display: block; height: 100%; border-radius: 3px;
   background: color-mix(in srgb, var(--ink-hi) 30%, transparent); }
 .bc__fun-b--goal { background: color-mix(in srgb, var(--good) 80%, transparent); }
-.bc__fun-r b.num { font: 700 11.5px var(--mono); color: var(--ink-hi);
+.bc__fun-r b.num { font: 700 12px var(--mono); color: var(--ink-hi);
   font-variant-numeric: tabular-nums; }
 .bc__fun-r em.num { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
   min-width: 2.8rem; text-align: right; }
@@ -826,7 +843,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
 .bc__seqs-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
   color: var(--ink-3); }
-.bc__seqs-r { display: flex; align-items: baseline; gap: 8px; font: 400 10.5px var(--mono);
+.bc__seqs-r { display: flex; align-items: baseline; gap: 8px; font: 400 11px var(--mono);
   color: var(--ink-2); }
 .bc__seqs-r b.num { flex: none; min-width: 2.6rem; text-align: right;
   font: 700 11px var(--mono); color: var(--ink-hi); font-variant-numeric: tabular-nums; }
@@ -849,7 +866,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__seqs-p i { font-style: normal; color: var(--ink-3); padding: 0 2px;
   /* the arrow is punctuation: present, never competing with the names */
   font-size: 0.92em; }
-.bc__seqs-r em { flex: none; font: 700 9.5px var(--mono); font-style: normal;
+.bc__seqs-r em { flex: none; font: 700 10px var(--mono); font-style: normal;
   color: var(--good); white-space: nowrap; }
 /* the completed route is the one the reader is looking for — it gets the
    brightest ink and the others sit a step behind it, which is a hierarchy
@@ -890,12 +907,12 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__out-bar i { display: block; height: 100%; border-radius: 999px;
   background: linear-gradient(90deg,
     color-mix(in srgb, var(--warn) 55%, transparent), var(--bad)); }
-.bc__out-ft { display: block; margin-top: 9px; font: 400 10.5px var(--mono);
+.bc__out-ft { display: block; margin-top: 9px; font: 400 11px var(--mono);
   color: var(--ink-3); line-height: 1.5; }
 /* the stop verdict — the join between where sessions end and how those screens
    perform, stated as a conclusion rather than left for the reader to infer */
 .rinfo__stopv { margin: 9px 0 2px; padding: 9px 12px; border-radius: 9px;
-  font: 400 11.5px var(--mono); line-height: 1.55; color: var(--ink-2);
+  font: 400 12px var(--mono); line-height: 1.55; color: var(--ink-2);
   border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border));
   background: color-mix(in srgb, var(--good) 8%, transparent); }
 .rinfo__stopv b { color: var(--good); font-weight: 700; }
@@ -1179,7 +1196,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .tech__v { display: flex; flex-direction: column; gap: 1px; padding: 8px 14px;
   border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border);
   border-left: 3px solid var(--vt, var(--border-2)); min-width: 96px; }
-.tech__v b { font-size: 19px; line-height: 1.1; color: var(--ink-hi); }
+.tech__v b { font-size: 18px; line-height: 1.1; color: var(--ink-hi); }
 .tech__v span { font: 700 9px var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
   color: var(--ink-2); }
 .tech__v em { font: 400 9px var(--mono); color: var(--ink-3); font-style: normal; }
@@ -1242,7 +1259,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__seg-r:first-of-type { border-top: none; }
 .bc__seg-b { font: 600 12px var(--mono); color: var(--ink); }
 .bc__seg-b em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; margin-left: 6px; }
-.bc__seg-r b { font-size: 14px; color: var(--ink-hi); }
+.bc__seg-r b { font-size: 15px; color: var(--ink-hi); }
 .bc__seg-lift { font: 700 11px var(--mono); }
 .bc__seg-n { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
 .rp__f { border-left: 2px solid var(--sv); }
@@ -1250,7 +1267,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .rp__sev { font: 700 12px var(--mono); color: var(--sv); text-transform: uppercase;
            letter-spacing: 0.08em; }
 .rp__area { font: 500 12px var(--sans); color: var(--hue, var(--ink-3)); }
-.rp__title { font: 600 16px var(--sans); color: var(--ink); margin: 0 0 6px; line-height: 1.3; }
+.rp__title { font: 600 15px var(--sans); color: var(--ink); margin: 0 0 6px; line-height: 1.3; }
 .rp__body { font: 400 13px var(--sans); color: var(--ink-2); line-height: 1.55; margin: 0 0 10px;
             max-width: 88ch; }
 .rp__ev { font: 400 12px var(--mono); color: var(--ink-3); line-height: 1.5;
@@ -1288,7 +1305,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
     flex-direction: column; align-items: center; text-align: center; gap: 3px;
     text-decoration: none; position: relative; min-width: 0; }
 .path__origin em, .path__step em { font-style: normal; }
-.path__dot, .path__node { display: grid; place-items: center; width: 38px; height: 38px;
+.path__dot, .path__node { display: grid; place-items: center; width: 40px; height: 40px;
     border-radius: 50%; font-size: 15px; font-style: normal; line-height: 1;
     border: 2px solid var(--c, var(--accent)); color: var(--c, var(--accent));
     background: var(--panel); transition: background 120ms, box-shadow 120ms; }
@@ -1317,7 +1334,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
               overflow-wrap: anywhere; }
 
 /* the problem count carried by the origin, like the badge on a Davis node */
-.path__badge { position: absolute; top: -3px; right: 26px; min-width: 17px; height: 17px;
+.path__badge { position: absolute; top: -3px; right: 26px; min-width: 18px; height: 18px;
     display: grid; place-items: center; padding: 0 4px; border-radius: 999px;
     font: 700 10px var(--mono); color: var(--bg); background: var(--bad); }
 
@@ -1348,7 +1365,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   background: color-mix(in srgb, var(--panel-2) 70%, transparent); margin-bottom: 14px; }
 .elsum__v { font: 600 13px var(--sans); display: flex; flex-direction: column; gap: 2px; }
 .elsum__v--bad { color: var(--bad); }
-.elsum__v--warn { color: var(--warn, #e8b04b); }
+.elsum__v--warn { color: var(--warn); }
 .elsum__v em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
 .lrow--fold { width: 100%; text-align: center; font: 600 11px var(--mono);
   color: var(--ink-3); cursor: pointer; border: 1px dashed var(--border-2);
@@ -1363,8 +1380,8 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   vertical-align: 1px; white-space: nowrap; }
 .lrow__tag--p { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
   background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.lrow__tag--a { color: var(--warn, #e8b04b); border: 1px solid color-mix(in srgb, var(--warn, #e8b04b) 55%, transparent);
-  background: color-mix(in srgb, var(--warn, #e8b04b) 12%, transparent); }
+.lrow__tag--a { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .lrow__impn { color: var(--bad); font-weight: 700; }
 .lrow__m { grid-column: 1 / -1; font: 400 12px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
 
@@ -1389,7 +1406,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .dd { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .dd__k { border: 1px solid var(--border); border-bottom-width: 2px; padding: 9px 11px; }
 .dd__kl { font: 600 12px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
-.dd__kv { font: 800 20px var(--mono); letter-spacing: -0.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.dd__kv { font: 800 22px var(--mono); letter-spacing: -0.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .dd__h { font: 600 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2);
          margin: 16px 0 8px; display: flex; gap: 8px; align-items: baseline; }
 .dd__h em { font-style: normal; color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; }
@@ -1460,7 +1477,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .stack3d { display: flex; flex-direction: column; gap: 0; padding: 30px 26px 60px;
          width: max-content; min-width: 100%; }
 .shelf { display: flex; align-items: center; margin-bottom: -6px; }
-.shelf__card { width: 264px; flex: none; display: flex; align-items: center; gap: 10px;
+.shelf__card { width: 252px; flex: none; display: flex; align-items: center; gap: 10px;
                border: 1px solid var(--border-2); border-radius: 10px; padding: 10px 12px;
                background: color-mix(in srgb, var(--accent) 6%, var(--panel));
                cursor: pointer; position: relative; z-index: 4;
@@ -1584,7 +1601,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad) 60%, transparent); }
 /* the reader asked for legible column captions — up from 10px ink-2 the
    layer names were furniture, not labels */
-.gcol__name { text-align: center; font: 600 12.5px var(--sans); color: var(--ink);
+.gcol__name { text-align: center; font: 600 12px var(--sans); color: var(--ink);
               margin-top: 2px; }
 .gcol__hd:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .gcol__ic { display: inline-flex; color: var(--ink-2); }
@@ -1597,7 +1614,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    point where shrinking would make it illegible, truncates from the TAIL:
    the count survives, the word gives way. */
 .gcol__sub { text-align: center; letter-spacing: 0.06em;
-             font: 600 clamp(10px, 0.85vw, 11.5px) var(--mono);
+             font: 600 clamp(10px, 0.85vw, 12px) var(--mono);
              text-transform: uppercase; color: var(--ink-2); margin: 1px 0 10px;
              max-width: 100%; overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; }
@@ -1796,7 +1813,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-row2 { position: relative; display: flex; gap: 22px; flex-wrap: wrap;
   margin-bottom: 6px; }
 .tk-stat { display: flex; flex-direction: column; }
-.tk-stat b { font-size: 24px; color: var(--ink-hi); line-height: 1.15;
+.tk-stat b { font-size: 22px; color: var(--ink-hi); line-height: 1.15;
   text-shadow: 0 0 12px color-mix(in srgb, var(--ink-hi) 25%, transparent); }
 .tk-stat span { font: 500 10px var(--mono); color: color-mix(in srgb, var(--ink-hi) 66%, transparent); }
 .tk-chartrow { position: relative; margin-top: auto; display: flex; align-items: center; gap: 10px;
@@ -1826,9 +1843,9 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   box-shadow: 0 0 40px color-mix(in srgb, var(--t) 55%, transparent); }
 @keyframes tkbreathe {
   0%,100% { box-shadow: 0 0 20px color-mix(in srgb, var(--t) 25%, transparent); }
-  50% { box-shadow: 0 0 34px color-mix(in srgb, var(--t) 45%, transparent); } }
-.tk-core__ic { color: var(--ink-hi); width: 32px; height: 32px; }
-.tk-core__ic svg { width: 32px; height: 32px;
+  50% { box-shadow: 0 0 30px color-mix(in srgb, var(--t) 45%, transparent); } }
+.tk-core__ic { color: var(--ink-hi); width: 30px; height: 30px; }
+.tk-core__ic svg { width: 30px; height: 30px;
   filter: drop-shadow(0 0 9px color-mix(in srgb, var(--ink-hi) 55%, transparent)); }
 .tk-core__pct--word, .cc .tk-core__pct--word { font-size: 30px; letter-spacing: 0.02em;
   text-transform: uppercase; }
@@ -1838,7 +1855,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   text-transform: uppercase; letter-spacing: 0.12em; }
 .tk-core__words { display: block; font: 400 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 75%, transparent);
   max-width: 320px; margin: 6px auto 0; line-height: 1.5; }
-.tk-core__nm { font: 700 16px var(--sans); color: var(--ink-hi); margin-top: 6px;
+.tk-core__nm { font: 700 15px var(--sans); color: var(--ink-hi); margin-top: 6px;
   text-align: center; }
 .tk-core__go { font: 600 10px var(--mono); color: color-mix(in srgb, var(--ink-hi) 60%, transparent); margin-top: 2px; }
 .tk-core__b:hover .tk-core__go, .tk-core__b:focus-visible .tk-core__go { color: var(--ink-hi); }
@@ -1883,7 +1900,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   padding: 12px 14px 4px; outline: none; }
 .tk-browser__nm { font: 700 15px var(--sans); color: var(--ink-hi); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
-.tk-browser__hd b { font-size: 14px; }
+.tk-browser__hd b { font-size: 15px; }
 .tk-browser__hd .tk-core__go { margin-left: auto; }
 .tk-browser__hd:hover .tk-core__go, .tk-browser__hd:focus-visible .tk-core__go {
   color: var(--ink); }
@@ -1897,12 +1914,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* the classic card's title row */
 .tk-hd { display: flex; align-items: center; gap: 12px; }
-.tk-hd__ic { display: inline-flex; width: 34px; height: 34px; color: var(--t, var(--ink-2));
+.tk-hd__ic { display: inline-flex; width: 30px; height: 30px; color: var(--t, var(--ink-2));
   border: 1.5px solid color-mix(in srgb, var(--t, var(--border-2)) 55%, var(--border-2));
   border-radius: 9px; align-items: center; justify-content: center;
   box-shadow: 0 0 12px color-mix(in srgb, var(--t, transparent) 30%, transparent); }
 .tk-hd__ic svg { width: 20px; height: 20px; }
-.tk-hd__t h2 { font: 700 19px var(--sans); color: var(--ink); margin: 0; }
+.tk-hd__t h2 { font: 700 18px var(--sans); color: var(--ink); margin: 0; }
 .tk-hd__t span { font: 500 11px var(--mono); color: var(--ink-3); }
 .tk-hd__a { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 .tk-btn { background: none; cursor: pointer; color: var(--ink-2);
@@ -1921,7 +1938,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    services above, classic topology (the mainframe's home) and data stores
    below. Identification was the ask; the label does it without a colour. */
 .gdiv { width: 100%; display: flex; align-items: center; gap: 8px;
-  margin: 2px 0 -6px; font: 600 8px var(--mono); letter-spacing: 0.14em;
+  margin: 2px 0 -6px; font: 600 9px var(--mono); letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-3); white-space: nowrap;
   position: relative; z-index: 3; }
 .gdiv::before, .gdiv::after { content: ""; flex: 1; height: 1px;
@@ -1945,7 +1962,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bsum { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 14px;
   align-items: stretch; position: relative; z-index: 4; min-width: 0; }
 .bsum__row { min-width: 0; }
-.bsum__c { width: 34px; height: 34px; margin: 6px auto 10px; }
+.bsum__c { width: 30px; height: 30px; margin: 6px auto 10px; }
 /* Each row wears the ENTITY layout the rest of the chain speaks: the circled
    icon, the tone on its ring, the anomaly count on its shoulder — the same
    grammar as a gnode, laid horizontally. Clicking opens the layer's entity
@@ -2027,7 +2044,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   animation: hlspot 1.6s ease-in-out infinite; }
 @keyframes hlspot {
   50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn) 30%, transparent),
-    0 0 34px color-mix(in srgb, var(--warn) 65%, transparent); } }
+    0 0 30px color-mix(in srgb, var(--warn) 65%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
   .graph--hl .gnode--spot .gnode__c { animation: none; } }
 .tk-btn--warn:hover, .tk-btn--warn:focus-visible { color: var(--warn); border-color: var(--warn); }
@@ -2036,7 +2053,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   box-shadow: 0 0 14px color-mix(in srgb, var(--bad) 30%, transparent); }
 /* tighter modules so the three columns hold at narrow widths, like the card */
 @media (max-width: 860px) {
-  .tk-stat b { font-size: 16px; }
+  .tk-stat b { font-size: 15px; }
   .tk-block { padding: 10px 10px; }
   .tk-core__pct { font-size: 26px; }
   .tk-core__nm { font-size: 13px; }
@@ -2052,7 +2069,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-phone__scr { stroke: color-mix(in srgb, var(--t) 40%, transparent); stroke-width: 1; }
 .tk-phone__pct { font: 700 30px var(--mono); fill: var(--ink-hi); text-anchor: middle;
   text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 40%, transparent); }
-.tk-phone__cap { font: 700 8px var(--mono); fill: color-mix(in srgb, var(--ink-hi) 75%, transparent);
+.tk-phone__cap { font: 700 9px var(--mono); fill: color-mix(in srgb, var(--ink-hi) 75%, transparent);
   text-anchor: middle; letter-spacing: 0.14em; }
 .tk-phone__bar { fill: color-mix(in srgb, var(--ink-hi) 85%, transparent); }
 .tk-phone__home { fill: none; stroke: color-mix(in srgb, var(--ink-hi) 50%, transparent); stroke-width: 1.5; }
@@ -2082,7 +2099,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   stroke: color-mix(in srgb, var(--info) 55%, transparent); stroke-width: 1.5;
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--info) 35%, transparent)); }
 .rv-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; fill: var(--ink-3); }
-.rv-val { font-size: 16px; font-weight: 700; fill: var(--ink); }
+.rv-val { font-size: 15px; font-weight: 700; fill: var(--ink); }
 
 .rv-gate { cursor: pointer; outline: none; }
 .rv-gate__halo { fill: none; stroke: color-mix(in srgb, var(--t) 40%, transparent);
@@ -2097,9 +2114,9 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   0%,100% { filter: drop-shadow(0 0 16px color-mix(in srgb, var(--t) 35%, transparent)); }
   50% { filter: drop-shadow(0 0 30px color-mix(in srgb, var(--t) 60%, transparent)); } }
 .rv-gate__pct { font-size: 30px; font-weight: 700; fill: var(--ink-hi); }
-.rv-gate__cap { font-size: 8.5px; font-weight: 700; letter-spacing: 0.14em;
+.rv-gate__cap { font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
   fill: color-mix(in srgb, var(--ink-hi) 70%, transparent); }
-.rv-name { font-size: 19px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
+.rv-name { font-size: 18px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
 .rv-go { font-size: 11px; fill: var(--ink-3); }
 .rv-gate:hover .rv-go, .rv-gate:focus-visible .rv-go { fill: var(--ink); }
 
@@ -2122,7 +2139,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 12px 20px; }
 .rv-kpi { display: flex; flex-direction: column; }
-.rv-kpi b { font-size: 24px; color: var(--ink); line-height: 1.15; }
+.rv-kpi b { font-size: 22px; color: var(--ink); line-height: 1.15; }
 .rv-kpi span { font: 500 10px var(--mono); color: var(--ink-3); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2163,18 +2180,18 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   display: flex; flex-direction: column; gap: 0; }
 .pp-stage h3 { font: 700 13px var(--sans); color: var(--ink); margin: 0 0 2px;
   text-align: center; }
-.pp-stage p { font: 500 9.5px var(--mono); color: var(--ink-3); margin: 0 0 8px;
+.pp-stage p { font: 500 10px var(--mono); color: var(--ink-3); margin: 0 0 8px;
   text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; }
 .pp-chips { display: flex; gap: 6px 10px; justify-content: center; flex-wrap: wrap;
   margin-top: auto; }
 .pp-chip { display: flex; flex-direction: column; align-items: center; gap: 1px;
   min-width: 52px; }
-.pp-chip i { display: inline-flex; width: 17px; height: 17px;
+.pp-chip i { display: inline-flex; width: 18px; height: 18px;
   color: var(--c, var(--ink-2)); }
-.pp-chip i svg { width: 17px; height: 17px;
+.pp-chip i svg { width: 18px; height: 18px;
   filter: drop-shadow(0 0 5px color-mix(in srgb, var(--c, var(--info)) 45%, transparent)); }
-.pp-chip b { font-size: 14px; color: var(--c, var(--ink)); }
+.pp-chip b { font-size: 15px; color: var(--c, var(--ink)); }
 .pp-chip span { font: 500 9px var(--mono); color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.08em; }
 .pp-step { align-self: center; font-size: 18px; color: var(--info); text-align: center;
@@ -2192,11 +2209,11 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   overflow: hidden; }
 .pp-fb__bar::after { content: ""; position: absolute; inset: 0;
   background: repeating-linear-gradient(90deg, transparent 0 26px,
-    color-mix(in srgb, var(--ink-hi) 10%, transparent) 26px 34px);
+    color-mix(in srgb, var(--ink-hi) 10%, transparent) 26px 30px);
   animation: ppflow 1.4s linear infinite; }
-@keyframes ppflow { to { transform: translateX(-34px); } }
+@keyframes ppflow { to { transform: translateX(-30px); } }
 .pp-fb__arr { font-size: 18px; }
-.pp-outcome { font: 600 10.5px var(--mono); color: var(--ink-2);
+.pp-outcome { font: 600 11px var(--mono); color: var(--ink-2);
   border: 1px solid color-mix(in srgb, var(--good) 45%, var(--border-2));
   border-radius: 8px; padding: 6px 10px;
   background: color-mix(in srgb, var(--good) 8%, transparent); }
@@ -2211,7 +2228,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .pp-cx__ic { display: inline-flex; width: 26px; height: 26px; color: var(--ink-hi); }
 .pp-cx__ic svg { width: 26px; height: 26px;
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--ink-hi) 50%, transparent)); }
-.pp-cx__pct { font-size: 32px; color: var(--ink-hi); line-height: 1.1;
+.pp-cx__pct { font-size: 30px; color: var(--ink-hi); line-height: 1.1;
   text-shadow: 0 0 16px color-mix(in srgb, var(--ink-hi) 30%, transparent); }
 .pp-cx__cap { font: 700 9px var(--mono); color: color-mix(in srgb, var(--ink-hi) 70%, transparent);
   text-transform: uppercase; letter-spacing: 0.12em; }
@@ -2261,17 +2278,17 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   align-items: center; justify-content: center; }
 .mc-n__ic svg { width: 30px; height: 30px;
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ink-hi) 45%, transparent)); }
-.mc-n__nm { font-size: 14px; font-weight: 700; fill: var(--ink);
+.mc-n__nm { font-size: 15px; font-weight: 700; fill: var(--ink);
   font-family: var(--sans); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
-.mc-n__v { font-size: 17px; font-weight: 700; fill: var(--ink);
+.mc-n__v { font-size: 18px; font-weight: 700; fill: var(--ink);
   paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 .mc-n--warn .mc-n__v { fill: var(--warn); }
 .mc-n--bad .mc-n__v { fill: var(--bad); }
 .mc-n--good .mc-n__v { fill: var(--good); }
-.mc-n__mt { font-size: 10.5px; font-weight: 500; fill: var(--ink-3);
+.mc-n__mt { font-size: 11px; font-weight: 500; fill: var(--ink-3);
   paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 
-.mc-cap { text-align: center; font: 500 10.5px var(--mono); color: var(--ink-3);
+.mc-cap { text-align: center; font: 500 11px var(--mono); color: var(--ink-3);
   padding: 0 14px 12px; }
 @media (prefers-reduced-motion: reduce) {
   .mc-e__pulse, .mc-n--bad .mc-n__c { animation: none; }
@@ -2317,7 +2334,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bb-verdict { display: flex; flex-direction: column; align-items: flex-start;
   background: none; border: none; cursor: pointer; outline: none; padding: 0; }
 .bb-verdict b { font-size: 88px; line-height: 0.95; color: var(--t);
-  text-shadow: 0 0 34px color-mix(in srgb, var(--t) 60%, transparent),
+  text-shadow: 0 0 30px color-mix(in srgb, var(--t) 60%, transparent),
     0 0 8px color-mix(in srgb, var(--t) 80%, transparent);
   animation: bbbreathe 4s ease-in-out infinite; }
 @keyframes bbbreathe {
@@ -2332,7 +2349,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bb-flow { display: flex; align-items: center; gap: 20px; margin-left: auto;
   flex-wrap: wrap; }
 /* the flow's wires: lit traces with a packet running them */
-.bb-wire { position: relative; width: 64px; height: 3px; border-radius: 2px;
+.bb-wire { position: relative; width: 52px; height: 3px; border-radius: 2px;
   background: color-mix(in srgb, var(--good) 35%, transparent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--good) 30%, transparent); }
 .bb-wire::after { content: ""; position: absolute; top: -2px; width: 14px; height: 7px;
@@ -2378,10 +2395,10 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
     color-mix(in srgb, var(--accent) 75%, transparent), transparent 70%);
   animation: bbline 3.2s ease-in-out infinite; }
 @keyframes bbline { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
-.bb-sec .bb-big b { font-size: 31px; }
+.bb-sec .bb-big b { font-size: 30px; }
 
 @media (max-width: 860px) { .bb-cols { grid-template-columns: 1fr; }
-  .bb-verdict b { font-size: 64px; } .bb-big b { font-size: 30px; } }
+  .bb-verdict b { font-size: 52px; } .bb-big b { font-size: 30px; } }
 @media (prefers-reduced-motion: reduce) {
   .bb-hero::after, .bb-verdict b, .bb-wire::after, .bb-sec h3::after { animation: none; }
 }
@@ -2512,9 +2529,9 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   transform: translateY(-3px) scale(1.025);
   border-color: color-mix(in srgb, var(--c) 100%, transparent) !important;
   box-shadow:
-    0 14px 34px -8px rgba(0, 0, 0, 0.55),
+    0 14px 30px -8px rgba(0, 0, 0, 0.55),
     0 0 0 1px color-mix(in srgb, var(--c) 70%, transparent),
-    0 0 34px color-mix(in srgb, var(--c) 42%, transparent),
+    0 0 30px color-mix(in srgb, var(--c) 42%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 22%, transparent) !important;
 }
 .cc-mod--on::before, .cc-mod--on::after { border-color: var(--ink-hi); }
@@ -2544,7 +2561,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .mch__x { background: none; border: none; color: var(--ink-3); cursor: pointer;
   font-size: 13px; padding: 0 2px; }
 .mch__x:hover, .mch__x:focus-visible { color: var(--ink); outline: none; }
-.mch__svg { width: 100%; height: 132px; display: block; }
+.mch__svg { width: 100%; height: 130px; display: block; }
 .mch__line { fill: none; stroke: var(--m); stroke-width: 1.9;
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--m) 55%, transparent)); }
 .mch__line--fc { stroke-dasharray: 5 4; opacity: 0.9; }
@@ -2571,7 +2588,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    bar on narrow rows and shouted over the list. Outline only, sized to its
    own text, never grown by the flex row it sits in. */
 .svcf__fatal { display: inline-block; vertical-align: middle;
-  font: 700 8px var(--mono); letter-spacing: 0.07em; line-height: 1.5;
+  font: 700 9px var(--mono); letter-spacing: 0.07em; line-height: 1.5;
   color: var(--bad); background: none;
   border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
   border-radius: 3px; padding: 0 5px; margin-right: 6px; }
@@ -2626,19 +2643,19 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   /* the numbers keep pace with the box */
   .cc .tk-stat b { font-size: 30px; }
   .cc .tk-stat span { font-size: 11px; }
-  .cc .tk-row2 { gap: 34px; }
+  .cc .tk-row2 { gap: 30px; }
   .cc .tk-chartrow { font-size: 12px; gap: 16px; }
   .cc .cc-bars { height: 30px; gap: 3px; }
   .cc .cc-bars i { width: 4px; }
   /* the core in proportion to its neighbours */
   .cc .tk-core__pct { font-size: 52px; }
-  .cc .tk-core__pct--word { font-size: 38px; }
-  .cc .tk-core__nm { font-size: 19px; }
+  .cc .tk-core__pct--word { font-size: 40px; }
+  .cc .tk-core__nm { font-size: 18px; }
   .cc .tk-core__ic, .cc .tk-core__ic svg { width: 40px; height: 40px; }
   .cc .tk-core__b { padding: 26px 20px 20px; }
   .cc .tk-fc { font-size: 12px; padding: 9px 16px; }
   /* the drill-downs fill the width too */
-  .mch__svg { height: clamp(132px, 22vh, 260px); }
+  .mch__svg { height: clamp(130px, 22vh, 260px); }
   .svcf__row { padding: 10px 0; font-size: 13px; }
 }
 /* very wide: hold the columns to a readable measure, centred, so a 2560px
@@ -2656,7 +2673,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .mch__tip { position: absolute; top: 6px; pointer-events: none; z-index: 3;
   background: color-mix(in srgb, #0b0b1a 92%, transparent);
   border: 1px solid var(--border-2); border-left: 3px solid var(--m);
-  border-radius: 8px; padding: 7px 11px; min-width: 132px;
+  border-radius: 8px; padding: 7px 11px; min-width: 130px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   display: flex; flex-direction: column; gap: 3px; }
 .mch__tip-t { font: 600 10px var(--mono); color: var(--ink-3);
@@ -2882,7 +2899,7 @@ a.svcf__row { text-decoration: none; color: inherit; }
    above (the actual top menu) stay pinned by the rule below; the title
    scrolls with the page, as the platform designed it to. */
 /* WHY THE MENUS DISAPPEARED AT ALL — measured 2026-08-25: the shell wraps
-   [header 32px, app column 100vh] in a plain div, so the page is 100vh+32
+   [header 30px, app column 100vh] in a plain div, so the page is 100vh+32
    tall and the WINDOW scrolls exactly one menu-height before the app's own
    scroller (main) even starts. No sticky needed: fit the pair to the
    viewport and the window has nothing to scroll — tabs, TitleBar and the
@@ -2904,7 +2921,7 @@ div:has(> header):has(main) > div {
 /* the traffic light's rulebook: one quiet line, dots matching the map */
 .geo__rule {
   margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--border);
-  font-family: var(--mono); font-size: 10.5px; line-height: 1.6;
+  font-family: var(--mono); font-size: 11px; line-height: 1.6;
   color: var(--ink-3); letter-spacing: .02em;
 }
 .geo__rule i {
@@ -2919,7 +2936,7 @@ div:has(> header):has(main) > div {
 .geo__lat--good { color: var(--good); }
 .geo__lat--warn { color: var(--warn); }
 .geo__lat--bad { color: var(--bad); font-weight: 700; }
-.geo__nm { font: 400 10.5px var(--sans); color: var(--ink-2);
+.geo__nm { font: 400 11px var(--sans); color: var(--ink-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .geo__cc { font: 700 12px var(--mono); color: var(--ink-hi); letter-spacing: .06em; }
 .geo__t { height: 9px; border-radius: 999px; overflow: hidden;
@@ -2947,8 +2964,8 @@ div:has(> header):has(main) > div {
 .geo__r--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .geo__drill { border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 9px; }
 .geo__drill-hd { display: flex; align-items: baseline; gap: 10px; }
-.geo__drill-hd b { font: 700 14px var(--mono); color: var(--ink-hi); letter-spacing: .08em; }
-.geo__drill-hd span { font: 400 10.5px var(--mono); color: var(--ink-3); }
+.geo__drill-hd b { font: 700 15px var(--mono); color: var(--ink-hi); letter-spacing: .08em; }
+.geo__drill-hd span { font: 400 11px var(--mono); color: var(--ink-3); }
 .geo__drill-x { margin-left: auto; background: none; border: none; cursor: pointer;
   color: var(--ink-3); font-size: 12px; }
 .geo__drill-x:hover { color: var(--ink-hi); }
@@ -2975,7 +2992,7 @@ div:has(> header):has(main) > div {
 .tpick__c { display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 9px; border-radius: 9999px; cursor: pointer;
   border: 1px solid var(--border); background: none;
-  font: 500 10.5px var(--mono); color: var(--ink-2); }
+  font: 500 11px var(--mono); color: var(--ink-2); }
 .tpick__c i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
 .tpick__c--warn i { background: var(--warn); }
 .tpick__c--bad i { background: var(--bad); }
@@ -2984,9 +3001,9 @@ div:has(> header):has(main) > div {
 .tpick__c--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
 .tpick__c--on { border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink-hi); }
-.tpick__c b { font: 700 9.5px var(--mono); color: var(--bad); }
+.tpick__c b { font: 700 10px var(--mono); color: var(--bad); }
 .tpick__c:hover { border-color: var(--accent); color: var(--ink-hi); }
-.tpick__more { font: 400 9.5px var(--mono); color: var(--ink-3); }
+.tpick__more { font: 400 10px var(--mono); color: var(--ink-3); }
 
 /* a poster scan that failed — a sentence and a retry, never a silent
    empty poster wearing a stale header */
@@ -3004,13 +3021,13 @@ div:has(> header):has(main) > div {
 /* the export button, SAID in words — a bare "⬇" reused the close-button
    shape, rendered as tofu in some fonts, and the reader could not find the
    download at all. One shared style for the poster and the board. */
-/* the accent at 10.5px measured 3.9:1 on the bar — same treatment as the
+/* the accent at 11px measured 3.9:1 on the bar — same treatment as the
    other accent-coloured microtype: the hue stays, the weight rises */
 .export-btn { display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: var(--r-field, 6px); cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  font: 700 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  font: 700 11px var(--mono); letter-spacing: .06em; text-transform: uppercase;
   color: color-mix(in srgb, var(--accent) 45%, var(--ink-hi)); white-space: nowrap; }
 .export-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
@@ -3031,10 +3048,10 @@ div:has(> header):has(main) > div {
 
 /* the second door: same shape, the error red — an <a>, so kill the underline */
 .geo__drill-go--err { text-decoration: none; display: inline-block; margin-left: 8px;
-  border-color: color-mix(in srgb, var(--bad, #ff7a8a) 55%, var(--border));
-  background: color-mix(in srgb, var(--bad, #ff7a8a) 12%, transparent);
-  color: var(--bad, #ff7a8a); }
-.geo__drill-go--err:hover { background: color-mix(in srgb, var(--bad, #ff7a8a) 22%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad); }
+.geo__drill-go--err:hover { background: color-mix(in srgb, var(--bad) 22%, transparent);
   color: var(--ink-hi); }
 
 /* what sets the region apart — the drill's foot, laid out as it deserves:
@@ -3052,7 +3069,7 @@ div:has(> header):has(main) > div {
   border: 1px solid var(--border); border-radius: var(--r-field, 6px);
   background: color-mix(in srgb, var(--panel-2) 70%, transparent);
   padding: 5px 10px; }
-.geo__who-r b { color: var(--ink-hi); font-weight: 700; font-size: 11.5px; }
+.geo__who-r b { color: var(--ink-hi); font-weight: 700; font-size: 12px; }
 .geo__who-r em { font-style: normal; font-size: 9px; color: var(--ink-3);
   text-transform: uppercase; letter-spacing: .05em; }
 .geo__who-r i { font-style: normal; font: 700 10px var(--mono); color: var(--accent);
@@ -3062,7 +3079,7 @@ div:has(> header):has(main) > div {
   background: color-mix(in srgb, var(--bad) 14%, transparent) !important; }
 .geo__who-g--bad .geo__who-r { border-color: color-mix(in srgb, var(--bad) 40%, var(--border));
   background: color-mix(in srgb, var(--bad) 7%, transparent); }
-.geo__who-none { font: 400 11.5px var(--mono); color: var(--ink-2); line-height: 1.55;
+.geo__who-none { font: 400 12px var(--mono); color: var(--ink-2); line-height: 1.55;
   border: 1px solid color-mix(in srgb, var(--good) 35%, var(--border));
   background: color-mix(in srgb, var(--good) 7%, transparent);
   border-radius: var(--r-container, 9px); padding: 9px 12px; }
@@ -3081,7 +3098,7 @@ div:has(> header):has(main) > div {
   font: 700 10px var(--sans); color: var(--ink-hi);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   padding: 1px 7px; border-radius: 999px; }
-.gpin__lbl em { font-style: normal; font: 700 9.5px var(--mono); color: var(--ink-2); }
+.gpin__lbl em { font-style: normal; font: 700 10px var(--mono); color: var(--ink-2); }
 /* THEME TOKENS, not the canvas hexes — the HTML pins live in the page and
    must follow the light theme like every other verdict on screen (only the
    canvas DotLayer, which paints outside CSS, keeps GEO_COL's literals). */

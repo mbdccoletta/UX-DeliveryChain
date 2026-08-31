@@ -1113,7 +1113,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   aria-label={`server ${pct(where.cur.srv)}, network ${pct(where.cur.net)}, download and render ${pct(where.cur.rend)}`}>
                   <i style={{ width: `${where.cur.srv * 100}%`, background: "var(--bad)" }} />
                   <i style={{ width: `${where.cur.net * 100}%`, background: "var(--t-cyan)" }} />
-                  <i style={{ width: `${where.cur.rend * 100}%`, background: "var(--warn, #e8b04b)" }} />
+                  <i style={{ width: `${where.cur.rend * 100}%`, background: "var(--warn)" }} />
                 </div>
                 )}
                 {where.cur && (
@@ -1129,7 +1129,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   <span title="The customer's network — DNS lookup + connection time">
                     <i style={{ background: "var(--t-cyan)" }} />the customer&apos;s internet · {ms(where.per(where.d.slow.cur.net))} per screen</span>
                   <span title="After the first byte: downloading and drawing the screen on the customer's device">
-                    <i style={{ background: "var(--warn, #e8b04b)" }} />the customer&apos;s device · {ms(where.per(where.d.slow.cur.rend))} per screen</span>
+                    <i style={{ background: "var(--warn)" }} />the customer&apos;s device · {ms(where.per(where.d.slow.cur.rend))} per screen</span>
                 </div>
                 )}
                 {/* error evidence: origin chips */}
