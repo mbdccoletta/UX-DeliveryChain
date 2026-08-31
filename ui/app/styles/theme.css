@@ -2521,8 +2521,15 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   animation-delay: 0.25s; }
 @keyframes ccbeat { 0%, 100% { r: 3; opacity: 0.75; } 50% { r: 5; opacity: 1; } }
 /* the card states what its movement means — motion is data, and says so */
+/* the card language, folded away: a key you open, not a wall you scroll past */
 .cc-motion { grid-column: 1 / -1; text-align: center; margin-top: 10px;
   font: 500 10px var(--mono); color: var(--ink-3); letter-spacing: 0.02em; }
+.cc-motion > summary { cursor: pointer; list-style: none; display: inline-block;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  color: var(--ink-3); }
+.cc-motion > summary::-webkit-details-marker { display: none; }
+.cc-motion > summary:hover { color: var(--ink-2); border-color: var(--border-2); }
+.cc-motion > span { display: block; margin-top: 8px; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .cc-bar--live, .rp-ecg__beat { animation: none; }
 }
