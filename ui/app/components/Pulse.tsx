@@ -248,7 +248,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         acc[r.domain] = (acc[r.domain] ?? 0) + r.reqs; return acc;
       }, {}))
     .sort((a, b) => b[1] - a[1])
-    .map(([d, n]) => `${d} · ${fmtK(n)}`);
+    /* THE MEASURE LEADS, the subject follows — every other line on these
+       cards reads "2k sessions", "246.3k web requests", and only these read
+       backwards. The host is trimmed to the part that identifies it
+       (astroshop.playground-dev.demoability.dynatracelabs.com is a wall in a
+       160px column); the whole name rides the tooltip. */
+    .map(([d, n]) => ({ short: `${fmtK(n)} ${d.split(".").slice(0, 2).join(".")}`,
+      full: `${d} · ${fmtK(n)} requests` }));
 
   if (!app) return null;
   const isMobile = app.entity?.startsWith("MOBILE_APPLICATION-");
@@ -344,23 +350,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 
   return (
     <div className="stack">
-      <div className="pl-estate">
-        <span>
-          <b className="num">{data.apps.length}</b> applications ·{" "}
-          {estate ? (() => {
-            const people = estate.real > 0;
-            const d = people ? estate.real : estate.s;
-            const n = people ? estate.realHit : estate.h;
-            // no sessions at all = nothing to rate, never "0% error-free"
-            if (!d) return <>estate <b className="num">•••</b> — no sessions to rate</>;
-            return <>estate <b className="num">
-              {/* floored, exactly as the estate table floors it */}
-              {Math.floor((1 - n / d) * 100)}%</b>{" "}
-              {people ? "of real users" : ""} error-free</>;
-          })() : "…"}
-          {" "}· <b className="num">{data.problems.length}</b> active problems
-        </span>
-      </div>
+      {/* THE ESTATE LINE IS GONE. This page is scoped to ONE application —
+          the header's selector says which — so a headline counting every
+          application, the whole estate's error-free share and every problem in
+          the environment described a subject the page never shows. The reader
+          caught the contradiction. */}
 
       <div className="tk-hd">
         <i className="tk-hd__ic" style={{ ["--t" as string]: TVAR[tone] }}>
@@ -901,7 +895,7 @@ interface CardProps {
   hitSessions: number;
   services: number | null; svcNames: string[];
   /** The domains this application contacts, busiest first, with their volume. */
-  domNames: string[];
+  domNames: Array<{ short: string; full: string }>;
   fc: Forecast | null;
   /** What the projection is OF — the selected box's metric, in words. */
   fcMetric: string;
@@ -1104,6 +1098,20 @@ function CleanCard(p: CardProps) {
   // and a card that cries wolf is worse than one that says nothing.
   const reqRate = p.requests > 0 ? p.reqFail / p.requests : 0;
   const reqTone: Tone = reqRate >= 0.01 ? "bad" : reqRate >= 0.001 ? "warn" : "info";
+  const apdexWords = (() => {
+    if (!p.apdexBands) return null;
+    const { sat, tol, fru, fruErr } = p.apdexBands;
+    const rated = sat + tol + fru;
+    if (!rated) return null;
+    const per = (v: number) => Math.round((v / rated) * 100);
+    const slow = per(fru - fruErr) + per(tol);
+    const err = per(fruErr);
+    const fine = Math.max(0, 100 - slow - err);
+    return `Of every 100 things users do here, about ${fine} feel fine`
+      + (slow > 0 ? ` · ${slow} drag${err > 0 ? "" : " — speed, not errors"}` : "")
+      + (err > 0 ? ` · ${err} ruined by errors` : "");
+  })();
+
   return (
     <div className="tk-mgrid cc" role="region" aria-label={`${p.name} overview card`}
       ref={wrapRef}>
@@ -1176,7 +1184,10 @@ function CleanCard(p: CardProps) {
                 already carries the two fatal/triage numbers, and an ANR is
                 the crash's sibling — named beside it, not competing with it. */}
             {p.isMobile && p.anrs > 0 && `${fmtK(p.anrs)} ANRs — app frozen until Android killed it · `}
-            {p.realErrors === 0 && p.errors > 0
+            {/* the provenance line EARNS its place: with no errors it said
+                "all from this application's own code" about nothing at all */}
+            {p.errors === 0 ? null
+              : p.realErrors === 0
               ? "none reached a real user — robot and synthetic traffic only"
               : p.errorsThird > 0
                 ? `${fmtK(p.errorsThird)} from third parties · `
@@ -1188,14 +1199,19 @@ function CleanCard(p: CardProps) {
 
       <i className="tk-gap" aria-hidden="true" />
 
-      <div className="tk-core cc-core" ref={coreRef} style={{ ["--t" as string]: TVAR[p.tone],
-        ["--breath" as string]: BREATH[p.tone] }}>
+      {/* THE CORE IS THE APDEX, ALL THE WAY DOWN. It shows the Apdex, its arc
+          fills to the Apdex, its colour is the Apdex's own band — and it used
+          to breathe to the ERROR verdict, a different signal entirely. On an
+          application that is fast and broken the centre pulsed alarm around a
+          score reading EXCELLENT. The pace is the Apdex's now: one measure,
+          one motion. Errors keep their own card, their own colour and their
+          own wave on this ring. */}
+      {/* the score in plain words, built from the same bands the number is, so
+          the two can never disagree — it is the verdict word's tooltip now */}
+      <div className="tk-core cc-core" ref={coreRef}
+        style={{ ["--t" as string]: TVAR[apdexTone(p.apdex)],
+          ["--breath" as string]: BREATH[apdexTone(p.apdex)] }}>
         <div className="cc-corewrap" ref={ringRef}>
-        {/* The ring draws the number it surrounds. That number is the Apdex
-            now, so the arc is the Apdex and its colour is the Apdex's own
-            band — an arc filled by one measure and coloured by another would
-            be unreadable. The breathing PACE still carries health, which is
-            the error verdict, so the card keeps saying both things. */}
         <CoreRing host={ringRef} value={p.apdex} tone={apdexTone(p.apdex)}
           errPerMin={Number(p.errorsPerMin)} errors={p.errors} />
         <button className="tk-core__b" onClick={p.onOpen}
@@ -1203,7 +1219,17 @@ function CleanCard(p: CardProps) {
           <i className="tk-core__ic">{p.isMobile ? <MobileIcon /> : <DesktopIcon />}</i>
           {/* The WORD leads — "Good" reads instantly where 0.92 needs a
               scale; the number moves to the caption for whoever audits it. */}
-          <b className="num tk-core__pct tk-core__pct--word">
+          {/* THE VERDICT WEARS ITS VERDICT. The biggest word on the screen was
+              printed in neutral ink while every smaller verdict in the app is
+              coloured — so the one thing a reader sees first said nothing by
+              its colour. Excellent and Good are good, Fair warns, Poor and
+              Unacceptable are critical: the same three tones the rest of the
+              product speaks. It also carries the score in plain words as its
+              tooltip, which used to be a line on the card repeating the
+              number printed right above it. */}
+          <b className="num tk-core__pct tk-core__pct--word"
+            style={{ color: p.apdex === null ? undefined : TVAR[apdexTone(p.apdex)] }}
+            title={apdexWords ?? undefined}>
             {p.apdex === null ? "…" : apdexBand(p.apdex)}</b>
           <span className="tk-core__cap">
             apdex{p.apdex === null ? "" : ` ${fmtApdex(p.apdex)}`}</span>
@@ -1211,22 +1237,6 @@ function CleanCard(p: CardProps) {
               do — built from the same bands the number is, so the words and
               the figure cannot disagree. Slowness and errors are named
               separately because they are fixed by different people. */}
-          {p.apdexBands && (() => {
-            const { sat, tol, fru, fruErr } = p.apdexBands;
-            const rated = sat + tol + fru;
-            if (!rated) return null;
-            const per = (v: number) => Math.round((v / rated) * 100);
-            const slow = per(fru - fruErr) + per(tol);
-            const err = per(fruErr);
-            const fine = Math.max(0, 100 - slow - err);
-            return (
-              <span className="tk-core__words">
-                of every 100 things users do here, ~{fine} feel fine
-                {slow > 0 && <> · {slow} drag{err > 0 ? "" : " — speed, not errors"}</>}
-                {err > 0 && <> · {err} ruined by errors</>}
-              </span>
-            );
-          })()}
           <span className="tk-core__nm">{p.name}</span>
           {/* What Davis detected, beside what we measured. Silence is stated
               too — "no problems detected" is a finding, and leaving the line
@@ -1273,9 +1283,9 @@ error series, read at the same width the window is drawn in.`}>
                 ? `${((p.reqFail / p.requests) * 100).toFixed(1)}%` : "—"}
               l="calls failed" tone={p.reqFail > 0 ? "bad" : undefined} />
           </div>
-          <div className="tk-note">load p50 {fmtMs(p.loadP50)}</div>
+          <div className="tk-note">{fmtMs(p.loadP50)} load <em>(p50)</em></div>
           {p.domNames.slice(0, 2).map((n) => (
-            <div key={n} className="tk-note" title={p.domNames.join("\n")}>{n}</div>
+            <div key={n.full} className="tk-note" title={n.full}>{n.short}</div>
           ))}
 
         </Module>
@@ -1300,13 +1310,21 @@ error series, read at the same width the window is drawn in.`}>
         </Module>
       </div>
 
-      <div className="cc-motion" aria-hidden="true">
-        every motion is a measurement · ring = apdex ·
-        wave = error rate · breathing pace = health · icon knock = a failing signal
-        on that box · pulsing forecast = rising · bright bar = the interval still
-        accruing · click a box for its breakdown
-        <br />{VERDICT_LEGEND}
-      </div>
+      {/* THE LEGEND MOVES OFF THE CANVAS. Two dense lines explaining the card
+          language sat under every screen, and the reader reads them once. It
+          is not DELETED — the thresholds it carries are the app's own rule and
+          stating the rule is a principle here — it becomes the key you can
+          open, closed by default. */}
+      <details className="cc-motion">
+        <summary>what the motion and the colours mean</summary>
+        <span>
+          every motion is a measurement · ring and breathing pace = apdex ·
+          wave = error rate · icon knock = a failing signal on that box ·
+          pulsing forecast = rising · bright bar = the interval still
+          accruing · click a box for its breakdown
+          <br />{VERDICT_LEGEND}
+        </span>
+      </details>
     </div>
   );
 }
