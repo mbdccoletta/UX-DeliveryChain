@@ -1129,19 +1129,26 @@ function CleanCard(p: CardProps) {
                 should have to say both out loud. */}
             <Stat v={fmtApdex(p.apdex)} l="apdex"
               tone={p.apdex === null ? undefined : apdexTone(p.apdex)}
-              title={p.apdex === null ? p.apdexNote : undefined} />
+              title={p.apdex === null ? p.apdexNote
+                : `${apdexBand(p.apdex)} · ${APDEX_LABEL}`} />
           </div>
 
+          {/* THE SCALE IS NOT A HEADLINE. This footnote repeated the band word
+              already printed as the biggest thing on the screen, added the
+              threshold, and did it in a column too narrow to hold it — so the
+              reader met "Excellent · T = 3s · …", a sentence cut before it
+              said anything. The whole of it, uncut, is the score's tooltip;
+              the CONFLICT between a good score and hurt users still earns a
+              line on the card, because that one is a finding. */}
           {p.apdex !== null && (() => {
             const hit = p.clean === null ? null : 1 - p.clean;
             const conflicted = p.apdex >= 0.85 && hit !== null && hit >= HIT_WARN;
+            if (!conflicted) return null;
             return (
               <div className="tk-apdex">
-                {apdexBand(p.apdex)} · {APDEX_LABEL}
-                {conflicted && (
-                  <><br />errored views frustrate their own actions (Dynatrace&apos;s rule);
-                    errors outside any rated action still cost no time</>
-                )}
+                fast, and still hurting people — errored views frustrate their own
+                actions (Dynatrace&apos;s rule); errors outside any rated action
+                still cost no time
               </div>
             );
           })()}
