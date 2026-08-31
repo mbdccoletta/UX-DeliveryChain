@@ -696,8 +696,28 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    Rows now take their natural height and the leftover space stays at the
    bottom, invisible, instead of being distributed as padding nobody asked
    for. The column cap keeps cards from gaining absurd widths on ultrawide. */
+/* NUMBERS ONLY. Narrative blocks used to live in here and span every column;
+   a spanning child leaves no EMPTY track for auto-fit to collapse, so four
+   tiles on a wide screen filled four of five tracks and the fifth stood open.
+   They moved to .bc__band below, and this grid packs and stretches cleanly. */
 .bc__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px; align-content: start; grid-auto-rows: min-content; }
+  gap: 10px; align-content: stretch;
+  /* ONLY THIS COLUMN STRETCHES. The row keeps align-items:start so the hero is
+     never pulled taller than what it has to say (the void that started this),
+     while the tiles fill whatever height the hero sets — so the two columns
+     end level and the band under the tiles closes. Whichever is taller wins;
+     neither is ever padded with emptiness. */
+  align-self: stretch;
+  /* grow to fill the row, never shrink below the content: the tiles used to
+     stop at their own height and leave a band under them wherever the hero
+     beside them was taller — the second hole the reader circled */
+  grid-auto-rows: minmax(min-content, 1fr); }
+/* the prose under the numbers — full width, its own rhythm */
+.bc__band { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+/* the two columns of a front are independent heights, so the shorter one ends
+   where its content ends — but the ROW keeps them tied at the top and the
+   band below runs the full width, which is what makes the block read as one */
+.bc__side { display: flex; flex-direction: column; min-width: 0; }
 /* The 3-column cap at 1500px was mine and it manufactured holes: four brand
    cards became 3+1 with two empty slots. The max-width above already stops
    ultrawide bloat, so auto-fit is free to pack the row. */

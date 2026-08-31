@@ -948,6 +948,15 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="flow"
               caption="came, saw one screen, left" />
+          </div>
+          {/* THE NARRATIVE BLOCKS LEAVE THE NUMBERS GRID.
+              They span every column, and a spanning child means auto-fit sees
+              no EMPTY track to collapse — so on a wide screen the four stat
+              tiles filled four of five tracks and the fifth stood open, which
+              is the hole the reader circled. Out here they are a band of their
+              own: the tiles above pack and stretch evenly, and the prose below
+              gets the full width it was already taking. */}
+          <div className="bc__band">
             {entries && (
               <div className="bc__entry">
                 <span className="bc__entry-l">where they come in decides how far they go</span>
