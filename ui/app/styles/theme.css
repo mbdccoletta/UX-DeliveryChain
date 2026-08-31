@@ -851,11 +851,20 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    gets the room it was never going to have inside a 340px hero */
 .bc__fun-l { font: 500 11px var(--mono); color: var(--ink-2);
   overflow-wrap: anywhere; line-height: 1.35; }
-.bc__fun-t { height: 13px; border-radius: 3px;
+.bc__fun-t { height: 13px; border-radius: 3px; display: flex; overflow: hidden;
   background: color-mix(in srgb, var(--ink-hi) 5%, transparent); }
-.bc__fun-b { display: block; height: 100%; border-radius: 3px;
-  background: color-mix(in srgb, var(--ink-hi) 30%, transparent); }
-.bc__fun-b--goal { background: color-mix(in srgb, var(--good) 80%, transparent); }
+/* WHO CONTINUED — the accent, because carrying on is the flow itself */
+.bc__fun-b { display: block; height: 100%; flex: none;
+  border-radius: 3px 0 0 3px;
+  background: color-mix(in srgb, var(--accent) 62%, var(--panel-2)); }
+/* WHO LEFT AT THIS STEP — sitting where they stopped, so the eye lands on
+   the loss instead of hunting for it in the gap between rows */
+.bc__fun-x { display: block; height: 100%; flex: none; border-radius: 0 3px 3px 0;
+  background: color-mix(in srgb, var(--warn) 55%, var(--panel-2)); }
+.bc__fun-x--worst { background: color-mix(in srgb, var(--bad) 65%, var(--panel-2)); }
+/* the goal reached: the one bar that is entirely good news */
+.bc__fun-b--goal { border-radius: 3px;
+  background: color-mix(in srgb, var(--good) 78%, var(--panel-2)); }
 .bc__fun-r b.num { font: 700 12px var(--mono); color: var(--ink-hi);
   font-variant-numeric: tabular-nums; }
 .bc__fun-r em.num { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
