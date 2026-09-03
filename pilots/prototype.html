@@ -744,7 +744,7 @@
       <span class="brand__mark" aria-hidden="true">⌖</span>
       <h1>Torre de <em>Controle</em></h1>
     </div>
-    <span class="top__meta">experiência digital · 4 aplicações · 2.352 sessões/2h · tenant bwm98081 · dados reais</span>
+    <span class="top__meta">experiência digital · 4 aplicações · 2.352 sessões/2h · tenant real · dados reais</span>
     <div class="top__spacer"></div>
     <nav class="tabs" aria-label="Visões" id="nav-tabs">
       <button class="tab tab--on" data-v="arch">1 · Fluxo</button>
@@ -756,7 +756,7 @@
   </header>
 
   <p class="disclaimer">
-    <b>Protótipo com dados reais</b> do tenant bwm98081, consultados via DQL/MCP em 23/07/2026 (janela de 2h):
+    <b>Protótipo com dados reais</b> de um tenant real, consultados via DQL/MCP em 23/07/2026 (janela de 2h):
     aplicações, sessões, views, erros e latências são medidos. Campos marcados como <b>estimados</b>
     (R$ em risco, cadeia de backend, fricção) são ilustrativos até a correlação via spans/Smartscape no app final.
   </p>
@@ -1094,7 +1094,7 @@
     p3: { name: "P3 · Observação",  color: "var(--sev-p3)", alarm: false },
     p4: { name: "P4 · Estável",     color: "var(--sev-p4)", alarm: false },
   };
-  /* ── DADOS REAIS — DQL via MCP · tenant bwm98081 · 23/07/2026 · janela 2h ──
+  /* ── DADOS REAIS — DQL via MCP · tenant real · 23/07/2026 · janela 2h ──
      fetch user.events | summarize sessions, views, errors, p50(view) by dt.rum.application.id
      XScore: 55% performance (p50 de view por etapa, ponderado por sessões)
            + 45% confiabilidade (densidade de erros por view — no demo, ~100%
@@ -1945,7 +1945,7 @@
 
   /* ═══════════ arquitetura — mapa macro com fluxo de partículas ═══════════ */
   const ARCH_HEALTH = { good: "--trace-good", warn: "--trace-warn", bad: "--trace-bad", info: "--trace-info" };
-  /* ── Nós e relações REAIS do Smartscape (tenant bwm98081, consultados via MCP)
+  /* ── Nós e relações REAIS do Smartscape (tenant real, consultado via MCP)
         smartscapeNodes "FRONTEND" / "SERVICE"  +  smartscapeEdges "calls"
         namespace astroshop · cluster aeric-walls-aks ── */
   const ARCH_NODES = [

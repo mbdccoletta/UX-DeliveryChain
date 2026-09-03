@@ -40,7 +40,7 @@ export function useCloudScope(
   /** AWS_LAMBDA_FUNCTION placement ids — a lambda-backed service produces no
    *  HOST, and the Provider column born only from hosts never existed for
    *  it. The function node itself carries provider, region and account
-   *  (measured on guu84124), so serverless earns the column too. */
+   *  (measured on the reference tenant), so serverless earns the column too. */
   lambdaIds: string[] = [],
   active = true,
 ): CloudPlacement[] | null {

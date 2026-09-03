@@ -165,7 +165,7 @@ export function App() {
 
   /* THE PLATFORM'S OWN CLASSIFICATION FIRST. This used to infer the kind
    * from a MOBILE_APPLICATION- entity prefix, and defaulted to "Web" when the
-   * entity was absent — so on fxz0998d, where dt.rum.application.entity comes
+   * entity was absent — so on a Smartscape-only tenant, where dt.rum.application.entity comes
    * back null, a native Android app was listed under Web (the reader caught
    * it). Smartscape's FRONTEND node states frontend.type as a fact; the
    * prefix stays as the fallback for apps that have no such node. */

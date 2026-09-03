@@ -11,7 +11,7 @@
 // before the query returns, so the two models never disagree on screen. What
 // arrives is what would otherwise be missing.
 //
-// Measured on guu84124 / easyTravel mainframe: seven services from Smartscape,
+// Measured on the reference tenant / easyTravel mainframe: seven services from Smartscape,
 // one — MF easyTravelBusiness — from here, called by three of them.
 import { useEffect, useState } from "react";
 import { qServicesGen2Calls, runDql } from "../utils/dql";

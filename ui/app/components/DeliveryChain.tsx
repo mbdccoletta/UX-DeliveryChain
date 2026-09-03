@@ -239,7 +239,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    *
    * Profiles are a top-20 over the whole environment — grouped by application
    * and resolution and pixel ratio and orientation, twenty rows is a handful
-   * of the busiest applications. Measured on guu84124: 248 profile rows across
+   * of the busiest applications. Measured on the reference tenant: 248 profile rows across
    * 14 applications, the top twenty covering seven of them. easyTravel
    * mainframe has 431 sessions and 26 profile rows, none of which survive the
    * cut, so this layer drew "No coverage" while the Sessions app listed those
@@ -375,12 +375,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * host-based deployment maps as completely as a Kubernetes one.
    */
   /* A serverless function is a PLACEMENT, not a layer of its own: measured on
-   * guu84124, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
+   * the reference tenant, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
    * the shape of `runs_on HOST`. So a lambda-backed service maps with no new
    * query and no new column — the runtime card simply says "lambda" where
    * another says "host".
    *
-   * Listed even though bwm98081 has none of those edges today, because the
+   * Listed even though the dev tenant has none of those edges today, because the
    * list is read against what the placement query returned: a type absent from
    * the environment costs nothing, while a type missing from this list is a
    * service silently drawn as running on nothing. */

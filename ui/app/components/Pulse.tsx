@@ -251,7 +251,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     /* THE MEASURE LEADS, the subject follows — every other line on these
        cards reads "2k sessions", "246.3k web requests", and only these read
        backwards. The host is trimmed to the part that identifies it
-       (astroshop.playground-dev.demoability.dynatracelabs.com is a wall in a
+       (checkout.playground-dev.internal.example.com is a wall in a
        160px column); the whole name rides the tooltip. */
     .map(([d, n]) => ({ short: `${fmtK(n)} ${d.split(".").slice(0, 2).join(".")}`,
       full: `${d} · ${fmtK(n)} requests` }));
@@ -1167,7 +1167,7 @@ function CleanCard(p: CardProps) {
             <em className="tk-block__sparkv">{p.errorsPerMin}/min<br />error rate</em></>}>
           <div className="tk-row2">
             {/* A mobile application's card leads with its FATAL failures.
-                Measured on guu84124: Astroshop Android had 289 crashes and
+                Measured on the reference tenant: Astroshop Android had 289 crashes and
                 247 ANRs inside its error count — a crash ends the session
                 where an ordinary error merely dents it, and burying both in
                 "errors" hid the number that decides whether anyone ships a

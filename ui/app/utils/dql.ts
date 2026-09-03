@@ -1,4 +1,4 @@
-// Data layer — every query here was validated against tenant bwm98081
+// Data layer — every query here was validated against a live tenant
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import { isScanLimit, noteScan, noteScanStart } from "./cost";
@@ -197,7 +197,7 @@ export const qAppNames = () => `
 smartscapeNodes "FRONTEND"
 // frontend.type ("web" | "mobile") is the platform's OWN classification —
 // the picker used to infer it from a MOBILE_APPLICATION- id prefix and, when
-// dt.rum.application.entity came back null (measured on fxz0998d), filed a
+// dt.rum.application.entity came back null (measured on a Smartscape-only tenant), filed a
 // native Android app under "Web".
 | fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
     kind = frontend.type
@@ -213,7 +213,7 @@ smartscapeNodes "FRONTEND"
  * the reader's drilldown came back "No results found" with every chip applied.
  * Fixed 24h window on purpose — the mapping is a property of the app, not of
  * the timeframe, and user.sessions is a small store (134k rows/24h measured
- * on guu84124, 2026-08-25).
+ * on the reference tenant, 2026-08-25).
  */
 export const qFrontendNames = () => `
 fetch user.sessions, from: now()-24h
@@ -410,7 +410,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * Every session CHARACTERISTIC the platform records, for the infographic.
  *
  * "All available" was measured, not assumed: the field inventory of
- * user.events was read off both a web and a mobile application on guu84124
+ * user.events was read off both a web and a mobile application on the reference tenant
  * and reduced to the categorical, session-describing fields — who the user
  * is, on what, from where. The rest of the schema (performance.*,
  * web_vitals.*, interaction.*, error.*) is measurement, not
@@ -928,7 +928,7 @@ export function normalizeView(name: string): string {
 /**
  * The view's display name, wherever the agent put it.
  *
- * Measured on guu84124, Astroshop Android, 2h: `view.detected_name` is null
+ * Measured on the reference tenant, Astroshop Android, 2h: `view.detected_name` is null
  * on ALL 332 mobile navigation events — the real names ("Home", "Product
  * detail", "Cart", "Checkout") live in `view.name` — while the few mobile
  * rows that DO carry detected_name carry the Activity class
@@ -1757,7 +1757,7 @@ fetch user.sessions, from: now()-24h
  *
  * A lambda-backed service produces no HOST, so the Cloud layer — born only
  * from hosts — never existed for it, and the chain ended at Run while the
- * platform knew better. Measured on guu84124: the AWS_LAMBDA_FUNCTION node
+ * platform knew better. Measured on the reference tenant: the AWS_LAMBDA_FUNCTION node
  * itself carries cloud.provider "aws", aws.region "us-east-1" and
  * aws.account.id — the whole Provider card, as node properties, no edge
  * needed. A region is not an availability zone, and the card says region.
@@ -1818,7 +1818,7 @@ fetch spans, from: now()-10m, to: now()
  * What the CLASSIC topology says these services call — used only for what
  * Smartscape does not know.
  *
- * Measured on guu84124, on the easyTravel mainframe application, and this is
+ * Measured on the reference tenant, on the easyTravel mainframe application, and this is
  * the whole reason it exists: Smartscape Gen3 draws seven services and six
  * `calls` edges between them, and stops. The classic entity model, over the
  * SAME entity ids, adds one more — `MF easyTravelBusiness`, a
@@ -1854,7 +1854,7 @@ fetch dt.entity.service, from: now()-2h
 /* An EXTERNAL WEB service is the same code seen from its caller.
  *
  * The classic model describes one running process at more than one
- * granularity, and the walk finds every level. Measured on guu84124:
+ * granularity, and the walk finds every level. Measured on the reference tenant:
  *
  *   MF JourneyService                             WEB_SERVICE   external=false
  *   MF /services/JourneyService/ on port 8091     WEB_SERVICE   external=TRUE
@@ -1889,7 +1889,7 @@ fetch dt.entity.service, from: now()-2h
  * A service's vitals from the METRIC STORE, for services that have no spans.
  *
  * The drawer reads spans, which is right for anything OneAgent traces into
- * Grail — and wrong for everything else. Measured on guu84124: `MF
+ * Grail — and wrong for everything else. Measured on the reference tenant: `MF
  * easyTravelBusiness` has zero spans, so the tiles printed p50 0ms, p90 0ms,
  * throughput 0 for a service the metric store shows serving 17, 280 and 60
  * requests in consecutive minutes at 4.7ms, 0.3ms and 3.9ms. A confident zero
@@ -1919,7 +1919,7 @@ timeseries { rt = avg(dt.service.request.response_time),
  *
  * The selector is built from `user.events`, which is right for anything
  * sending RUM to Grail and silently wrong for everything else. Measured on
- * guu84124: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
+ * the reference tenant: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
  * so it could never be listed — while the platform's own service flow drew
  * its whole backend, mainframe included. `easyTravel Mobile` has 375 events
  * in 24h and simply falls out of a two-hour window.
@@ -1968,7 +1968,7 @@ smartscapeEdges "calls"
  * It used to read the device-profile rows, and those are a TOP-20 over the
  * whole environment: grouped by application AND resolution AND pixel ratio AND
  * orientation, twenty rows is a handful of the busiest applications. Measured
- * on guu84124 — 248 profile rows across 14 applications, and the top twenty
+ * on the reference tenant — 248 profile rows across 14 applications, and the top twenty
  * covered seven of them. easyTravel mainframe has 26 profile rows and 431
  * sessions, none of which reach the cut, so its Consume layer drew "No
  * coverage" while the Sessions app listed 281 of them with their browsers.

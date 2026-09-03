@@ -1,5 +1,5 @@
 {
-  "environmentUrl": "https://bwm98081.apps.dynatrace.com",
+  "environmentUrl": "https://your-environment.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
     "version": "0.3.2",
