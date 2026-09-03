@@ -388,7 +388,7 @@ svg { shape-rendering: geometricPrecision; }
 /* a dimension with one value for everyone: stated once, no bar.
    A flex row whose children cannot shrink overflows its grid cell and lands
    on the neighbour — measured with a long page domain
-   ("astroshop.live.demoability.dynatracelabs.com") printing over the next
+   ("checkout.live.internal.example.com") printing over the next
    block's label. min-width:0 lets the value wrap inside its own card. */
 .rinfo__blk--flat { flex-direction: row; align-items: baseline; gap: 10px;
   padding: 9px 14px; min-width: 0; flex-wrap: wrap; }
@@ -2885,7 +2885,7 @@ a.svcf__row { text-decoration: none; color: inherit; }
 .ctl [class*="strato-select"] { min-width: 15rem; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   STRATO ALIGNMENT LAYER — extracted from developer.dynatracelabs.com docs.
+   STRATO ALIGNMENT LAYER — extracted from the Strato design-system docs.
    One place, appended last so it wins the cascade, deletable as one block.
 
    The authoritative values (design/design-tokens):
