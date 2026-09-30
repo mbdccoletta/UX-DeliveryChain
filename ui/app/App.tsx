@@ -15,6 +15,7 @@ import { tfFrom } from "./utils/dql";
 import { FlowSankey } from "./components/FlowSankey";
 import { DeliveryChain } from "./components/DeliveryChain";
 import { Pulse } from "./components/Pulse";
+import { NoRumState } from "./components/NoRumState";
 import { ReportView } from "./components/ReportView";
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
 import { useUrlState } from "./hooks/useUrlState";
@@ -340,6 +341,15 @@ export function App() {
 
       {d.loading ? (
         <div className="loading"><i />querying Grail and Smartscape…</div>
+      ) : !d.apps.length ? (
+        /* NO APPLICATION, NO BLANK PAGE. Every view below is gated on a
+           selected application, so an environment without one used to render
+           nothing at all and explain nothing — which reads as a broken app
+           rather than as a fact about the data. This measures what the
+           environment does send and says which half of the product that
+           supports. Chiefly for OpenTelemetry-first customers, whose telemetry
+           is backend-shaped and carries no RUM application. */
+        <Boundary label="No RUM application"><NoRumState /></Boundary>
       ) : (
         <>
           {tab === "home" && current && (

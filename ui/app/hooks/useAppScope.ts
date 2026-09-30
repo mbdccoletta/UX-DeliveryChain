@@ -13,7 +13,8 @@
 // Fetched lazily and memoised: most sessions never switch application, and a
 // scope that has been resolved once does not change while the user looks at it.
 import { useEffect, useState } from "react";
-import { qAppSeedGen2, qAppServices, qAppServicesTopo, qAppServicesTopoMobile,
+import { qAppSeedGen2, qAppServices, qAppTraceIds,
+  qAppServicesTopo, qAppServicesTopoMobile,
   qServiceRuntime, runDql } from "../utils/dql";
 
 export interface AppScope {
@@ -76,8 +77,18 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         // is lost: traces catch what topology has not declared; topology
         // catches what a 300-trace sample missed and everything classic RUM
         // (PurePath ids, absent from Grail spans) cannot join at all.
-        const rows = await runDql<{ svc: string; traces: number; name?: string }>(
-          qAppServices(rumAppId), 60);
+        /* The trace ids first, then the spans filtered by them — see
+         * qAppServices. No ids means this application sent no traceable RUM in
+         * the window, which is an empty answer, not a failed one. */
+        const idRows = await runDql<Record<string, unknown>>(
+          qAppTraceIds(rumAppId), 300);
+        const traceIds = idRows
+          .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
+          .filter(Boolean);
+        const rows = traceIds.length
+          ? await runDql<{ svc: string; traces: number; name?: string }>(
+            qAppServices(traceIds), 60)
+          : [];
         const topoRows = await (async () => {
           try {
             if (/^[0-9a-f]{16}$/.test(rumAppId))

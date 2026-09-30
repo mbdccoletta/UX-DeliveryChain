@@ -301,8 +301,15 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // 900-session journey into 900 rows of one, and the biggest journeys fall off
 // the end.${COLLAPSE_IDS}
 | sort start_time asc
-| summarize path = collectArray(v), by: { appId = dt.rum.application.id, session = dt.rum.session.id }
-| summarize sessions = count(), by: { appId, journey = path }
+// PLATFORM RIDES ALONG. One RUM application id can carry two platforms —
+// measured on a customer tenant, a single banking application reported both
+// iOS view controllers and Android activities — and they do not share a
+// journey shape, so they cannot share one completion depth. dt.rum.agent.type
+// is the platform's own answer ("javascript" | "ios" | "android"); a session
+// belongs to exactly one, so carrying it splits nothing that belonged together.
+| summarize path = collectArray(v), plat = takeAny(dt.rum.agent.type),
+    by: { appId = dt.rum.application.id, session = dt.rum.session.id }
+| summarize sessions = count(), by: { appId, plat, journey = path }
 // 1000, not 200: the budget is shared by every application, and at 200 the
 // audit measured 866 vmware + 28 Astroshop sessions with full journeys
 // falling off the end — then being counted as "No page telemetry"
@@ -1300,20 +1307,55 @@ fetch dt.davis.problems, from: now()-24h
  *
  * Ten-minute window, fixed, and 300 traces sampled: membership in a topology is
  * not a fast-moving fact. Measured, 10m returns the same 12 services as 30m for
- * 0.36 GB against 1.06 GB — three times the spend for an identical answer. The
- * span side dominates either way, since a join reads the whole window whatever
- * the other side is filtered to.
+ * 0.36 GB against 1.06 GB — three times the spend for an identical answer.
+ *
+ * TWO ROUND TRIPS, NOT A JOIN. This used to carry the span fetch as a join
+ * subquery, and the subquery could only be filtered by `isNotNull(service)` —
+ * the left side's trace ids are not visible inside it, so it read the whole
+ * window. On a large estate that hits the platform's own ceiling: measured on a
+ * customer tenant, HTTP 400 `JOIN_RIGHT_TABLE_SIZE`, "the join command's
+ * subquery read too much data", and the chain's service layer came back empty
+ * with no visible reason. Asking for the ids first and filtering the spans BY
+ * them removes the subquery entirely, so no join limit applies and the span
+ * side is selective instead of exhaustive.
  */
-export const qAppServices = (rumAppId: string) => `
+/**
+ * WHAT THIS TENANT ACTUALLY SENDS, asked only when the application picker came
+ * back empty.
+ *
+ * Every journey this product draws is mined from `user.events`, which is
+ * Dynatrace RUM: 34 of the app's queries read it, and the picker itself
+ * enumerates FRONTEND nodes by `dt.rum.instrumentation.id`. A customer whose
+ * primary source is OpenTelemetry has spans and services but no such
+ * application, and the app used to answer that with a blank page.
+ *
+ * OTel defines `session.id` in its semantic conventions, so a journey mine over
+ * spans is conceivable — but only if the CLIENT is instrumented. Measured on a
+ * live estate: 147,200 OTel spans in two hours, 9 of them carrying a session
+ * id. So this counts rather than assumes, and the page reports what it found.
+ */
+export const qTelemetryShape = () => `
+fetch spans, from: now()-2h
+| summarize spans = count(),
+    otel = countIf(telemetry.sdk.name == "opentelemetry"),
+    sessionSpans = countIf(isNotNull(session.id)),
+    services = countDistinct(dt.entity.service)`;
+
+export const qAppTraceIds = (rumAppId: string) => `
 fetch user.events, from: now()-10m
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}" and isNotNull(trace.id)
 | summarize n = count(), by: { trace.id }
+| sort n desc
 | limit 300
-| join [ fetch spans, from: now()-10m | filter isNotNull(dt.entity.service)
-         | summarize m = count(), by: { trace.id, svc = dt.entity.service } ],
-    on: { trace.id }, fields: { svc }
-| filter isNotNull(svc)
-| summarize traces = countDistinctExact(trace.id), by: { svc }
+| fields trace.id`;
+
+/** The services those traces crossed. Empty id list means no question to ask. */
+export const qAppServices = (traceIds: string[]) => `
+fetch spans, from: now()-10m
+| filter in(trace.id, { ${traceIds.slice(0, 300)
+    .map((i) => `"${String(i).replace(/["\\]/g, "")}"`).join(", ")} })
+| filter isNotNull(dt.entity.service)
+| summarize traces = countDistinctExact(trace.id), by: { svc = dt.entity.service }
 // The name rides along from Smartscape (free): leaf services — the ones that
 // only RECEIVE calls — appear in no call edge, so resolving their names from
 // the calls table was silently dropping them from the chain.

@@ -12,7 +12,7 @@
 // extrapolated to the whole (marked with an approx sign and a bar notice);
 // RATES are untouched — a representative sample carries them as they are.
 import React from "react";
-import type { ChainData } from "../hooks/useChainData";
+import type { ChainData, SeqRow } from "../hooks/useChainData";
 import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
 import { useBizForecast } from "../hooks/useBizForecast";
 import { useBizBreakdown } from "../hooks/useBizBreakdown";
@@ -43,6 +43,97 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
     arrow: cur > prev ? "▲" : "▼" };
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
+
+/**
+ * Fewest journeys a funnel may be drawn from. Below it the rungs, the
+ * percentages and the "biggest single loss" all describe a handful of sessions
+ * and read as findings; the page says so instead of drawing them.
+ */
+const FUNNEL_MIN = 30;
+
+/**
+ * Most screen names a merged rung will spell out before it counts the rest.
+ * A rung is a PLACE — fifteen names strung together with arrows is not a place,
+ * and that is exactly what an unbounded join produced on a thin application.
+ */
+const RUNG_VIEWS_MAX = 3;
+
+/** Most steps a spelled-out route shows before it counts the remainder. */
+const PATH_MAX = 24;
+
+/**
+ * Folds repeated navigation cycles into one pass carrying its repeat count.
+ *
+ * mergeJourneys already collapses ADJACENT duplicates — a view_summary closing
+ * the navigation that opened it — but that only catches A A. Real apps loop:
+ * measured on a customer's banking app, one route ran 169 steps of
+ * `SecurityKey → Pin → SecurityKey → Message → SecurityKey …`, an A B A C
+ * oscillation no adjacent rule can see. Spelled out it is unreadable, and
+ * unreadable evidence is not evidence.
+ *
+ * So the largest repeating block wins at each position, the block is emitted
+ * once, and the count rides on its last step. The journey's SHAPE survives —
+ * "they went round this seven times" is the finding, not a wall of arrows.
+ */
+export function compressCycles(
+  path: string[], maxBlock = 6,
+): Array<{ v: string; rep?: number }> {
+  const out: Array<{ v: string; rep?: number }> = [];
+  let i = 0;
+  while (i < path.length) {
+    let best = { len: 0, reps: 1 };
+    for (let len = 1; len <= maxBlock && i + len * 2 <= path.length; len++) {
+      let reps = 1;
+      while (i + len * (reps + 1) <= path.length
+        && path.slice(i, i + len)
+          .every((v, k) => v === path[i + len * reps + k])) reps++;
+      // the block that swallows the most steps wins, not the shortest one
+      if (reps > 1 && len * reps > best.len * best.reps) best = { len, reps };
+    }
+    if (best.reps > 1) {
+      for (let k = 0; k < best.len; k++) {
+        out.push(k === best.len - 1
+          ? { v: path[i + k], rep: best.reps } : { v: path[i + k] });
+      }
+      i += best.len * best.reps;
+    } else {
+      out.push({ v: path[i] });
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Is this route a WALK or a CHURN?
+ *
+ * Cycle folding assumes a repeating block, and real navigation rarely obliges.
+ * Measured on the captured 169-step banking route: after adjacent-duplicate
+ * collapse it is 112 steps — and folding exact blocks took it only to 108,
+ * because the pattern is A B A C A B A D, never the same block twice running.
+ *
+ * But those 112 steps visit ELEVEN screens, and one of them 27 times. That is
+ * the finding, and no arrow chain can carry it: the honest reading is not
+ * "they walked this path" but "they went round these eleven screens, returning
+ * to the security key home twenty-seven times". So a route whose steps dwarf
+ * its places is described instead of drawn.
+ */
+function routeShape(path: string[]) {
+  const counts = new Map<string, number>();
+  for (const v of path) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const revisits = [...counts.entries()].filter(([, n]) => n > 1)
+    .sort((a, b) => b[1] - a[1]);
+  return { steps: path.length, distinct: counts.size, revisits,
+    // three passes per screen on a route too long to spell out
+    churn: counts.size > 0 && path.length >= counts.size * 3
+      && path.length > PATH_MAX };
+}
+
+/** The platform's own word, said the way a reader says it. */
+const PLAT_WORD: Record<string, string> = {
+  javascript: "web", ios: "iOS", android: "Android", unknown: "unrecorded",
+};
+const platWord = (p: string) => PLAT_WORD[p] ?? p;
 
 export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   routePicks, onClearRoutes, onGo }: {
@@ -133,7 +224,26 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    * board and the diagram cannot disagree.
    */
   const completeness = React.useMemo(() => {
-    const mine = data.sequences.filter((q) => (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+    const all = data.sequences.filter((q) => (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+    /* ONE APPLICATION ID, TWO PLATFORMS. Measured on a customer tenant: a
+     * single banking application reported iOS view controllers AND Android
+     * activities under one RUM id. They do not share a journey shape, so a
+     * completion depth computed across both describes neither. The funnel is
+     * therefore built for the platform that carries the traffic, and the page
+     * says which — a blended depth would be a number with no referent. */
+    const byPlat = new Map<string, SeqRow[]>();
+    for (const q of all) {
+      const k = q.plat ?? "unknown";
+      (byPlat.get(k) ?? byPlat.set(k, []).get(k)!).push(q);
+    }
+    const sized = [...byPlat.entries()]
+      .map(([plat, rows]) => ({ plat, rows,
+        n: rows.reduce((a, q) => a + q.sessions, 0) }))
+      .sort((a, b) => b.n - a.n);
+    const lead = sized[0];
+    const mine = sized.length > 1 && lead ? lead.rows : all;
+    const platform = sized.length > 1 && lead ? lead.plat : null;
+    const otherPlats = sized.length > 1 ? sized.slice(1) : [];
     const total = mine.reduce((a, q) => a + q.sessions, 0);
     /* THE SAME FUNCTION the diagram draws with (FlowSankey.deepestOf) — the
      * rule lived twice, and the flow's copy was the naive maximum, so one
@@ -143,7 +253,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       mine.filter((q) => q.journey.length >= d).reduce((a, q) => a + q.sessions, 0);
     const deepest = deepestOf(mine);
     const full = deepest > 1 ? reach(deepest) : 0;
-    return { deepest, total, full, share: total ? full / total : 0 };
+    return { deepest, total, full, share: total ? full / total : 0,
+      platform, otherPlats: otherPlats.map((o) => ({ plat: o.plat, n: o.n })) };
   }, [data.sequences, scopeApp]);
 
   /**
@@ -341,10 +452,18 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    */
   const ladder = React.useMemo(() => {
     const mine = data.sequences.filter((q) =>
-      (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
+      (!scopeApp || q.appId === scopeApp) && q.journey.length > 0
+      && (!completeness.platform || q.plat === completeness.platform));
     const total = mine.reduce((a, q) => a + q.sessions, 0);
     const deep = completeness.deepest;
     if (!total || deep < 2) return null;
+    /* A FUNNEL NEEDS A POPULATION. Measured on a customer tenant: the selected
+     * application had FOUR journeys in the window, and the funnel still drew
+     * rungs, printed "25%" and "50%", and named a "biggest single loss" of two
+     * sessions. Percentages over a handful of journeys are noise wearing the
+     * costume of a measurement, and this product says "not measurable" rather
+     * than dressing noise up. The floor is stated on screen, not hidden. */
+    if (total < FUNNEL_MIN) return { thin: true as const, total };
     /* EVERY RUNG NAMES ITS SCREEN. "saw 2 screens" is a position, not a
      * place: it tells a reader nothing they can open, act on, or recognise.
      * The mine already knows WHICH screen the journeys at that depth are on,
@@ -375,7 +494,13 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
      * "↓ 1 leave here" between 861 and 860. Half a percent of arrivals is
      * the floor, and whatever it absorbs is stated on the row rather than
      * quietly dropped. */
-    const IMMATERIAL = Math.max(1, Math.round(total * 0.005));
+    /* Proportional, with NO absolute floor. The floor used to be max(1, …),
+     * which on a 4-journey application made "one journey left here" — a
+     * quarter of everyone — immaterial, and every depth merged into a single
+     * rung whose label was fifteen screen names strung together. Below the
+     * sample floor there is no funnel at all now, and above it half a percent
+     * is a real threshold rather than a rounding artefact. */
+    const IMMATERIAL = Math.round(total * 0.005);
     steps.forEach((s, i) => {
       const prev = rows[rows.length - 1];
       const mergeable = i > 0 && i < steps.length - 1 && prev && rows.length > 1
@@ -416,9 +541,11 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
      * The mine already has them — the busiest few, spelled out, completed
      * ones marked, are the evidence behind every row above. */
     const top = [...mine].sort((x, y) => y.sessions - x.sessions).slice(0, 5)
-      .map((q) => ({ path: q.journey, n: q.sessions,
-        done: q.journey.length >= deep }));
-    return { rows, whereBetween, total, worst, worstLost, where, top };
+      .map((q) => ({ path: compressCycles(q.journey), raw: q.journey.length,
+        shape: routeShape(q.journey),
+        n: q.sessions, done: q.journey.length >= deep }));
+    return { thin: false as const,
+      rows, whereBetween, total, worst, worstLost, where, top };
   }, [data.sequences, scopeApp, completeness.deepest]);
 
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
@@ -481,9 +608,41 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    * to match and stood mostly empty, and the rungs themselves were squeezed
    * into 340px with screen names wrapping mid-path. Out here it gets the full
    * width it needs and the hero goes back to being one number and one line. */
-  const Funnel = () => (!ladder ? null : (
-          
+  /* THE FUNNEL SAYS WHO IT IS ABOUT. Where one application id reports from two
+     platforms, the rungs belong to the one carrying the traffic — and the other
+     is named with its count, so nobody reads this as the whole application. */
+  const FunnelScope = () => {
+    const { platform, otherPlats } = completeness;
+    if (!platform || !otherPlats.length) return null;
+    return (
+      <div className="bc__fun-scope">
+        this funnel is <b>{platWord(platform)}</b> only — this application also
+        reports {otherPlats.map((o, i) => (
+          <React.Fragment key={o.plat}>
+            {i > 0 ? " and " : " "}
+            <b className="num">{fmtCount(o.n)}</b> {platWord(o.plat)} journeys
+          </React.Fragment>
+        ))}, whose screens differ, so they cannot share one completion depth
+      </div>
+    );
+  };
+
+  const Funnel = () => (!ladder ? null : ladder.thin ? (
+    /* Not a funnel: a statement that there is nothing to draw one from. */
+    <div className="bc__fun bc__fun--thin">
+      <FunnelScope />
+      <div className="bc__fun-none">
+        <b className="num">{fmtCount(ladder.total)}</b> journeys in this window —
+        a funnel needs at least <b className="num">{FUNNEL_MIN}</b>.
+        Percentages and a “biggest loss” over this many sessions would be noise
+        with the confidence of a measurement, so they are not drawn. Widen the
+        window, or pick an application with more traffic.
+      </div>
+    </div>
+  ) : (
+
             <div className="bc__fun">
+              <FunnelScope />
               {ladder.rows.map((x, i) => {
                 const share = x.n / ladder.total;
                 const prevRow = i > 0 ? ladder.rows[i - 1] : null;
@@ -495,9 +654,14 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   ? ladder.whereBetween(prevRow.dTo, x.dFrom) : [];
                 /* THE RUNG IS A PLACE, not a count of screens. Where the depth
                    has no dominant screen the count is the honest fallback. */
+                /* and a merged rung names at most RUNG_VIEWS_MAX of them: the
+                   rest is counted, because a label is read, not parsed */
+                const named = x.views.slice(0, RUNG_VIEWS_MAX).join(" → ")
+                  + (x.views.length > RUNG_VIEWS_MAX
+                    ? ` +${x.views.length - RUNG_VIEWS_MAX} more` : "");
                 const label = i === 0 ? "arrived"
                   : last ? (x.views[0] ? `completed at ${x.views[0]}` : "completed")
-                  : x.views.length ? x.views.join(" → ")
+                  : x.views.length ? named
                   : x.dFrom === x.dTo ? `saw ${x.dFrom} screens`
                   : `saw ${x.dFrom}–${x.dTo} screens`;
                 return (
@@ -790,8 +954,20 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               `  A journey counts as complete when it reaches ${completeness.deepest} screens,`
                 + " the depth a tenth of this application's own traffic still reaches",
               "  (journeys are mined per window, so there is no previous window to compare)",
-              ladder ? "  The funnel, rung by rung:" : "",
-              ...(ladder ? ladder.rows.map((x, i) => {
+              completeness.platform
+                ? `  This funnel covers the ${platWord(completeness.platform)} platform only;`
+                  + ` the same application also reports `
+                  + completeness.otherPlats
+                    .map((o) => `${fmtCount(o.n)} ${platWord(o.plat)}`).join(" and ")
+                  + " journeys, which do not share its completion depth"
+                : "",
+              ladder?.thin
+                ? `  NO FUNNEL: ${fmtCount(ladder.total)} journeys is below the`
+                  + ` ${FUNNEL_MIN}-journey floor, so no rungs, percentages or`
+                  + " biggest-loss claim are computed for this window"
+                : "",
+              ladder && !ladder.thin ? "  The funnel, rung by rung:" : "",
+              ...(ladder && !ladder.thin ? ladder.rows.map((x, i) => {
                 const prev = i > 0 ? ladder.rows[i - 1] : null;
                 const lost = prev ? prev.n - x.n : 0;
                 const where = prev && lost > 0 ? ladder.whereBetween(prev.dTo, x.dFrom) : [];
@@ -1020,26 +1196,52 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
 
             {/* the busiest sequences, spelled out — the pages in the order people
             actually walk them, completions marked */}
-            {ladder && ladder.top.length > 0 && (
+            {ladder && !ladder.thin && ladder.top.length > 0 && (
               <div className="bc__seqs bc__seqs--cell">
             <span className="bc__seqs-l">the busiest sequences</span>
-            {ladder.top.map((q) => (
+            {ladder.top.map((q) => {
+              const shown = q.path.slice(0, PATH_MAX);
+              const hidden = q.path.length - shown.length;
+              return (
               <div className={q.done ? "bc__seqs-r bc__seqs-r--done" : "bc__seqs-r"}
-                key={q.path.join("\u0001")}
-                title={`${fmtN(q.n)} journeys walk exactly this sequence${q.done
-                  ? " — and it reaches the completion depth" : ""}`}>
+                key={q.path.map((s) => s.v).join("\u0001")}
+                title={`${fmtN(q.n)} journeys walk exactly this sequence`
+                  + ` — ${fmtN(q.raw)} steps in all, with repeated loops folded`
+                  + ` into the ↻ counts${q.done
+                    ? "; it reaches the completion depth" : ""}`}>
                 <b className="num">{fmtCount(q.n)}</b>
+                {q.shape.churn ? (
+                  /* not a path — a count of places and how often each came back */
+                  <span className="bc__seqs-churn">
+                    <b className="num">{fmtCount(q.shape.steps)}</b> steps across only{" "}
+                    <b className="num">{fmtCount(q.shape.distinct)}</b> screens — back to{" "}
+                    {q.shape.revisits.slice(0, 2).map(([v, n], i) => (
+                      <React.Fragment key={v}>
+                        {i > 0 ? ", " : ""}<span>{v}</span>{" "}
+                        <b className="num">{n}×</b>
+                      </React.Fragment>
+                    ))}
+                  </span>
+                ) : (
                 <span className="bc__seqs-p">
-                  {q.path.map((v, i) => (
+                  {shown.map((s, i) => (
                     <React.Fragment key={i}>
                       {i > 0 && <i aria-hidden="true">→</i>}
-                      <span>{v}</span>
+                      <span>{s.v}</span>
+                      {/* the loop IS the finding — "round this seven times" */}
+                      {s.rep ? <b className="bc__seqs-rep num"
+                        title={`this loop repeats ${s.rep} times`}>↻{s.rep}</b> : null}
                     </React.Fragment>
                   ))}
+                  {hidden > 0 && (
+                    <em className="bc__seqs-more">+{fmtCount(hidden)} more steps</em>
+                  )}
                 </span>
+                )}
                 {q.done && <em>✓ completes</em>}
               </div>
-            ))}
+              );
+            })}
             {onGo && (
               <button className="bc__seqs-go" onClick={() => onGo("flow", scopeApp || undefined)}>
                 every sequence, on the flow →
