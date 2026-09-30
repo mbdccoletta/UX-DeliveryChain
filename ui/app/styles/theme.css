@@ -3193,3 +3193,79 @@ div:has(> header):has(main) > div {
 .geo__who-r--go { cursor: pointer; }
 .geo__who-r--go:hover { border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THIN DATA, TWO PLATFORMS, AND NO APPLICATION AT ALL
+   Three states the product used to answer with either a confident-looking
+   wrong number or a blank page. Each one now says what it knows and what it
+   does not, in the same voice as the measured views.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* WHOSE FUNNEL THIS IS. One RUM application id can carry both an iOS and an
+   Android frontend; the rungs belong to the busier one and this names the
+   other, so the number is never read as the whole application. */
+.bc__fun-scope { font: 400 var(--fs-mini) var(--mono); color: var(--ink-3);
+  line-height: 1.5; padding: 0 0 6px; border-bottom: 1px dashed var(--border);
+  margin-bottom: 8px; }
+.bc__fun-scope b { color: var(--ink-2); font-weight: 600; }
+
+/* BELOW THE SAMPLE FLOOR there are no rungs at all — a statement, not a chart. */
+.bc__fun--thin { padding: 2px 0; }
+.bc__fun-none { font: 400 var(--fs-small) var(--mono); color: var(--ink-2);
+  line-height: 1.6; padding: 12px 14px; border-radius: 6px;
+  background: var(--panel); border-left: 3px solid var(--warn); }
+.bc__fun-none b.num { color: var(--ink-hi); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+
+/* THE LOOP IS THE FINDING. A route that goes round the same three screens
+   seven times says something a hundred arrows cannot. */
+.bc__seqs-rep { flex: none; font: 700 10px var(--mono); color: var(--warn);
+  padding: 0 3px; border-radius: 3px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.bc__seqs-more { flex: none; font: 400 10px var(--mono); font-style: normal;
+  color: var(--ink-3); }
+
+/* NO RUM APPLICATION — the OpenTelemetry-first case. */
+.norum { display: flex; flex-direction: column; gap: 18px; max-width: 62rem; }
+.norum__hd h2 { margin: 0 0 6px; font: 600 var(--fs-head) var(--sans);
+  color: var(--ink-hi); }
+.norum__hd p { margin: 0; font: 400 var(--fs-body) var(--sans); color: var(--ink-2);
+  line-height: 1.6; }
+.norum__probe { font: 400 var(--fs-small) var(--mono); color: var(--ink-3); }
+.norum__probe--bad { color: var(--bad); }
+.norum__facts { display: flex; flex-wrap: wrap; gap: 10px; }
+.norum__f { flex: 1 1 10rem; display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border-radius: 6px; background: var(--panel);
+  border-left: 3px solid var(--accent); }
+.norum__f--bad { border-left-color: var(--bad); }
+.norum__f b.num { font: 700 26px var(--mono); line-height: 1; color: var(--ink-hi);
+  font-variant-numeric: tabular-nums; }
+.norum__f span { font: 600 var(--fs-micro) var(--mono); text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink-3); }
+.norum__verdict p { margin: 0; font: 400 var(--fs-body) var(--sans);
+  color: var(--ink-2); line-height: 1.65; }
+.norum__verdict b { color: var(--ink-hi); }
+.norum__split { display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); align-items: start; }
+.norum__col { padding: 12px 14px; border-radius: 6px; background: var(--panel);
+  border-left: 3px solid var(--border); }
+.norum__col--no { border-left-color: var(--bad); }
+.norum__col--ok { border-left-color: var(--good); }
+.norum__col-l { display: block; font: 600 var(--fs-micro) var(--mono);
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3);
+  margin-bottom: 8px; }
+.norum__col ul { margin: 0; padding-left: 1.1rem; display: flex;
+  flex-direction: column; gap: 4px; }
+.norum__col li { font: 400 var(--fs-small) var(--sans); color: var(--ink-2);
+  line-height: 1.5; }
+.norum__col li b { color: var(--ink-hi); font-weight: 600; }
+.norum__col p { margin: 10px 0 0; font: 400 var(--fs-small) var(--sans);
+  color: var(--ink-3); line-height: 1.6; }
+
+/* A ROUTE THAT CHURNS is described, not drawn: 112 steps over 11 screens is a
+   sentence, and a hundred arrows saying the same thing is a wall. */
+.bc__seqs-churn { min-width: 0; font: 400 var(--fs-small) var(--mono);
+  color: var(--ink-2); line-height: 1.55; }
+.bc__seqs-churn b.num { color: var(--warn); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.bc__seqs-churn span { font-weight: 500; color: var(--ink-hi); }
