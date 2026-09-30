@@ -1341,8 +1341,15 @@ fetch spans, from: now()-2h
     sessionSpans = countIf(isNotNull(session.id)),
     services = countDistinct(dt.entity.service)`;
 
-export const qAppTraceIds = (rumAppId: string) => `
-fetch user.events, from: now()-10m
+/**
+ * @param since how far back to look. Ten minutes answers a busy application
+ *   for a twelfth of the spend, but an application with a dozen sessions in two
+ *   hours has no trace at all in a ten-minute window — and an empty answer
+ *   there reads as "this application reaches no backend", which is a different
+ *   claim entirely. So the caller escalates rather than concluding.
+ */
+export const qAppTraceIds = (rumAppId: string, since = "now()-10m") => `
+fetch user.events, from: ${since}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}" and isNotNull(trace.id)
 | summarize n = count(), by: { trace.id }
 | sort n desc
@@ -1350,9 +1357,14 @@ fetch user.events, from: now()-10m
 | fields trace.id`;
 
 /** The services those traces crossed. Empty id list means no question to ask. */
-export const qAppServices = (traceIds: string[]) => `
-fetch spans, from: now()-10m
-| filter in(trace.id, { ${traceIds.slice(0, 300)
+export const qAppServices = (traceIds: string[], since = "now()-10m") => `
+fetch spans, from: ${since}
+// TRACE ID IS A uid IN THE SPAN STORE, not a string, and \`in\` compares types:
+// matching it against quoted ids silently returned ZERO rows, which the chain
+// drew as "no trace reaches a service". The platform says so in a warning
+// rather than an error, so the query succeeds and lies. Cast, then compare.
+| fieldsAdd tid = toString(trace.id)
+| filter in(tid, { ${traceIds.slice(0, 300)
     .map((i) => `"${String(i).replace(/["\\]/g, "")}"`).join(", ")} })
 | filter isNotNull(dt.entity.service)
 | summarize traces = countDistinctExact(trace.id), by: { svc = dt.entity.service }
