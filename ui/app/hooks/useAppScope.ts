@@ -80,14 +80,25 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         /* The trace ids first, then the spans filtered by them — see
          * qAppServices. No ids means this application sent no traceable RUM in
          * the window, which is an empty answer, not a failed one. */
-        const idRows = await runDql<Record<string, unknown>>(
-          qAppTraceIds(rumAppId), 300);
-        const traceIds = idRows
-          .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
-          .filter(Boolean);
+        const idsIn = async (since: string) =>
+          (await runDql<Record<string, unknown>>(qAppTraceIds(rumAppId, since), 300))
+            .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
+            .filter(Boolean);
+        /* Ten minutes first, because it answers a busy application for a
+         * twelfth of the scan. A QUIET one has no trace in ten minutes at all —
+         * measured on a customer tenant, an application with twelve sessions in
+         * two hours — and reporting "no trace reaches a service" there would
+         * state a topology fact on the strength of an empty sample. The wider
+         * window is only paid for when the cheap one comes back with nothing. */
+        let since = "now()-10m";
+        let traceIds = await idsIn(since);
+        if (!traceIds.length) {
+          since = "now()-2h";
+          traceIds = await idsIn(since);
+        }
         const rows = traceIds.length
           ? await runDql<{ svc: string; traces: number; name?: string }>(
-            qAppServices(traceIds), 60)
+            qAppServices(traceIds, since), 60)
           : [];
         const topoRows = await (async () => {
           try {
