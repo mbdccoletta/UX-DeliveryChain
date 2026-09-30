@@ -1609,8 +1609,17 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    Neutral by default; colour appears exactly where a signal does. ── */
 /* gaps and type scale with --gs: a sparse chain earns room, a dense one
    keeps today's compactness untouched (--gs = 1) */
+/* CENTRED IN ITS OWN BOX, which is what makes the stage's fit() land straight.
+   `min-width: 100%` keeps the band full-width when the chain is narrow, so the
+   BOX is often wider than the columns inside it — and fit() centres the box,
+   not the content: it solves x = (stageW - boxW·z)/2, which with boxW ≈ stageW
+   and z < 1 shifts everything right and leaves half the stage empty. Measured
+   on a customer tenant whose Transport layer holds 35 domains: the column ran
+   ~1,150px tall, z fell well under 1 to fit that height, and the whole chain
+   sat in the right-hand half behind 900px of nothing. Centring the columns
+   inside the box makes the two centres coincide at every zoom. */
 .graph { user-select: none; display: flex; gap: calc(22px * var(--gs, 1)); padding: 22px 30px 46px; width: max-content;
-         min-width: 100%; align-items: stretch; }
+         min-width: 100%; align-items: stretch; justify-content: center; }
 /* Each layer stands on its own band: a quiet vertical panel that groups the
    column. Identity stays neutral; a Davis signal tints the whole band, so a
    sick LAYER is findable from across the room, not only a sick node. */
@@ -1661,7 +1670,20 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
                /* height from the densest column: ~96px per node, floor for
                   one-node apps, the old 540px only as a lower bound when the
                   estate is genuinely busy */
-               min-height: clamp(240px, calc(var(--chain-rows, 5) * 96px + 60px), 620px); }
+               min-height: clamp(240px, calc(var(--chain-rows, 5) * 96px + 60px), 620px);
+               /* A LAYER GROWS SIDEWAYS, NOT DOWNWARD. min-height set a floor
+                  and nothing set a ceiling, so twelve cards at ~96px built a
+                  1,150px tower — measured on a tenant whose Transport layer
+                  carries 35 third-party domains. One tall column drags the
+                  whole chain down with it: the stage has to zoom out to fit
+                  the height, which shrinks every OTHER layer to nothing.
+                  Wrapping turns the overflow into a second sub-column, so a
+                  dense layer costs width, which the stage has, instead of
+                  height, which it does not. Edges are measured from the live
+                  DOM per node, so they follow the cards wherever they land. */
+               flex-wrap: wrap;
+               max-height: clamp(240px, calc(var(--chain-rows, 5) * 96px + 60px), 620px);
+               align-content: space-evenly; column-gap: 20px; }
 
 .gnode { display: flex; flex-direction: column; align-items: center; gap: 5px;
          cursor: pointer; background: none; border: none; max-width: calc(150px * var(--gs, 1));
@@ -2880,6 +2902,17 @@ a.svcf__row { text-decoration: none; color: inherit; }
   border: 1px solid var(--dt-colors-border-neutral-default, color-mix(in srgb, var(--ink-hi) 12%, transparent));
   border-radius: 8px;
   box-shadow: 0 12px 30px -6px rgba(0, 0, 0, 0.6);
+  /* AND IT CARRIES ITS OWN CEILING, for the same reason it carries its own
+     background. Strato caps the POPPER's height from the viewport (its own
+     modifier computes `maxHeightBase - reference height - 20`), which worked
+     while the popper was the painted box. Moving the chrome onto the list to
+     fix the width left the visible panel on the one element nothing bounds —
+     so on a tenant with a dozen applications the menu ran off the bottom of
+     the screen. The list is now bounded and scrolls inside itself, and the
+     scroll stops at its own edge instead of carrying on into the page. */
+  max-height: min(52vh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 /* and the trigger itself, so the CHOSEN name is readable before opening */
 .ctl [class*="strato-select"] { min-width: 15rem; }
