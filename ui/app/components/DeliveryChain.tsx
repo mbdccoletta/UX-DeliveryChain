@@ -420,10 +420,23 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     v: "—", tone: "info", miss: true,
     det: [["Meaning", "Smartscape maps no pod/host under these services"],
           ["Action", "check OneAgent injection on the workload"]] };
-  const noLink: Elo = { nm: "No measured link", mt: "no trace reaches a service", v: "—",
-    tone: "info", miss: true,
-    det: [["Meaning", "sessions of this application carry no backend trace"],
-          ["Action", "check RUM–trace correlation or OneAgent coverage"]] };
+  /* TWO DIFFERENT FINDINGS, TWO DIFFERENT SENTENCES. "No trace reaches a
+     service" covered both an application that never propagated a trace id and
+     one whose traces landed on nothing monitored — and they call for opposite
+     actions. Measured on a customer tenant: of twenty applications, nine
+     carried thousands of requests and not one trace id, while neighbours on
+     the same tenant carried tens of thousands. That is a tracing-context gap
+     in the frontend's own configuration, and telling that reader to "check
+     OneAgent coverage" on the backend sends them to the wrong building. */
+  const noLink: Elo = scope.tracesSeen === 0
+    ? { nm: "No trace context", mt: "this application propagates none", v: "—",
+        tone: "info", miss: true,
+        det: [["Meaning", "its RUM records requests but attaches no trace id, so there is nothing to follow into the backend"],
+              ["Action", "enable W3C traceparent for this application's API domains in its RUM configuration"]] }
+    : { nm: "No measured link", mt: `${fmtN(scope.tracesSeen)} traces reach no service`, v: "—",
+        tone: "info", miss: true,
+        det: [["Meaning", "trace ids exist on this application's requests, but no span carrying them belongs to a monitored service"],
+              ["Action", "check that the receiving services report spans, and that their trace context survives the hop"]] };
 
   /* ── the data stores those services call ────────────────────────────────
    * One card per store, not per service-to-store pair: `easytrade-db` is one

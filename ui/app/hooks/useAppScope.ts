@@ -18,6 +18,17 @@ import { qAppSeedGen2, qAppServices, qAppTraceIds,
   qServiceRuntime, runDql } from "../utils/dql";
 
 export interface AppScope {
+  /**
+   * How many distinct traces this application's RUM actually carried.
+   *
+   * Zero and "some but none matched a span" are different findings with
+   * different actions, and the chain used to print one sentence for both.
+   * Measured on a customer tenant: of twenty applications, nine carried
+   * thousands of requests and NOT ONE trace id, while others on the same
+   * tenant carried tens of thousands — so an empty backend there is a
+   * per-application tracing-context gap, not a topology fact.
+   */
+  tracesSeen: number;
   /** Service entity ids this application's traces actually reach. */
   services: Set<string>;
   /** Traces observed per service — the volume an edge into it carries. */
@@ -53,7 +64,8 @@ export interface AppScope {
 }
 
 const EMPTY: AppScope = { services: new Set(), traces: new Map(), names: new Map(),
-  runtime: new Set(), placements: [], resolved: false, loading: false };
+  runtime: new Set(), placements: [], resolved: false, loading: false,
+  tracesSeen: 0 };
 const memo = new Map<string, AppScope>();
 
 export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
@@ -71,7 +83,8 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
     setScope({ ...EMPTY, loading: true });
     (async () => {
       let out: AppScope = { services: new Set(), traces: new Map(), names: new Map(),
-        runtime: new Set(), placements: [], resolved: false, loading: false };
+        runtime: new Set(), placements: [], resolved: false, loading: false,
+        tracesSeen: 0 };
       try {
         // UNION of the two discovery engines, so nothing measured OR declared
         // is lost: traces catch what topology has not declared; topology
@@ -93,7 +106,15 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         let since = "now()-10m";
         let traceIds = await idsIn(since);
         if (!traceIds.length) {
-          since = "now()-2h";
+          /* THIRTY MINUTES, NOT TWO HOURS. The escalation is for quiet
+           * applications, and the RUM side is cheap either way — but the SPAN
+           * side is billed by the window, and a span store is the biggest
+           * thing in Grail. Measured on a customer tenant: 169M spans in two
+           * hours, and one `fetch spans, from: now()-2h` scanned 384 GiB,
+           * about $1.35 at the DPS list rate. Paying that on every application
+           * the reader opens is not a fallback, it is a leak. Three times the
+           * window buys most of the quiet cases at a fifth of the ceiling. */
+          since = "now()-30m";
           traceIds = await idsIn(since);
         }
         const rows = traceIds.length
@@ -145,7 +166,7 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         // must say so — not display the whole environment as if it belonged to
         // the app. Only a FAILED query leaves the scope unresolved.
         out = { services, traces, names, topo, runtime: new Set(), placements: [],
-          resolved: true, loading: false };
+          resolved: true, loading: false, tracesSeen: traceIds.length };
         if (services.size) {
           try {
             const rt = await runDql<{ src: string; id: string; type: string;
