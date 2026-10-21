@@ -77,7 +77,7 @@ export function verdictOf(v: VerdictInput): Verdict {
   const sessions = v.sessions ?? 0;
   const hit = v.hit ?? 0;
   /* ── who actually felt it ──
-   * Measured on this tenant: two applications report 100% of sessions hit by
+   * Measured on a live estate: two applications report 100% of sessions hit by
    * errors and have not one human user between them — every session is a robot
    * or a synthetic monitor. Judging those "Critical" put them at the top of the
    * estate table and pushed the one application with 24,491 real users and
@@ -153,3 +153,46 @@ export const VERDICT_LEGEND =
   `Critical = an active Davis problem, or ≥${HIT_BAD * 100}% of sessions hit by errors · `
   + `Warning = an anomaly, a rising forecast, or ≥${HIT_WARN * 100}% of sessions hit · `
   + `Healthy = neither`;
+
+/**
+ * How a FAILURE RATE on requests is judged — one rule, one home.
+ *
+ * This lived as bare literals in two components: the Overview's request card
+ * (`reqRate >= 0.01 ? "bad" : reqRate >= 0.001 ? "warn"`) and the chain's
+ * throughput tile, whose own comment said it was keeping "one failure-rate
+ * rule with the overview card" — an admission that the rule was copied rather
+ * than shared. Two copies of a threshold is how two screens start disagreeing
+ * about the same application.
+ *
+ * The thresholds themselves are unchanged and were chosen deliberately: one
+ * failure in a million should not wear a warning, so the floor sits at a tenth
+ * of a percent and the alarm at one percent.
+ */
+export const FAIL_BAD = 0.01;
+export const FAIL_WARN = 0.001;
+
+export const failTone = (rate: number | null | undefined): Tone =>
+  rate === null || rate === undefined ? "info"
+  : rate >= FAIL_BAD ? "bad"
+  : rate >= FAIL_WARN ? "warn"
+  : "good";
+
+/** The same rule, said in words, for a tooltip or a legend. */
+export const FAIL_LEGEND =
+  `Failing calls: Critical at ≥${FAIL_BAD * 100}%, Warning at ≥${FAIL_WARN * 100}%`;
+
+/**
+ * Fewest measured journeys before a screen states a SHARE, a percentage or a
+ * superlative ("biggest loss", "worst screen").
+ *
+ * Below it the arithmetic still works and means nothing: on a live estate
+ * an application with four journeys was being shown a funnel with "25%", "50%"
+ * and a named biggest loss of two sessions. The pictures still draw — they
+ * portray what happened and are honest at any size — but the ratios wait for a
+ * population.
+ *
+ * It lives here because two screens describing one application must not
+ * disagree about when a number becomes sayable; it was briefly FUNNEL_MIN in
+ * the board and FLOW_MIN in the journeys page, which is how that drift starts.
+ */
+export const SAMPLE_MIN = 30;

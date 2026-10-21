@@ -24,8 +24,11 @@ import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
 import { useGeo } from "../hooks/useGeo";
-import { DotLayer, MapView } from "@dynatrace/strato-geo";
-import { CENTROID } from "../utils/geoCentroids";
+import { useCities, useRegions } from "../hooks/useGeoDetail";
+import { Intelligence } from "./Intelligence";
+import { OVERVIEW_STARTERS } from "../utils/starters";
+import { ChoroplethLayer, DotLayer, MapView } from "@dynatrace/strato-geo";
+import { CENTROID, REGION_CENTROID } from "../utils/geoCentroids";
 import { usePulse } from "../hooks/usePulse";
 import { useAppScope } from "../hooks/useAppScope";
 import { useMetricForecast, METRIC_LABEL, type Metric } from "../hooks/useEcgForecast";
@@ -42,7 +45,7 @@ import {
 } from "@dynatrace/strato-icons";
 
 import { verdictOf, VERDICT_LEGEND, HIT_WARN, davisCategory,
-  type Tone } from "../utils/verdict";
+  type Tone, failTone} from "../utils/verdict";
 import { errorsExplorerHref, servicesExplorerHref, rowDrilldown, open,
   intentsAvailable, appEntityOf } from "../utils/links";
 import type { DeepLink } from "../utils/links";
@@ -74,6 +77,10 @@ function useCountUp(target: number, ms = 1100): number {
   return v;
 }
 
+/** The map's height. 380px left it a strip under a tall legend; the tile is
+ *  the one place on this page where SPACE is the information. */
+const MAP_H = 520;
+
 export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;
   appId: string;
@@ -96,6 +103,16 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
   const [geoSel, setGeoSel] = useState<string | null>(null);
+  /** The state opened inside the selected country — its cities follow. */
+  const [regionSel, setRegionSel] = useState<string | null>(null);
+  /** Take the map to a place — a country, or one of its states. */
+  const flyTo = (lat: number, lng: number, z: number) =>
+    setGeoView({ latitude: lat, longitude: lng, zoom: z });
+  /* Asked only once a country is open — the map's first level is one scan,
+   * and these cost another only if a reader goes looking. */
+  const regions = useRegions(data.tf, geoSel ? appId : null, geoSel);
+  const cities = useCities(data.tf, regionSel ? appId : null, geoSel,
+    regionSel ? regionSel.slice((geoSel ?? "").length + 1) : null);
   const [geoDetail, setGeoDetail] = useState<Array<{ view: string; sessions: number; hit: number }> | null>(null);
   const geoMemo = React.useRef(new Map<string, Array<{ view: string; sessions: number; hit: number }>>());
   useEffect(() => {
@@ -118,7 +135,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, appId, data.tf.from, data.tf.to]);
   useEffect(() => { setGeoSel(null); }, [appId, data.tf.from, data.tf.to]);
-  useEffect(() => { setGeoViewSel(null); }, [geoSel]);
+  useEffect(() => { setGeoViewSel(null); setRegionSel(null); }, [geoSel]);
   /* The map draws into a CANVAS: ReactNode shapes do not paint and CSS cannot
    * animate there — measured, zero dots rendered. So the animated pins are an
    * HTML OVERLAY, projected with the same Web-Mercator maths the map uses and
@@ -348,8 +365,57 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * in an iframe and the hand-off leaves it. */
   const errExplorer = app.errors > 0 ? errorsExplorerHref(data.tf, app.name) : null;
 
+  /* What this page measured, in the order a reader meets it. Built here so
+   * the Intelligence starters cite exactly the figures on screen — and so a
+   * figure the page could NOT measure is named as unmeasured rather than
+   * quietly omitted, which is how a model ends up inventing one. */
+  const overviewFacts = () => {
+    const L: string[] = [
+      `Application: ${app.name}`,
+      `Window: ${data.tf.label}`,
+      `Verdict:  — `,
+      impacted
+        ? `Sessions: ${fmtN(impacted.sessions)} (${fmtN(impacted.realSessions)} from real people, the rest robots or synthetic)`
+        : "Sessions: not measured in this window",
+      impacted && impacted.realSessions > 0
+        ? `Sessions that met an error: ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} real ones`
+        : "Sessions that met an error: not measurable — no real-user sessions on record",
+      `Errors recorded: ${fmtN(app.errors)}`,
+      `Views recorded: ${fmtN(app.views)}`,
+      problems.length + scopeProblems > 0
+        ? `Davis problems on this application or its chain: ${fmtN(problems.length + scopeProblems)}`
+        : "Davis problems: none open on this application or its chain",
+      anomalies > 0
+        ? `Davis baselining anomalies on its components: ${fmtN(anomalies)}`
+        : "Davis baselining anomalies: none",
+      "",
+    ];
+    if (geo && geo.length) {
+      const tot = geo.reduce((a, g) => a + g.sessions, 0) || 1;
+      L.push("Where they connect from (sessions, and the share that met an error):");
+      for (const g of [...geo].sort((a, b) => b.sessions - a.sessions).slice(0, 8)) {
+        L.push(`  ${g.country}: ${fmtN(g.sessions)} sessions`
+          + ` (${((g.sessions / tot) * 100).toFixed(1)}% of the window)`
+          + `, ${g.sessions > 0 ? ((g.hit / g.sessions) * 100).toFixed(1) : "0"}% met an error`);
+      }
+    } else {
+      L.push("Geography: no located sessions in this window");
+    }
+    L.push("",
+      "Note: these counts include robot and synthetic traffic unless a line says",
+      "otherwise. Anything this page did not measure is stated as such above —",
+      "do not substitute a figure for it.");
+    return L.filter((x) => x !== undefined).join("\n");
+  };
+
   return (
     <div className="stack">
+      {/* INTELLIGENCE — this application's own questions. overviewFacts is
+          built from what the page rendered, so an answer can only cite what
+          the reader can also see. */}
+      <Intelligence subject="the Overview of this application"
+        starters={OVERVIEW_STARTERS} facts={overviewFacts} />
+
       {/* THE ESTATE LINE IS GONE. This page is scoped to ONE application —
           the header's selector says which — so a headline counting every
           application, the whole estate's error-free share and every problem in
@@ -471,12 +537,48 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const base = totHit / tot;
         const max = Math.max(...geo.map((g) => g.sessions), 1);
         const located = geo.filter((g) => CENTROID[g.country]);
-        // frame the map on the traffic itself
-        const lats = located.map((g) => CENTROID[g.country][0]);
-        const lngs = located.map((g) => CENTROID[g.country][1]);
-        const cLat = lats.length ? (Math.min(...lats) + Math.max(...lats)) / 2 : 20;
-        const cLng = lngs.length ? (Math.min(...lngs) + Math.max(...lngs)) / 2 : 0;
-        const span = lngs.length ? Math.max(Math.max(...lngs) - Math.min(...lngs), 30) : 360;
+        /* FRAME THE MAP ON THE PEOPLE, NOT ON THE PLACES.
+         *
+         * This used to centre on the midpoint of the bounding box of every
+         * located country — one vote per country, however few sessions it
+         * held. Measured on a live estate: 391 sessions in Brazil and TWO
+         * in the United States put the centre at roughly 14°N 76°W, so the map
+         * opened on the Caribbean with Brazil clipped at the right edge and
+         * 99.5% of the traffic off-screen. Two sessions outvoted three hundred
+         * and ninety-one.
+         *
+         * So the centre is weighted by sessions, and the frame is sized from
+         * the countries that actually carry traffic. The outliers still draw —
+         * they are dots on a map and rows in the list beside it — they just no
+         * longer decide where everyone else is looking.
+         */
+        const wsum = located.reduce((a, g) => a + g.sessions, 0) || 1;
+        /* The CENTRE follows the sessions — latitude averages directly, but
+         * longitude has to go round the circle, or an estate split across the
+         * antimeridian averages to its own opposite (Tokyo and California
+         * would centre on Africa). */
+        const cLat = located.length
+          ? located.reduce((a, g) => a + CENTROID[g.country][0] * g.sessions, 0) / wsum : 20;
+        const cLng = located.length ? (() => {
+          const x = located.reduce((a, g) =>
+            a + Math.cos((CENTROID[g.country][1] * Math.PI) / 180) * g.sessions, 0);
+          const y = located.reduce((a, g) =>
+            a + Math.sin((CENTROID[g.country][1] * Math.PI) / 180) * g.sessions, 0);
+          return (Math.atan2(y, x) * 180) / Math.PI;
+        })() : 0;
+        /* …but the FRAME holds everyone, weight or none. A country with two
+         * sessions must not decide where the map looks, and it must not fall
+         * off the edge either: it is a real place real people connected from,
+         * and the panel beside the map names it. So the span reaches the
+         * furthest country, not the heaviest one, measured the short way round
+         * the globe. */
+        const away = (lng: number) =>
+          Math.abs(((lng - cLng + 540) % 360) - 180);
+        const PAD = 1.6; // dots sit inside the view, not against its edges
+        const span = located.length
+          ? Math.min(360, Math.max(
+            2 * Math.max(...located.map((g) => away(CENTROID[g.country][1]))) * PAD, 30))
+          : 360;
         const zoom = span > 200 ? 1.1 : span > 120 ? 1.6 : span > 60 ? 2.2 : 3;
         /* The rule itself lives in utils/geoVerdict — the board and the
          * poster judge locations too, and three copies of a threshold is
@@ -495,7 +597,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const because = (g: GeoArm) => geoBecause(g, base);
         /* Country NAMES from the browser itself — no dataset needed, and it
          * speaks the reader's own language. City stays impossible honestly:
-         * measured null on every RUM row of this tenant. */
+         * measured null on every RUM row of a live estate. */
         /* LATENCY per region: ttfb p75 from the same scan. Judged against
          * the MEDIAN country — a region 2× the median is paying for its
          * route, whatever the absolute number is. */
@@ -535,13 +637,31 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
               <span className="hint">sessions and health by country · {data.tf.label}</span></div>
             <div className="pad geo__wrap">
               <div className="geo__map">
-                <MapView height={380}
-                  initialViewState={{ latitude: cLat, longitude: cLng, zoom }}
+                {/* CONTROLLED, so a click can take the reader somewhere.
+                    Uncontrolled, the map owned its own position and nothing
+                    outside could move it — a state in the list could be named
+                    but never shown. The reader's own panning still writes back
+                    through onViewStateChange, so control is shared rather than
+                    seized. */}
+                <MapView height={MAP_H}
+                  latitude={geoView?.latitude ?? cLat}
+                  longitude={geoView?.longitude ?? cLng}
+                  zoom={geoView?.zoom ?? zoom}
                   onViewStateChange={(v) => setGeoView({
                     latitude: v.latitude ?? cLat, longitude: v.longitude ?? cLng,
                     zoom: v.zoom ?? zoom })}>
                   {/* a faint native layer keeps the map's own tooltip */}
                   <DotLayer shape="circle" shapeSize={6} data={located.map(dot)} />
+                  {/* NO STATE CHOROPLETH, and the reason is the component, not
+                      the data. Strato's ChoroplethLayer takes an ISO 3166-2
+                      code — which geo.region.iso_code supplies once the country
+                      is prefixed — but this version ships ONE geometry file,
+                      WORLD-COUNTRIES.json, and its only fill constant is
+                      COUNTRIES_FILL_COLOR. Measured with the layer mounted: the
+                      map requested no sub-national shapes and painted nothing.
+                      A code with no polygon behind it draws nothing, so the
+                      states live in the panel below, counted rather than
+                      shaded. */}
                 </MapView>
                 {(() => {
                   const vs = geoView ?? { latitude: cLat, longitude: cLng, zoom };
@@ -592,6 +712,41 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           </button>
                         );
                       })}
+
+                      {/* THE STATES, AS MARKS. Strato paints no sub-national
+                          polygon — this version ships WORLD-COUNTRIES.json and
+                          nothing else, measured — but this overlay never drew
+                          polygons anyway: the country bubbles above are placed
+                          from our own centroid table over the platform's map.
+                          A state needs the same one coordinate, so it joins
+                          them rather than waiting for a geometry file that is
+                          not coming. Smaller than a country mark, so the two
+                          levels never read as the same thing. */}
+                      {geoSel && regions && regions.map((r) => {
+                        const c = REGION_CENTROID[r.id];
+                        if (!c) return null;
+                        const rate = r.hit / Math.max(r.sessions, 1);
+                        const t = r.sessions < GEO_MIN_SESSIONS ? "good"
+                          : rate >= GEO_ABS_BAD ? "bad"
+                          : rate >= GEO_ABS_WARN ? "warn" : "good";
+                        const sz = r.sessions >= 100 ? 20 : r.sessions >= 10 ? 15 : 11;
+                        return (
+                          <button type="button" key={r.id}
+                            className={`gpin gpin--sub gpin--${t}`
+                              + (regionSel === r.id ? " gpin--sel" : "")}
+                            style={{ width: sz, height: sz,
+                              left: `calc(50% + ${(mx(c[1]) - cx).toFixed(1)}px)`,
+                              top: `calc(50% + ${(my(c[0]) - cy).toFixed(1)}px)` }}
+                            title={`${r.name} — ${fmtN(r.sessions)} sessions,`
+                              + ` ${(rate * 100).toFixed(1)}% met an error.`
+                              + " Click for its cities."}
+                            onClick={() => setRegionSel((x) => (x === r.id ? null : r.id))}>
+                            {r.sessions >= 10 && (
+                              <span className="gpin__lbl"><b>{r.name}</b></span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -612,6 +767,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       onClick={() => {
                         const opening = geoSel !== g.country;
                         setGeoSel((c) => (c === g.country ? null : g.country));
+                        // and take the map there, so the row and the picture agree
+                        const cc = CENTROID[g.country];
+                        if (opening && cc) flyTo(cc[0], cc[1], 3.4);
                         if (opening) setTimeout(() => {
                           document.querySelector(".geo")?.scrollIntoView({
                             behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -648,6 +806,47 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     </button>
                   );
                 })}
+
+                {/* THE STATES, IN THE LIST, under the country they belong to.
+                    They were only in the panel below the map, which is where
+                    the reader was not looking — the list is the index of this
+                    tile, and a level missing from it reads as a level that
+                    does not exist. Clicking one takes the map to it, so the
+                    row and the picture always agree about where you are. */}
+                {geoSel && regions && regions.length > 0 && regions.map((r) => {
+                  const rate = r.hit / Math.max(r.sessions, 1);
+                  const t = r.sessions < GEO_MIN_SESSIONS ? "good"
+                    : rate >= GEO_ABS_BAD ? "bad"
+                    : rate >= GEO_ABS_WARN ? "warn" : "good";
+                  const c = REGION_CENTROID[r.id];
+                  return (
+                    <button type="button" key={r.id}
+                      className={`geo__r geo__r--sub${regionSel === r.id ? " geo__r--on" : ""}`}
+                      title={`${r.name} — ${fmtN(r.sessions)} sessions,`
+                        + ` ${(rate * 100).toFixed(1)}% met an error.`
+                        + (c ? " Click to centre the map on it and list its cities."
+                             : " No coordinate for this state, so it is counted but not placed.")}
+                      onClick={() => {
+                        const opening = regionSel !== r.id;
+                        setRegionSel((x) => (x === r.id ? null : r.id));
+                        if (opening && c) flyTo(c[0], c[1], 5.2);
+                      }}>
+                      <i className="geo__dot" style={{ background: TOK[t] }} />
+                      <b className="geo__cc">{r.id.slice(3)}</b>
+                      <span className="geo__nm">{r.name}</span>
+                      <span className="geo__t">
+                        <i className="geo__b" style={{
+                          width: `${(r.sessions / Math.max(...regions.map((x) => x.sessions), 1)) * 100}%`,
+                          background: `color-mix(in srgb, ${TOK[t]} 55%, transparent)` }} />
+                      </span>
+                      <span className="num geo__n">{fmtN(r.sessions)}</span>
+                      <em className={`geo__h geo__h--${t}`}>
+                        {r.hit === 0 ? "clean" : `${(rate * 100).toFixed(1)}% hit`}
+                      </em>
+                    </button>
+                  );
+                })}
+
                 {/* the traffic light's own rulebook, always on screen — the
                     verdict never asks to be taken on faith */}
                 <span className="geo__rule"
@@ -669,6 +868,78 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   <button className="geo__drill-x" aria-label="Close"
                     onClick={() => setGeoSel(null)}>✕</button>
                 </div>
+
+                {/* STATES, AND THE SESSIONS THAT HAVE NONE.
+                    Coverage is stated first and always: measured on a live
+                    estate, one application's US traffic was 419 sessions with
+                    no state against 3 with one. A reader adding the states up
+                    and finding less than the country is owed the reason — it
+                    is a gap in what the platform resolved, not a missing
+                    place — and without the line they would read it as a bug in
+                    the numbers beside it. */}
+                {regions !== null && (() => {
+                  const total = geo?.find((g) => g.country === geoSel)?.sessions ?? 0;
+                  /* NOT A SUM. A session is counted in every state it had
+                     events in, so adding these up double-counts anyone who
+                     moved — measured here, the states totalled 469 against a
+                     country of 468. The honest line says what each state
+                     holds and warns that they do not add up, rather than
+                     publishing a coverage figure that is arithmetic nonsense
+                     wearing the look of a measurement. */
+                  return (
+                    <div className="geo__sub">
+                      <span className="geo__sub-l">
+                        states
+                        <em>{regions.length === 0
+                          ? `none of this country's ${fmtN(total)} sessions carry a state`
+                          : `${regions.length} recorded of ${fmtN(total)} sessions in the country`
+                            + " — a session that moves between states is counted in each,"
+                            + " so these do not add up"}</em>
+                      </span>
+                      {regions.length > 0 && (
+                        <div className="geo__sub-rows">
+                          {regions.slice(0, 8).map((r) => {
+                            const rate = r.hit / Math.max(r.sessions, 1);
+                            const open = regionSel === r.id;
+                            return (
+                              <button type="button" key={r.id}
+                                className={open ? "geo__sub-r geo__sub-r--on" : "geo__sub-r"}
+                                title={`${fmtN(r.sessions)} sessions from ${r.name}`
+                                  + ` · ${(rate * 100).toFixed(1)}% met an error`
+                                  + ` · ISO ${r.id}. Click for its cities.`}
+                                onClick={() => setRegionSel((c) => (c === r.id ? null : r.id))}>
+                                <span>{r.name}</span>
+                                <b className="num">{fmtN(r.sessions)}</b>
+                                <em className="num">{(rate * 100).toFixed(0)}%</em>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {/* CITIES ARE A LIST, NOT A MAP. They carry no ISO code,
+                          and geo.location.latitude measured NULL on 100% of
+                          rows — nothing can position them. */}
+                      {regionSel && cities !== null && (
+                        <div className="geo__sub-cities">
+                          <span className="geo__sub-l">
+                            cities in {regions.find((r) => r.id === regionSel)?.name ?? regionSel}
+                            <em>no coordinate is recorded for a city, so these are counted, not mapped</em>
+                          </span>
+                          {cities.length === 0
+                            ? <span className="geo__sub-none">no city recorded for these sessions</span>
+                            : cities.slice(0, 10).map((c) => (
+                              <span className="geo__sub-city" key={c.id}>
+                                <span>{c.name}</span>
+                                <b className="num">{fmtN(c.sessions)}</b>
+                                <em className="num">
+                                  {((c.hit / Math.max(c.sessions, 1)) * 100).toFixed(0)}%</em>
+                              </span>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {geoDetail && geoDetail.length > 0 && (() => {
                   const dmax = Math.max(...geoDetail.map((d) => d.sessions), 1);
                   /* The drill speaks the same traffic light as the map: each
@@ -872,7 +1143,7 @@ interface CardProps {
   /** Apdex over this application's user actions, or null when none were rated. */
   apdex: number | null;
   /** Why the score is absent, when it is — "•••" alone made a robot-only
-   *  application on the dev tenant read as a rendering bug. */
+   *  application on a live estate read as a rendering bug. */
   apdexNote?: string;
   /** The bands behind it — what the words under the score are built from. */
   apdexBands: { sat: number; tol: number; fru: number; fruErr: number } | null;
@@ -1017,7 +1288,7 @@ function CoreRing({ host, value, tone, errPerMin, errors }: {
  *
  * Laid out in the DOM rather than a stretched SVG: with
  * preserveAspectRatio="none" the bars fattened into blocks as the module got
- * wider — in the tenant shell they read as a solid slab instead of a chart.
+ * wider — in a live estate shell they read as a solid slab instead of a chart.
  * Fixed-width bars keep the same shape at any width.
  */
 /**
@@ -1097,7 +1368,8 @@ function CleanCard(p: CardProps) {
   // 0.0% — turning the box red and making it knock for that is a false alarm,
   // and a card that cries wolf is worse than one that says nothing.
   const reqRate = p.requests > 0 ? p.reqFail / p.requests : 0;
-  const reqTone: Tone = reqRate >= 0.01 ? "bad" : reqRate >= 0.001 ? "warn" : "info";
+  // the shared rule (utils/verdict.failTone), not a second copy of it
+  const reqTone: Tone = failTone(reqRate);
   const apdexWords = (() => {
     if (!p.apdexBands) return null;
     const { sat, tol, fru, fruErr } = p.apdexBands;
@@ -1167,7 +1439,7 @@ function CleanCard(p: CardProps) {
             <em className="tk-block__sparkv">{p.errorsPerMin}/min<br />error rate</em></>}>
           <div className="tk-row2">
             {/* A mobile application's card leads with its FATAL failures.
-                Measured on the reference tenant: Astroshop Android had 289 crashes and
+                Measured on a live estate: Astroshop Android had 289 crashes and
                 247 ANRs inside its error count — a crash ends the session
                 where an ordinary error merely dents it, and burying both in
                 "errors" hid the number that decides whether anyone ships a
@@ -1416,7 +1688,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
            * Views drill through the app's OWN url, observed carrying two
            * conditions at once ("View Name" and Frontend). Both are needed:
            * a view name is not unique — measured, `/` exists in four of this
-           * tenant's applications. */
+           * estate's applications. */
           /* Which screen a view earns is decided by its DOMINANT signal, not
            * by whether an error exists at all. Measured on easytrade:
            *   /home            0.1% errors · 6.3% of actions over 3s · p95 3.9s
@@ -1536,7 +1808,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           ? "one row per KIND of failure — ids in the url are collapsed, so a broken "
             + "endpoint counts once with its true weight"
           : metric === "requests"
-            ? "failures come from the error records: request events on this tenant "
+            ? "failures come from the error records: request events on a live estate "
               + "carry only 2xx, so counting 4xx off them would always read zero"
             : `apdex bands at T = ${APDEX_T_MS / 1000}s · the bar is share of user actions`}
       </div>

@@ -74,7 +74,7 @@ Rules while migrating:
 ## Open bugs to fix on the way
 
 1. **The poster opens with 0 sessions** (`openInfographic` in FlowSankey). Both
-   queries were measured against the tenant and are healthy — `qPathSessions`
+   queries were measured against a live estate and are healthy — `qPathSessions`
    and `qCohortSessions` both return rows with `sid`. The lead is the **400 Bad
    Request** responses in the app console: identify which request and its body.
    Until this is fixed the poster's conversion block — and the journeys list

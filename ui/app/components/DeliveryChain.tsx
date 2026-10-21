@@ -15,13 +15,15 @@ import { usePanZoom } from "../hooks/usePanZoom";
 import { useAssist } from "../hooks/useAssist";
 import { type AppMap, useApps } from "../hooks/useApps";
 import { useAppScope, type AppScope } from "../hooks/useAppScope";
+import { Intelligence } from "./Intelligence";
+import { CHAIN_STARTERS } from "../utils/starters";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useDbEntity } from "../hooks/useDbEntity";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
-import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone } from "../utils/verdict";
+import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone, failTone} from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 import { aheadOf, type Forecast } from "../utils/forecast";
@@ -54,7 +56,7 @@ export const TIERS: Array<[string, string, string]> = [
   ["Runtime", "pods and containers", "Run"],
   ["Infrastructure & cloud", "nodes, hosts and provider", "Host"],
   // The eighth layer exists only where the machinery has a provider behind it.
-  // Measured on this tenant: 7 of 49 hosts do; for the other 42 the chain ends
+  // Measured on a live estate: 7 of 49 hosts do; for the other 42 the chain ends
   // at Infrastructure rather than showing an empty column.
   ["Cloud", "where the machine lives", "Provider"],
 ];
@@ -132,7 +134,7 @@ interface Elo {
    * An offer the card makes, rather than a cost the page already paid.
    *
    * The span read that measures a backend link scans the biggest store in
-   * Grail — ~32 GiB for ten minutes on a tenant carrying 169M spans in two
+   * Grail — ~32 GiB for ten minutes on a live estate carrying 169M spans in two
    * hours, about $0.11 a click. Topology answers free and answers first; when
    * it cannot, the card SAYS what the deeper read would cost and lets a person
    * decide, instead of billing them for opening a page.
@@ -215,6 +217,20 @@ const problemIds = (p: { entityIds: string[] | null }) => p.entityIds ?? [];
  * Shared by the tier builder AND the backend row's "N topology-mapped" sub,
  * so the count can never disagree with the cards (it once said 2 over 0).
  */
+/**
+ * A name the platform may not have.
+ *
+ * Smartscape resolves most SERVICE, CONTAINER and host names and leaves the
+ * rest null — a leaf service nobody named, a node reported only by id. The
+ * chain split those names to trim them, and a null made the WHOLE page read
+ * "Delivery chain failed to render: Cannot read properties of null". A
+ * nameless component is ordinary data; blanking the view over it is not.
+ *
+ * So every trim goes through here. The id or the empty string is a worse
+ * label than a real name and a far better one than no page.
+ */
+const str = (v: unknown): string => (v === null || v === undefined ? "" : String(v));
+
 function gen2CardKept(g: Gen2Service, stores: DataStore[] | null): boolean {
   if (!/DATABASE|DATASTORE/.test(g.kind) || !stores?.length) return true;
   const gt = g.name.toLowerCase().replace(/[^a-z0-9]+/g, " ")
@@ -249,7 +265,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    *
    * Profiles are a top-20 over the whole environment — grouped by application
    * and resolution and pixel ratio and orientation, twenty rows is a handful
-   * of the busiest applications. Measured on the reference tenant: 248 profile rows across
+   * of the busiest applications. Measured on a live estate: 248 profile rows across
    * 14 applications, the top twenty covering seven of them. easyTravel
    * mainframe has 431 sessions and 26 profile rows, none of which survive the
    * cut, so this layer drew "No coverage" while the Sessions app listed those
@@ -283,7 +299,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   };
 
   // rows arrive split by origin for the edges; cards aggregate per domain.
-  // err now counts failed CALLS (fetch-source errors); on tenants whose
+  // err now counts failed CALLS (fetch-source errors); on estates whose
   // error events carry no url.domain they arrive under domain "" — those
   // failures are real but unattributable, so they gate the "clean" word
   // instead of joining a domain's tally.
@@ -309,7 +325,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       reqs: r.reqs, p50: r.p50, p90: r.p90, err: r.err, bytes: r.bytes,
       late: r.late ?? null });
   }
-  /* Latency with its dignity. Measured on this tenant: over half of the
+  /* Latency with its dignity. Measured on a live estate: over half of the
    * 916k first-party requests report ZERO duration, so the median is 0 and
    * a bare "0ms" was truth wearing the clothes of nonsense. When the median
    * is silent the tail speaks, labelled as itself; the ledger says WHY. */
@@ -385,12 +401,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * host-based deployment maps as completely as a Kubernetes one.
    */
   /* A serverless function is a PLACEMENT, not a layer of its own: measured on
-   * the reference tenant, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
+   * a live estate, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
    * the shape of `runs_on HOST`. So a lambda-backed service maps with no new
    * query and no new column — the runtime card simply says "lambda" where
    * another says "host".
    *
-   * Listed even though the dev tenant has none of those edges today, because the
+   * Listed even though a live estate has none of those edges today, because the
    * list is read against what the placement query returned: a type absent from
    * the environment costs nothing, while a type missing from this list is a
    * service silently drawn as running on nothing. */
@@ -407,7 +423,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     .sort((a, b) => RUNTIME_ORDER.indexOf(a[0]) - RUNTIME_ORDER.indexOf(b[0]));
   // pools and nodes follow the same cut — an app on 3 pods does not span 6 pools
   const rtRows = scope.loading ? [] : scope.resolved ? runtimeRows : d.runtime;
-  const pools = new Set(rtRows.map((r) => r.node.split("-").slice(0, 3).join("-")));
+  const pools = new Set(rtRows.map((r) => str(r.node).split("-").slice(0, 3).join("-")));
   const scopedHosts = [...scope.runtime].filter((i) => i.startsWith("HOST-"));
 
   const nodeIds = [...new Set(rtRows.flatMap((r) => [r.nodeId, r.nodeClassic]).filter(Boolean))] as string[];
@@ -433,9 +449,9 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   /* TWO DIFFERENT FINDINGS, TWO DIFFERENT SENTENCES. "No trace reaches a
      service" covered both an application that never propagated a trace id and
      one whose traces landed on nothing monitored — and they call for opposite
-     actions. Measured on a customer tenant: of twenty applications, nine
+     actions. Measured on a live estate: of twenty applications, nine
      carried thousands of requests and not one trace id, while neighbours on
-     the same tenant carried tens of thousands. That is a tracing-context gap
+     the same estate carried tens of thousands. That is a tracing-context gap
      in the frontend's own configuration, and telling that reader to "check
      OneAgent coverage" on the backend sends them to the wrong building. */
   const noLink: Elo = scope.tracesSeen === 0
@@ -498,7 +514,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           v: fmtMs(wAvg((s) => s.p50)), tone: "info", vol: calls,
           store, grp: "stores",
           /* ids WHEN the DB entity resolves (batched, useDbEntities): the
-           * tenant's database health alerts bind to the instances' classic
+           * estate's database health alerts bind to the instances' classic
            * CUSTOM_DEVICE- ids, and a card with no ids could never light —
            * the Databases app showed a "Configuration" alert this chain
            * painted calm. A store with no DB_* node (redis, mongo) still
@@ -558,7 +574,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    */
   const serveCards: Elo[] = (() => {
     const svc = svcRows.map<Elo>((r) => ({
-      nm: r.nm.split(" - ")[0],
+      nm: str(r.nm).split(" - ")[0],
       mt: scope.resolved ? (r.vol > 0 ? `${fmtN(r.vol)} traces` : "linked · topology")
         : `calls ${r.fan} service(s)`,
       v: String(r.fan || "·"), tone: "info", vol: Math.max(r.vol, 1),
@@ -567,7 +583,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
             ["Traces (10m)", scope.resolved && r.vol > 0 ? fmtN(r.vol) : "—"],
             ["Fan-out (calls)", String(r.fan)],
             ["Calls", d.calls.filter((c) => c.src === r.nm)
-              .map((c) => c.dst.split(" - ")[0]).slice(0, 6).join(" · ") || "—"]],
+              .map((c) => str(c.dst).split(" - ")[0]).slice(0, 6).join(" · ") || "—"]],
     }));
     const extra = [...gen2Cards, ...storeCards];
     if (!extra.length) return svc;
@@ -803,7 +819,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
 
     /* ── Cloud, and only where there is one ──
      * Present exactly when a host in scope has a provider behind it. On this
-     * tenant that is 7 hosts of 49; for the rest this layer holds nothing and
+     * estate that is 7 hosts of 49; for the rest this layer holds nothing and
      * the renderer drops it, so the chain ends at Infrastructure rather than
      * showing an eighth column with nothing in it.
      *
@@ -830,7 +846,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
                   : c.instanceType.startsWith("GCP") ? "gce" : "vm",
                 tone: "info" as Tone, ids: [c.instanceId],
                 det: [["Instance", c.instanceId],
-                      ["Provider", c.instanceType.split("_")[0]],
+                      ["Provider", str(c.instanceType).split("_")[0]],
                       ["Zone", c.zoneName ?? "—"],
                       ["Host", c.host]],
               })),
@@ -1136,7 +1152,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   /* the entity, derived when the qApps row is gone — which is EXACTLY the
    * quiet case: zero events in the window means no row to read it from.
    * Measured: a mobile RUM id is the entity's hex as a dashed uuid
-   * (21cb4989-d0a5-46c7-… ⇔ MOBILE_APPLICATION-21CB4989D0A546C7); a web
+   * (<uuid>… ⇔ MOBILE_APPLICATION-<id>); a web
    * RUM id is the 16-hex itself. */
   const quietEntity = data.apps.find((a) => a.appId === appId)?.entity
     ?? (/^[0-9a-f]{16}$/.test(appId) ? `APPLICATION-${appId.toUpperCase()}`
@@ -1192,7 +1208,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const { t: view, fit, zoomIn, zoomOut, reset } = usePanZoom(shellRef, canvasRef);
-  // Assist may be off for this tenant or this user; the routes ask before offering
+  // Assist may be off for a live estate or this user; the routes ask before offering
   const assist = useAssist();
   // which app owns each capability here — Gen3 if installed, classic otherwise
   const apps = useApps();
@@ -1356,8 +1372,37 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
       // lands. Steady legs carry nothing; the full facts stay on hover.
       drawn.sort((x, y) => y.v - x.v);
       const seen = new Set<string>();
+      /* every label already drawn, so the next one can avoid it */
+      const placed: Array<{ x: number; y: number; w: number }> = [];
+      /* ONE FINDING, SAID ONCE.
+       *
+       * The old rule deduplicated on value AND label, so every leg out of a
+       * busy node survived — thirteen of them, measured on a live estate,
+       * each reading "requests ↗" down the left of the diagram. Thirteen
+       * labels saying the same word are not thirteen findings; they are one
+       * finding repeated until it stops being read.
+       *
+       * What the label actually reports is a TREND for a kind of traffic —
+       * "requests are growing" — and that is a fact about the flow, not about
+       * each individual leg. So the legs are grouped by what the label would
+       * say, the busiest one in each group carries it, and the rest stay
+       * quiet. Their own numbers are still on their hover, and the node they
+       * land on still shows its volume. */
+      const byClaim = new Map<string, typeof drawn>();
       for (const dd of drawn.filter((x) => x.op > 0.3)) {
         if (dd.next == null || dd.fcArrow === "→") continue;
+        const claim = `${dd.label}|${dd.fcArrow}`;
+        const g = byClaim.get(claim);
+        if (g) g.push(dd); else byClaim.set(claim, [dd]);
+      }
+      // the loudest leg speaks for its claim: volume is what the reader acts on
+      const speakers = [...byClaim.values()]
+        .map((g) => g.reduce((a, b) => (b.v > a.v ? b : a)))
+        .sort((a, b) => b.v - a.v);
+      for (const dd of speakers) {
+        // the filter above already proved these, but narrow it for the compiler
+        if (dd.next == null || dd.fcArrow === "→") continue;
+        const next = dd.next;
         // one label per distinct figure: consecutive hops carry the same volume
         const k = `${dd.v}|${dd.label}`;
         if (seen.has(k)) continue;
@@ -1367,7 +1412,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         // dizer?") while "sessions ↘ 21%" reads itself. The absolute
         // projection moves into the label's own hover, which spells the
         // whole mechanism out.
-        const pct = Math.round(Math.abs(dd.next / dd.v - 1) * 100);
+        const pct = Math.round(Math.abs(next / dd.v - 1) * 100);
         const full = `${dd.label} ${dd.fcArrow} ${pct}%`;
         /* the NOUN survives the squeeze, not the percentage: two bare
          * "↘ 17%" labels on neighbouring legs read as the same thing, and
@@ -1379,9 +1424,36 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         if (!txt) continue;
         const need = txt.length * 7.4;
         const lx = Math.min(Math.max(dd.mx, dd.gapL + need / 2), dd.gapR - need / 2);
+        /* LABELS DO NOT SIT ON EACH OTHER. Each one was placed at its own
+         * edge's midpoint and nothing checked whether anything was already
+         * there — so a node with four outgoing legs stacked four "requests"
+         * in the same strip of pixels, one of them across the node's own
+         * name. The midpoint is still the preferred home; when it is taken,
+         * the label steps away from it, alternating up and down, and gives up
+         * rather than draw an unreadable pile. */
+        const ly = (() => {
+          /* 15px and 2px of slack were not enough: the labels carry a 3px
+             halo on each side (paint-order: stroke, so they stay readable
+             over an edge) and bold mono measures a little wider than the
+             7.4px-per-glyph estimate. Measured in the shell, three pairs
+             still touched. */
+          const H = 19, pad = 8;
+          const hits = (y: number) => placed.some((r) =>
+            Math.abs(r.x - lx) < (r.w + need) / 2 + pad && Math.abs(r.y - y) < H);
+          const base = dd.my - 7;
+          if (!hits(base)) return base;
+          for (let step = 1; step <= 9; step++) {
+            for (const y of [base - step * H, base + step * H]) {
+              if (!hits(y)) return y;
+            }
+          }
+          return null;
+        })();
+        if (ly === null) continue;
+        placed.push({ x: lx, y: ly, w: need });
         const word = dd.fcArrow === "↘" ? "slowing" : "growing";
-        parts.push(`<text x="${lx}" y="${dd.my - 7}">${txt}
-          <title>This flow is ${word}: the window's second half ran ${pct}% ${dd.fcArrow === "↘" ? "under" : "over"} the first. At that pace the next window carries ≈${fmtN(dd.next)} ${dd.label} (now: ${fmtN(dd.v)}).</title></text>`);
+        parts.push(`<text x="${lx}" y="${ly}">${txt}
+          <title>This flow is ${word}: the window's second half ran ${pct}% ${dd.fcArrow === "↘" ? "under" : "over"} the first. At that pace the next window carries ≈${fmtN(next)} ${dd.label} (now: ${fmtN(dd.v)}).</title></text>`);
       }
       svg.innerHTML = `<defs>${defs}</defs>` + parts.join("");
     };
@@ -1638,7 +1710,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     if (selTier === 4) {
       const mine = new Set((tiers[4]?.items ?? []).map((n) => n.nm));
       const chainCalls = data.calls.filter((c) =>
-        mine.has(c.src.split(" - ")[0]) || mine.has(c.dst.split(" - ")[0]));
+        mine.has(str(c.src).split(" - ")[0]) || mine.has(str(c.dst).split(" - ")[0]));
       return (
         <p className="dd__note">
           {fmtN(chainCalls.length)} of the environment&apos;s {fmtN(data.calls.length)} call
@@ -1662,8 +1734,53 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     );
   };
 
+  /* THE CHAIN, STATED. Every layer with its population and its verdict, and
+   * the links that could not be measured named as such. A root-cause answer
+   * drawn from a layer this app never resolved is a guess wearing the app's
+   * credibility, so the gaps are listed as loudly as the measurements. */
+  const chainFacts = () => {
+    const L: string[] = [
+      `Application: ${data.apps.find((a) => a.appId === appId)?.name ?? appId}`,
+      `Window: ${data.tf.label}`,
+      "",
+      "The layers a user request crosses, outermost first:",
+    ];
+    tiers.forEach((ly, i) => {
+      const nm = TIERS[i]?.[2] ?? TIERS[i]?.[0] ?? `layer ${i}`;
+      const shown = ly.items.filter((x) => !x.miss);
+      L.push(`  ${nm}: ${ly.kpi} ${ly.kpiLabel} · verdict ${ly.tone}`
+        + ` · ${fmtN(ly.total)} element(s)`
+        + (shown.length < ly.total ? `, ${shown.length} drawn` : ""));
+      for (const it of shown.slice(0, 6)) {
+        L.push(`      ${it.nm} — ${it.mt}${it.tone !== "info" ? ` (${it.tone})` : ""}`);
+      }
+      for (const it of ly.items.filter((x) => x.miss)) {
+        L.push(`      NOT MEASURED: ${it.nm} — ${it.mt}`);
+      }
+    });
+    L.push("",
+      scope.resolved
+        ? `Backend discovery: ${scope.services.size} service(s) linked to this application`
+          + `, from ${fmtN(scope.tracesSeen)} trace id(s) carried by its RUM`
+          + (scope.measured ? ", measured against the span store" : ", declared by Smartscape topology")
+        : "Backend discovery: not resolved in this window",
+      data.signals.length
+        ? `Davis signals attached to elements on this chain: ${fmtN(data.signals.length)}`
+        : "Davis signals on this chain: none",
+      "",
+      "Anything listed as NOT MEASURED is a gap in this app's evidence, not a",
+      "finding about the system. Do not reason past it — say it is unknown.");
+    return L.join("\n");
+  };
+
   return (
     <div className="stack">
+      {/* INTELLIGENCE — root-cause questions, asked of the chain on screen.
+          chainFacts names every layer the app could NOT resolve, so an answer
+          cannot quietly reason across a gap. */}
+      <Intelligence subject="the Delivery Chain of this application"
+        starters={CHAIN_STARTERS} facts={chainFacts} />
+
       <div className={`panel dcf-shell stage ${intro ? "intro" : ""}`} ref={shellRef}>
         <div className="stage__canvas" ref={canvasRef}
              style={view.z === 1 && view.x === 0 && view.y === 0
@@ -1825,7 +1942,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
               const beTone: Tone = [4, 5, 6, 7].reduce<Tone>(
                 (acc, ti) => worseOf(acc, tiers[ti]?.tone ?? "good"), "good");
               const storeCount = new Set((stores ?? []).map((st) => st.store)).size;
-              /* THIS app's runtime, not the tenant's: `data.runtime` is the
+              /* THIS app's runtime, not a live estate's: `data.runtime` is the
                * whole environment, and it sent a VM-deployed application's
                * reader to the Kubernetes app — measured, easytravel's 8
                * services run on zero pods. While the scope is still
@@ -2260,11 +2377,12 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     * homework. */}
                   {met.ready && (() => {
                     const rate = met.thr > 0 ? met.fails / met.thr : 0;
-                    // one failure-rate rule with the overview card:
-                    // bad >= 1%, warn >= 0.1% — 'any failure = amber' made
-                    // one blip in a million wear a warning here only
-                    const bad = rate >= 0.01, warn = rate >= 0.001 && rate < 0.01;
-                    const col = bad ? "var(--bad)" : warn ? "var(--warn)" : "var(--good)";
+                    /* the SHARED rule (utils/verdict.failTone). It used to be
+                       two literals here and two more on the Overview card,
+                       with a comment promising they matched — a promise no
+                       compiler checks. */
+                    const t = failTone(rate);
+                    const col = `var(--${t === "info" ? "good" : t})`;
                     return (
                       <div className="trf">
                         <div className="trf__top">

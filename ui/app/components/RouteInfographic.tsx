@@ -9,6 +9,7 @@
 // Every figure is the cohort's own, beside everyone else's, from one query
 // (qRouteInfographic). Where the two differ, the poster says so with the
 // lift; where nothing differs it says "same as everyone", which is a finding.
+import { Button } from "@dynatrace/strato-components/buttons";
 import React, { useEffect } from "react";
 import { fmtMs, fmtN, fmtPct } from "../utils/dql";
 import { vitalTitle } from "../utils/vitals";
@@ -351,7 +352,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               the whole of it at 2×, chrome (this button, the ✕) excluded.
               A WORDED button: the bare glyph rendered as tofu and the
               reader could not find the download at all. */}
-          <button className="export-btn noexport" disabled={exporting}
+          <Button className="noexport" variant="default" disabled={exporting}
             style={{ marginLeft: "auto", marginRight: 8 }}
             title="Download this poster as a PNG (2×) — full height, this button left out of the picture"
             onClick={async () => {
@@ -363,7 +364,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
               finally { setExporting(false); }
             }}>
             {exporting ? "rendering…" : "export image ↓"}
-          </button>
+          </Button>
           <button className="drawer__x" onClick={onClose} aria-label="Close">✕</button>
         </header>
 
