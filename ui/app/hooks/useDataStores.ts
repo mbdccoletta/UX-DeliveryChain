@@ -5,7 +5,7 @@
 // component drawn with nothing joining it to anything, which is the defect
 // this whole pass set out to remove.
 //
-// CONDITIONAL, like the cloud layer. Measured on this tenant, 13 of 104
+// CONDITIONAL, like the cloud layer. Measured on a live estate, 13 of 104
 // services call a store; the rest call none, and for them nothing is drawn.
 // A store node appears exactly where a service was measured talking to one.
 import { useEffect, useState } from "react";
@@ -18,7 +18,7 @@ export interface DataStore {
    * The store's name as the caller addresses it: `easytrade-db`,
    * `valkey-cart`, `dynamodb.us-east-1.amazonaws.com`. Not an entity id,
    * because there is no entity — Smartscape maps no service-to-store edge on
-   * this tenant. It is what the span says, which is what the service dialled.
+   * a live estate. It is what the span says, which is what the service dialled.
    */
   store: string;
   /** redis, mssql, dynamodb, mongoose … the platform's own vocabulary. */

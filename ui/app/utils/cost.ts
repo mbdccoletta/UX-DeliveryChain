@@ -2,7 +2,7 @@
 //
 // Grail bills a query by the BYTES IT SCANS, and the app measured itself to
 // learn what that means: projection is free (a bare count and an eight-column
-// summarize scan the same 5.9 GB of this tenant's two hours), filters are
+// summarize scan the same 5.9 GB of a live estate's two hours), filters are
 // everything (one application 2.9 GB, a small one 0.24 GB), every `append`
 // leg pays its own scan — and the window is LINEAR, so twenty-four hours
 // costs about twelve times two.

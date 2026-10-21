@@ -17,7 +17,7 @@ export interface AppRow {
   views: number;
   errors: number;
   /**
-   * The FATAL subset of `errors`, mobile only — measured on the reference tenant:
+   * The FATAL subset of `errors`, mobile only — measured on a live estate:
    * crashes are classifier "error" with error.type "crash" (289 events /
    * 288 sessions on Astroshop Android in 24h), and ANRs — the app frozen
    * until Android kills it — are error.type "anr" (247 more). Both are
@@ -270,7 +270,7 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
           }
         }
         /* THE ENTITY ID, RECOVERED. dt.rum.application.entity is null on
-         * a Smartscape-only tenant, and the chain needs that id for two things it silently
+         * a live estate, and the chain needs that id for two things it silently
          * lost without it: kindOf() reads the *_APPLICATION- prefix to know
          * it is looking at an application (without it a RUM app became a
          * generic "element" and its whole investigation route — Error
@@ -385,7 +385,7 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
          * (type × provider × name × status); the provider view is those rows
          * added up, and the alerts view is those rows filtered. Two reads of
          * the same 24 hours of the same store cost 8.7 GiB each on a customer
-         * tenant — this is the second one, not taken. */
+         * estate — this is the second one, not taken. */
         providers: (() => {
           const by = new Map<string, ProviderRow>();
           for (const r of davis) {

@@ -541,7 +541,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
          *
          * This used to centre on the midpoint of the bounding box of every
          * located country — one vote per country, however few sessions it
-         * held. Measured on a customer tenant: 391 sessions in Brazil and TWO
+         * held. Measured on a live estate: 391 sessions in Brazil and TWO
          * in the United States put the centre at roughly 14°N 76°W, so the map
          * opened on the Caribbean with Brazil clipped at the right edge and
          * 99.5% of the traffic off-screen. Two sessions outvoted three hundred
@@ -597,7 +597,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const because = (g: GeoArm) => geoBecause(g, base);
         /* Country NAMES from the browser itself — no dataset needed, and it
          * speaks the reader's own language. City stays impossible honestly:
-         * measured null on every RUM row of this tenant. */
+         * measured null on every RUM row of a live estate. */
         /* LATENCY per region: ttfb p75 from the same scan. Judged against
          * the MEDIAN country — a region 2× the median is paying for its
          * route, whatever the absolute number is. */
@@ -1143,7 +1143,7 @@ interface CardProps {
   /** Apdex over this application's user actions, or null when none were rated. */
   apdex: number | null;
   /** Why the score is absent, when it is — "•••" alone made a robot-only
-   *  application on the dev tenant read as a rendering bug. */
+   *  application on a live estate read as a rendering bug. */
   apdexNote?: string;
   /** The bands behind it — what the words under the score are built from. */
   apdexBands: { sat: number; tol: number; fru: number; fruErr: number } | null;
@@ -1288,7 +1288,7 @@ function CoreRing({ host, value, tone, errPerMin, errors }: {
  *
  * Laid out in the DOM rather than a stretched SVG: with
  * preserveAspectRatio="none" the bars fattened into blocks as the module got
- * wider — in the tenant shell they read as a solid slab instead of a chart.
+ * wider — in a live estate shell they read as a solid slab instead of a chart.
  * Fixed-width bars keep the same shape at any width.
  */
 /**
@@ -1439,7 +1439,7 @@ function CleanCard(p: CardProps) {
             <em className="tk-block__sparkv">{p.errorsPerMin}/min<br />error rate</em></>}>
           <div className="tk-row2">
             {/* A mobile application's card leads with its FATAL failures.
-                Measured on the reference tenant: Astroshop Android had 289 crashes and
+                Measured on a live estate: Astroshop Android had 289 crashes and
                 247 ANRs inside its error count — a crash ends the session
                 where an ordinary error merely dents it, and burying both in
                 "errors" hid the number that decides whether anyone ships a
@@ -1688,7 +1688,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
            * Views drill through the app's OWN url, observed carrying two
            * conditions at once ("View Name" and Frontend). Both are needed:
            * a view name is not unique — measured, `/` exists in four of this
-           * tenant's applications. */
+           * estate's applications. */
           /* Which screen a view earns is decided by its DOMINANT signal, not
            * by whether an error exists at all. Measured on easytrade:
            *   /home            0.1% errors · 6.3% of actions over 3s · p95 3.9s
@@ -1808,7 +1808,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           ? "one row per KIND of failure — ids in the url are collapsed, so a broken "
             + "endpoint counts once with its true weight"
           : metric === "requests"
-            ? "failures come from the error records: request events on this tenant "
+            ? "failures come from the error records: request events on a live estate "
               + "carry only 2xx, so counting 4xx off them would always read zero"
             : `apdex bands at T = ${APDEX_T_MS / 1000}s · the bar is share of user actions`}
       </div>

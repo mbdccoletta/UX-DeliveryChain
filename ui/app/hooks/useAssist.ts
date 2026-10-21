@@ -1,7 +1,7 @@
 // Is Dynatrace Assist usable by the person looking at this screen — and how?
 //
 // The platform guide is explicit that it may not be: Gen AI can be disabled on
-// the account, an admin may not have allowed it on the tenant, or the user may
+// the account, an admin may not have allowed it on a live estate, or the user may
 // lack the permission. Offering a conversation starter that cannot run is worse
 // than not offering one, so the routes ask this first.
 //
@@ -30,9 +30,9 @@ export function useAssistState(): AssistState {
       .listAvailableSkills()
       .then((r) => {
         /* The installed SDK's union predates agentic mode and does not list
-         * `operator`, but a tenant that has it returns it all the same. Read
+         * `operator`, but a live estate that has it returns it all the same. Read
          * the wire value as strings rather than pretend the skill cannot
-         * arrive — the types are a snapshot, the tenant is the truth. */
+         * arrive — the types are a snapshot, a live estate is the truth. */
         const skills: string[] = (r.skills ?? []) as unknown as string[];
         if (!cancelled) {
           setState({

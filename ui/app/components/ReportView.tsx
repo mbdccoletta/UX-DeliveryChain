@@ -238,7 +238,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    */
   const completeness = React.useMemo(() => {
     const all = data.sequences.filter((q) => (!scopeApp || q.appId === scopeApp) && q.journey.length > 0);
-    /* ONE APPLICATION ID, TWO PLATFORMS. Measured on a customer tenant: a
+    /* ONE APPLICATION ID, TWO PLATFORMS. Measured on a live estate: a
      * single banking application reported iOS view controllers AND Android
      * activities under one RUM id. They do not share a journey shape, so a
      * completion depth computed across both describes neither. The funnel is
@@ -274,7 +274,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    * WHAT DESTOA — the outlier hunter.
    *
    * Every list in this product ranks by VOLUME, so the screen that is broken
-   * but small never surfaces. Measured on this tenant: /special-offers.jsp
+   * but small never surfaces. Measured on a live estate: /special-offers.jsp
    * runs 1,126ms against ~450ms for every other screen — the only real
    * performance target in the application, and invisible on every page
    * because it carries 80 views.
@@ -408,7 +408,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   const c = withCompleteness(scoped ? asFacts(cohort?.cur) : f(curP));
   const p = withCompleteness(scoped ? asFacts(cohort?.prev) : f(prevP));
   /* EMPTY IS NOT ZERO. With no real customers in the window (a robot-only
-   * tenant, or no traffic at all) every people-based figure divides by
+   * estate, or no traffic at all) every people-based figure divides by
    * nothing — the board once printed "reached first screen only 100%",
    * "bounced 0" and "0 customers at risk" as if they were measurements.
    * The people tiles say "•••" and why, exactly as the Apdex card does. */
@@ -470,7 +470,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     const total = mine.reduce((a, q) => a + q.sessions, 0);
     const deep = completeness.deepest;
     if (!total || deep < 2) return null;
-    /* A FUNNEL NEEDS A POPULATION. Measured on a customer tenant: the selected
+    /* A FUNNEL NEEDS A POPULATION. Measured on a live estate: the selected
      * application had FOUR journeys in the window, and the funnel still drew
      * rungs, printed "25%" and "50%", and named a "biggest single loss" of two
      * sessions. Percentages over a handful of journeys are noise wearing the

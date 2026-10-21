@@ -105,7 +105,7 @@ export function Intelligence({ subject, starters, facts, className }: {
       });
       /* The endpoint answers in two shapes — one object carrying the finished
        * text, or the stream of events it was assembled from. Which arrives
-       * depends on the tenant's negotiated accept type, so read both rather
+       * depends on a live estate's negotiated accept type, so read both rather
        * than assume: a union handled on one branch is a blank panel on the
        * other. */
       const text = Array.isArray(r)

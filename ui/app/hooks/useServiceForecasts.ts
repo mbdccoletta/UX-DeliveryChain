@@ -2,7 +2,7 @@
 //
 // The projection rides the metric store, not Grail: `dt.service.request.count`
 // and its failure counterpart are pre-aggregated series, so a forecast per
-// service costs zero scanned bytes — measured on this tenant. What it does
+// service costs zero scanned bytes — measured on a live estate. What it does
 // cost is an analyzer execution each, which is why the list is capped and
 // nothing runs until the user opens the drill-down.
 //

@@ -17,7 +17,7 @@ const memo = new Map<string, BizForecast>();
 
 /**
  * Raw platform calls, same origin in dev (proxy) and production (AppEngine):
- * verified directly against the tenant — the analyzer answers synchronously
+ * verified directly against a live estate — the analyzer answers synchronously
  * for this series size, and returns OK/VALID with 8 forecast points.
  */
 async function forecastOne(

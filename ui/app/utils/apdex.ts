@@ -3,7 +3,7 @@
 // Checked before writing any of this: `apdex` is not a field on user.events
 // (none of its 80 fields carries it), there is no Grail metric for it, and the
 // classic metrics API answers 403 to this app's token. The settings API — where
-// the tenant's own thresholds live — answers 403 too (`settings:objects:read`
+// a live estate's own thresholds live — answers 403 too (`settings:objects:read`
 // is not in the app's scopes). So the number cannot be read; it has to be
 // computed, and the threshold it was computed with has to be stated on screen
 // next to it. An Apdex whose T is invisible is a number nobody can check.
@@ -18,13 +18,13 @@
 //
 // measured over USER ACTIONS, which is the unit Dynatrace rates — not views and
 // not sessions. T is Dynatrace's own default for user actions, 3 s, so this
-// app's number matches what the platform would report for a tenant that never
-// changed the setting. Where a tenant HAS changed it, ours will differ, which
+// app's number matches what the platform would report for a live estate that never
+// changed the setting. Where a live estate HAS changed it, ours will differ, which
 // is exactly why the label says which T produced it.
 //
 // DYNATRACE'S ERROR RULE — "user actions with reported errors are rated as
 // Frustrated" (docs, verified 2026-08) — IS implemented, at the closest grain
-// this tenant's data links. The docs' mechanism is server-side; in Grail the
+// a live estate's data links. The docs' mechanism is server-side; in Grail the
 // error events carry no user_action.id (checked: none of the populated
 // fields), so per-action attribution is impossible. What both sides DO share
 // is view.instance_id (measured: 1,224 view instances in a 2h window hold
@@ -33,7 +33,7 @@
 // whatever their speed. An error with no view instance frustrates nothing —
 // the rule only acts where the data actually links. Implemented in qUxByApp
 // and qDetailExperience; an earlier note here cited `user_action.error_count`
-// (always zero on this tenant) — that field was never Dynatrace's mechanism.
+// (always zero on a live estate) — that field was never Dynatrace's mechanism.
 
 /** Dynatrace's default tolerated threshold for user actions. */
 export const APDEX_T_MS = 3_000;
@@ -70,7 +70,7 @@ export const apdexBand = (v: number): ApdexBand =>
 
 /**
  * Apdex judges SPEED, never correctness — an application can be fast and
- * broken at the same time, and on this tenant one is: Astroshop-Snow scores
+ * broken at the same time, and on a live estate one is: Astroshop-Snow scores
  * 0.969 while every session it served hit an error. So this tone colours the
  * performance cell only; it is deliberately not an input to verdictOf().
  */
