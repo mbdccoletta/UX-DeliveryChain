@@ -12,11 +12,35 @@
 //
 // Fetched lazily and memoised: most sessions never switch application, and a
 // scope that has been resolved once does not change while the user looks at it.
-import { useEffect, useState } from "react";
-import { qAppSeedGen2, qAppServices, qAppServicesTopo, qAppServicesTopoMobile,
+import { useCallback, useEffect, useState } from "react";
+import { qAppSeedGen2, qAppServices, qAppTraceIds,
+  qAppServicesTopo, qAppServicesTopoMobile,
   qServiceRuntime, runDql } from "../utils/dql";
 
 export interface AppScope {
+  /**
+   * How many distinct traces this application's RUM actually carried.
+   *
+   * Zero and "some but none matched a span" are different findings with
+   * different actions, and the chain used to print one sentence for both.
+   * Measured on a customer tenant: of twenty applications, nine carried
+   * thousands of requests and NOT ONE trace id, while others on the same
+   * tenant carried tens of thousands — so an empty backend there is a
+   * per-application tracing-context gap, not a topology fact.
+   */
+  tracesSeen: number;
+  /**
+   * Has the reader asked for the SPAN measurement on this application?
+   *
+   * Topology is free and answers most of the time; spans cost real money on a
+   * large estate (~32 GiB for ten minutes on a tenant carrying 169M spans in
+   * two hours) and must never be spent by the act of opening a page.
+   */
+  measured: boolean;
+  /** The span read is running. */
+  measuring: boolean;
+  /** Ask for it. Costs a scan, so it is a button, not a side effect. */
+  measure: () => void;
   /** Service entity ids this application's traces actually reach. */
   services: Set<string>;
   /** Traces observed per service — the volume an edge into it carries. */
@@ -33,7 +57,7 @@ export interface AppScope {
    * run straight on hosts has a full chain too, and reading only pods was what
    * left this layer blank and the machinery below it unattached.
    */
-  placements: Array<{ svc: string; id: string; type: string; name: string }>;
+  placements: Array<{ svc: string; id: string; type: string; name: string; classic?: string }>;
   /** True when membership came from classic topology, not from traces —
    *  volumes are unknown then, and the UI says "linked" instead of counting. */
   topo?: boolean;
@@ -52,17 +76,23 @@ export interface AppScope {
 }
 
 const EMPTY: AppScope = { services: new Set(), traces: new Map(), names: new Map(),
-  runtime: new Set(), placements: [], resolved: false, loading: false };
+  runtime: new Set(), placements: [], resolved: false, loading: false,
+  tracesSeen: 0, measured: false, measuring: false, measure: () => {} };
 const memo = new Map<string, AppScope>();
 
 export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
   const [scope, setScope] = useState<AppScope>(
     rumAppId ? memo.get(rumAppId) ?? EMPTY : EMPTY,
   );
+  /* Which applications the reader has paid the span scan for, this session.
+   * Keyed rather than boolean so switching application does not inherit
+   * someone else's decision to spend. */
+  const [paid, setPaid] = useState<Set<string>>(() => new Set());
+  const wantSpans = !!rumAppId && paid.has(rumAppId);
 
   useEffect(() => {
     if (!rumAppId) { setScope(EMPTY); return; }
-    const memoKey = `${rumAppId}|${appEntity ?? ""}`;
+    const memoKey = `${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`;
     const hit = memo.get(memoKey);
     if (hit) { setScope(hit); return; }
 
@@ -70,49 +100,75 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
     setScope({ ...EMPTY, loading: true });
     (async () => {
       let out: AppScope = { services: new Set(), traces: new Map(), names: new Map(),
-        runtime: new Set(), placements: [], resolved: false, loading: false };
+        runtime: new Set(), placements: [], resolved: false, loading: false,
+        tracesSeen: 0, measured: false, measuring: false, measure: () => {} };
       try {
-        // UNION of the two discovery engines, so nothing measured OR declared
-        // is lost: traces catch what topology has not declared; topology
-        // catches what a 300-trace sample missed and everything classic RUM
-        // (PurePath ids, absent from Grail spans) cannot join at all.
-        const rows = await runDql<{ svc: string; traces: number; name?: string }>(
-          qAppServices(rumAppId), 60);
+        /* ORDER IS A PRICE LIST, and this used to be in the wrong order.
+         *
+         * Three engines answer "which services does this application reach",
+         * and they do not cost the same. Smartscape topology is metadata: a
+         * FRONTEND-to-SERVICE `calls` edge costs nothing to read. The RUM side
+         * is small. SPANS are the biggest store in Grail, billed by the window,
+         * and on a customer tenant carrying 169M spans in two hours a single
+         * ten-minute span read scans ~32 GiB — about $0.11 EVERY TIME a reader
+         * opens an application. A diagnostic that bills per click is not a
+         * diagnostic, it is a subscription.
+         *
+         * So: topology first and always, because it is free. Trace ids next,
+         * because they are cheap and they answer the question the chain most
+         * often needs — whether this application propagates trace context at
+         * all. Spans only when the reader asks for them by name.
+         */
         const topoRows = await (async () => {
           try {
-            if (/^[0-9a-f]{16}$/.test(rumAppId))
-              return await runDql<{ svc: string; traces: number; name?: string }>(
-                qAppServicesTopo(rumAppId), 60);
+            // No id-shape gate: qAppServicesTopo keys on the FRONTEND node's
+            // own dt.rum.instrumentation.id, which every RUM application has
+            // whatever its id looks like. The old /^[0-9a-f]{16}$/ test skipped
+            // every UUID-shaped application for no reason a measurement backs.
+            const viaFrontend = await runDql<{ svc: string; traces: number; name?: string }>(
+              qAppServicesTopo(rumAppId), 60);
+            if (viaFrontend.length) return viaFrontend;
             if (appEntity?.startsWith("MOBILE_APPLICATION-"))
               return await runDql<{ svc: string; traces: number; name?: string }>(
                 qAppServicesTopoMobile(appEntity), 60);
-          } catch { /* topology view unavailable — traces alone still stand */ }
+          } catch { /* topology view unavailable — the cheaper reads still stand */ }
           return [];
         })();
-        for (const t of topoRows) {
-          if (!rows.some((r) => r.svc === t.svc)) rows.push(t);
+        const rows: Array<{ svc: string; traces: number; name?: string }> = [...topoRows];
+
+        /* Does this application propagate trace context? Cheap, and worth
+         * knowing even when topology already answered: an empty backend has two
+         * causes and they call for opposite actions. */
+        const idsIn = async (since: string) =>
+          (await runDql<Record<string, unknown>>(qAppTraceIds(rumAppId, since), 300))
+            .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
+            .filter(Boolean);
+        let since = "now()-10m";
+        let traceIds = await idsIn(since);
+        if (!traceIds.length) {
+          // the escalation stays on the CHEAP side of the wall
+          since = "now()-30m";
+          traceIds = await idsIn(since);
         }
-        /* THIRD source, asked only when the first two came back empty.
-         *
-         * Traces need the application to send RUM into Grail and Smartscape
-         * needs it to have a Gen3 node; an application with neither is not
-         * an application without a backend, it is one whose backend only the
-         * classic model still describes. Measured: `easyTravel Mobile
-         * (mainframe)` has no events in seven days and no Smartscape edge,
-         * and `dt.entity.mobile_application.calls` names its webserver in one
-         * hop — from which the chain walks the rest.
-         *
-         * Last, never first: where the other two answer, they answer with
-         * measured volumes, and this one has none to give. */
-        if (!rows.length && appEntity) {
+
+        /* THE EXPENSIVE READ, and the only one behind a decision. Topology
+         * declares what the platform knows; spans measure what actually ran,
+         * including links topology never declared. That extra truth is worth
+         * paying for sometimes — which is exactly why a person, not a page
+         * load, should decide when. */
+        if (wantSpans && traceIds.length) {
           try {
-            const seed = await runDql<{ svc: string; name?: string }>(
-              qAppSeedGen2(appEntity), 40);
-            for (const r of seed) {
-              if (r.svc) rows.push({ svc: r.svc, traces: 0, name: r.name });
+            const measured = await runDql<{ svc: string; traces: number; name?: string }>(
+              qAppServices(traceIds, since), 60);
+            for (const m of measured) {
+              const hit = rows.find((r) => r.svc === m.svc);
+              // a measured volume always beats a declared zero
+              if (hit) hit.traces = Number(m.traces) || 0;
+              else rows.push(m);
             }
-          } catch { /* the classic model is unavailable too — the scope is empty */ }
+          } catch { /* the span read failed; declared topology still stands */ }
         }
+
         const topo = rows.length > 0 && rows.every((r) => !Number(r.traces));
         const services = new Set(rows.map((r) => String(r.svc)).filter(Boolean));
         const traces = new Map(rows.map((r) => [String(r.svc), Number(r.traces) || 0]));
@@ -123,12 +179,17 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         // must say so — not display the whole environment as if it belonged to
         // the app. Only a FAILED query leaves the scope unresolved.
         out = { services, traces, names, topo, runtime: new Set(), placements: [],
-          resolved: true, loading: false };
+          resolved: true, loading: false, tracesSeen: traceIds.length,
+          measured: wantSpans, measuring: false, measure: () => {} };
         if (services.size) {
           try {
-            const rt = await runDql<{ src: string; id: string; type: string; name: string }>(
+            const rt = await runDql<{ src: string; id: string; type: string;
+              name: string; classic?: string }>(
               qServiceRuntime([...services]), 800);
-            out.runtime = new Set(rt.map((r) => String(r.id)).filter(Boolean));
+            // both id forms enter the scope set: Davis names k8s entities in
+            // classic form, and a set without them can never match its events
+            out.runtime = new Set(rt.flatMap((r) => [String(r.id), r.classic ? String(r.classic) : ""])
+              .filter(Boolean));
             // The NAME travels with the placement now. The runtime layer used
             // to be drawn from a pod-centric query and named from there, which
             // left it empty wherever services do not run on pods — measured on
@@ -138,6 +199,7 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
             out.placements = rt.map((r) => ({
               svc: String(r.src), id: String(r.id), type: String(r.type),
               name: r.name ? String(r.name) : String(r.id),
+              classic: r.classic ? String(r.classic) : undefined,
             }));
           } catch {
             /* Smartscape unavailable — services still narrow, runtime does not */
@@ -151,7 +213,12 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
     })();
 
     return () => { live = false; };
-  }, [rumAppId, appEntity]);
+  }, [rumAppId, appEntity, wantSpans]);
 
-  return scope;
+  const measure = useCallback(() => {
+    if (rumAppId) setPaid((s) => (s.has(rumAppId) ? s : new Set(s).add(rumAppId)));
+  }, [rumAppId]);
+
+  return { ...scope, measured: wantSpans, measure,
+    measuring: wantSpans && scope.loading };
 }

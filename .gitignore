@@ -9,6 +9,13 @@ out/
 # holds the live app_token and toolkit_token for the tenant. Never committed.
 .dt-app/
 
+# Which tenant this checkout points at. The repository is public, so the
+# environment URL is a local fact, not a committed one: DT_APP_ENVIRONMENT_URL
+# here overrides the placeholder in app.config.json (flag > env > file).
+.env
+.env.*
+!.env.example
+
 # macOS
 .DS_Store
 *.log

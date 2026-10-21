@@ -2,12 +2,18 @@
 // problems, custom alerts and extension events.
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { fmtK, fmtMs, fmtN, perfScore } from "../utils/dql";
-import { insightsFor, type Insight } from "../utils/insights";
-import { intentsAvailable, investigationPaths, kindOf, open, type Persona, type Route } from "../utils/links";
+import { appHomeHref, intentsAvailable, investigationPaths, kindOf,
+  KIND_LABEL as ENTITY_WORD, open,
+  type Persona, type Route } from "../utils/links";
+import { useFrontendNames } from "../hooks/useFrontendNames";
+import { useDbEntities } from "../hooks/useDbEntities";
+import { useLayerStats } from "../hooks/useLayerStats";
+import { useJourneys } from "../hooks/useJourneys";
+import { useQuietProbe } from "../hooks/useQuietProbe";
 import type { ChainData } from "../hooks/useChainData";
 import { usePanZoom } from "../hooks/usePanZoom";
 import { useAssist } from "../hooks/useAssist";
-import { useApps } from "../hooks/useApps";
+import { type AppMap, useApps } from "../hooks/useApps";
 import { useAppScope, type AppScope } from "../hooks/useAppScope";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
@@ -15,13 +21,13 @@ import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useDbEntity } from "../hooks/useDbEntity";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
-import { davisCategory, verdictOf, worseOf, type Tone } from "../utils/verdict";
+import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone } from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import { useDomainTraces } from "../hooks/useDomainTraces";
-import type { Forecast } from "../utils/forecast";
+import { aheadOf, type Forecast } from "../utils/forecast";
 import type { SvgIconProps } from "@dynatrace/strato-icons";
 import {
-  ApplicationsIcon, AutomationEngineIcon, ContainerIcon, DatabaseIcon, DesktopIcon,
+  ApplicationsIcon, AutomationEngineIcon, ContainerIcon, DatabaseIcon, DesktopIcon, TerminalIcon,
   HostsIcon, InternetIcon, MobileIcon, NetworkIcon, NodeIcon,
   ServicesIcon, SyntheticMonitoringSignetIcon, UserSessionsIcon,
 } from "@dynatrace/strato-icons";
@@ -54,6 +60,9 @@ export const TIERS: Array<[string, string, string]> = [
 ];
 
 /** The platform's own icon per layer — and per node kind below. */
+/** The layer's name where a reader can see it — "layer 05" was jargon. */
+const TIER_NAME = ["Consume", "Transport", "Render", "Route",
+  "Serve", "Runtime", "Infrastructure", "Cloud"] as const;
 const LAYER_ICON = [
   UserSessionsIcon, InternetIcon, ApplicationsIcon, NetworkIcon,
   ServicesIcon, ContainerIcon, HostsIcon, AutomationEngineIcon,
@@ -75,7 +84,11 @@ const KIND_LABEL = (kind: string): string => kind
 function nodeIcon(ti: number, n: { nm: string; store?: string; gen2Db?: boolean }): React.ComponentType<SvgIconProps> {
   if (ti === 0) {
     if (n.nm === "Mobile") return MobileIcon;
-    if (n.nm === "Robots") return AutomationEngineIcon;
+    /* Not AutomationEngineIcon: that glyph is the AutomationEngine PRODUCT
+     * logo — its native tooltip literally reads "AutomationEngine" over a
+     * node called Robots. Strato ships no robot; Terminal is the honest
+     * stand-in for scripted, machine-driven traffic, and brands nothing. */
+    if (n.nm === "Robots") return TerminalIcon;
     if (n.nm === "Synthetic") return SyntheticMonitoringSignetIcon;
     return DesktopIcon;
   }
@@ -115,6 +128,16 @@ interface Elo {
    * subtitle. A divider is drawn where the group changes.
    */
   grp?: "classic" | "stores";
+  /**
+   * An offer the card makes, rather than a cost the page already paid.
+   *
+   * The span read that measures a backend link scans the biggest store in
+   * Grail — ~32 GiB for ten minutes on a tenant carrying 169M spans in two
+   * hours, about $0.11 a click. Topology answers free and answers first; when
+   * it cannot, the card SAYS what the deeper read would cost and lets a person
+   * decide, instead of billing them for opening a page.
+   */
+  act?: { label: string; run: () => void; hint: string };
 }
 
 /**
@@ -158,15 +181,65 @@ const ORIGIN_META: Record<Origin, string> = {
 };
 
 /** A measured flow between two rendered cards. */
-interface Edge { s: [number, number]; t: [number, number]; v: number; label: string }
+interface Edge {
+  s: [number, number]; t: [number, number]; v: number; label: string;
+  /** The route's own casualties: failed requests, or sessions that met an
+   *  error, riding THIS leg. undefined = not measured for this edge kind;
+   *  null = still loading. Free — every count already sits in the rows the
+   *  edge volumes come from. */
+  bad?: number | null;
+  /** True when the app has failed calls that carry no domain — a leg whose
+   *  own count is 0 cannot claim "clean" while failures sit unattributed. */
+  blind?: boolean;
+  /** The leg's median latency, when the same rows carry one (ns). */
+  p50?: number;
+  /** The tail — speaks when the median is 0 (measured: over half of the
+   *  first-party requests report zero duration). */
+  p90?: number;
+  /** The leg's volume in the SECOND half of the window — the free trend
+   *  split the queries now carry. null: unknown (cached payload from before
+   *  the column, or a shifted window where a trend is not a forecast). */
+  late?: number | null;
+}
 
 /** Entity ids a Davis problem points at. */
 const problemIds = (p: { entityIds: string[] | null }) => p.entityIds ?? [];
 
 /** Builds the 7 layers from the loaded live data. */
+/**
+ * Does this classic-only service earn its own card? The same database must
+ * not be drawn twice: when a classic DATABASE service's significant name
+ * tokens appear in a store card's namespace or address (measured: derby @
+ * ls-ub-lb4ac00v vs "MF easyTravelBusiness", one physical DB as two boxes),
+ * the store card — which carries measured calls and latency — keeps it.
+ * Shared by the tier builder AND the backend row's "N topology-mapped" sub,
+ * so the count can never disagree with the cards (it once said 2 over 0).
+ */
+function gen2CardKept(g: Gen2Service, stores: DataStore[] | null): boolean {
+  if (!/DATABASE|DATASTORE/.test(g.kind) || !stores?.length) return true;
+  const gt = g.name.toLowerCase().replace(/[^a-z0-9]+/g, " ")
+    .split(" ").filter((t) => t.length >= 4);
+  return !stores.some((st) => {
+    const hay = ` ${(st.ns ?? "")} ${st.store} `.toLowerCase();
+    return gt.length > 0 && gt.some((t) => hay.includes(t));
+  });
+}
+
 function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecast | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
   stores: DataStore[] | null, gen2: Gen2Service[] | null,
+  /** store address → resolved DB entity ids (batched Smartscape lookup),
+   *  so database health alerts can light store cards. */
+  dbIds?: Map<string, { id: string; classic?: string }> | null,
+  /** 24h probe for a window with zero sessions — "quiet" vs "uninstrumented"
+   *  are different findings and the empty card must say which. */
+  quiet?: { sessions: number; last: string | null } | null,
+  /** A third-party-TAGGED domain proven to be this app's own backend —
+   *  spans with server.address == domain exist (measured: the Android app's
+   *  only domain carries 93,250 spans over 2 of its services in 30m, yet
+   *  RUM tags it third_party). Promoted, it feeds the Route layer instead
+   *  of leaving it "No coverage". */
+  promotedFp: string | null = null,
 ): { layers: Layer[]; edges: Edge[] } {
   const app = d.apps.find((a) => a.appId === appId);
   // Layers 1, 2 and 4 come from RUM, which now carries the application id —
@@ -176,7 +249,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    *
    * Profiles are a top-20 over the whole environment — grouped by application
    * and resolution and pixel ratio and orientation, twenty rows is a handful
-   * of the busiest applications. Measured on lab-tenant: 248 profile rows across
+   * of the busiest applications. Measured on the reference tenant: 248 profile rows across
    * 14 applications, the top twenty covering seven of them. easyTravel
    * mainframe has 431 sessions and 26 profile rows, none of which survive the
    * cut, so this layer drew "No coverage" while the Sessions app listed those
@@ -187,16 +260,21 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   const devSessions = devices.reduce((a, r) => a + r.sessions, 0);
 
   /* ── measured harm, per origin ──
-   * The per-session scan counts hits as real / robot / synthetic; the device
-   * rows say how many sessions each origin brought. "Real" covers two cards
-   * here (Browsers and Mobile), so its hits are split between them in
-   * proportion to their sessions. Null while the scan is in flight — a node
-   * must never be painted green because the evidence has not arrived. */
+   * MEASURED now, per origin row (qOrigins carries max-error-per-session
+   * summed by origin). The audit caught the old form: a proportional split
+   * of the app-wide count, worn as an exact number on cards and edges. The
+   * estimate survives only as the fallback for cached payloads written
+   * before the column existed. Null while nothing has arrived — a node must
+   * never be painted green because the evidence has not come. */
   const realSessions = devices.reduce((a, r) => {
     const o = originOf(r.agent, r.utype);
     return o === "Browsers" || o === "Mobile" ? a + r.sessions : a;
   }, 0);
   const hitPerOrigin = (o: Origin, total: number): number | null => {
+    const rows = devices.filter((r) => originOf(r.agent, r.utype) === o);
+    if (rows.length > 0 && rows.every((r) => r.hit != null)) {
+      return Math.min(rows.reduce((a, r) => a + (r.hit ?? 0), 0), total);
+    }
     if (!impacted) return null;
     if (o === "Robots") return Math.min(impacted.hitRobot, total);
     if (o === "Synthetic") return Math.min(impacted.hitSynth, total);
@@ -204,19 +282,48 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       ? Math.min(Math.round(impacted.hitReal * (total / realSessions)), total) : 0;
   };
 
-  // rows arrive split by origin for the edges; cards aggregate per domain
+  // rows arrive split by origin for the edges; cards aggregate per domain.
+  // err now counts failed CALLS (fetch-source errors); on tenants whose
+  // error events carry no url.domain they arrive under domain "" — those
+  // failures are real but unattributable, so they gate the "clean" word
+  // instead of joining a domain's tally.
+  let unattribErr = 0;
   const domAgg = new Map<string, { domain: string; provider: string | null;
-    reqs: number; p50: number; err: number; bytes: number }>();
+    reqs: number; p50: number; p90: number; err: number; bytes: number;
+    late: number | null }>();
   for (const r of domains) {
+    if (!r.domain) { unattribErr += r.err; continue; }
     const cur = domAgg.get(r.domain);
-    if (cur) { cur.reqs += r.reqs; cur.err += r.err; cur.bytes += r.bytes;
-      cur.p50 = Math.max(cur.p50, r.p50); }
+    if (cur) {
+      // the DOMINANT segment's p50 names the domain — max() once let a
+      // 39-request synthetic sliver (4.9ms) caption 922k real requests (~0ms);
+      // per-segment p50s cannot be merged into a true p50, so the honest
+      // approximation is the one that describes almost all of the traffic
+      if (r.reqs > cur.reqs) { cur.p50 = r.p50; cur.p90 = r.p90; }
+      cur.reqs += r.reqs; cur.err += r.err; cur.bytes += r.bytes;
+      // one unknown half poisons the sum — a partial "late" would trend on
+      // a fraction of the traffic while claiming the whole
+      cur.late = cur.late == null || r.late == null ? null : cur.late + r.late;
+    }
     else domAgg.set(r.domain, { domain: r.domain, provider: r.provider,
-      reqs: r.reqs, p50: r.p50, err: r.err, bytes: r.bytes });
+      reqs: r.reqs, p50: r.p50, p90: r.p90, err: r.err, bytes: r.bytes,
+      late: r.late ?? null });
   }
+  /* Latency with its dignity. Measured on this tenant: over half of the
+   * 916k first-party requests report ZERO duration, so the median is 0 and
+   * a bare "0ms" was truth wearing the clothes of nonsense. When the median
+   * is silent the tail speaks, labelled as itself; the ledger says WHY. */
+  const latShort = (p50: number, p90: number) =>
+    p50 <= 0 && p90 > 0 ? fmtMs(p90) : fmtMs(p50);
+  const latRows = (p50: number, p90: number): Array<[string, string]> =>
+    p50 <= 0 && p90 > 0
+      ? [["p50", "0ms — over half of these requests report zero duration"],
+         ["p90", fmtMs(p90)]]
+      : [["p50", fmtMs(p50)], ...(p90 > 0 ? [["p90", fmtMs(p90)] as [string, string]] : [])];
   const domList = [...domAgg.values()].sort((a, b) => b.reqs - a.reqs);
-  const firstParty = domList.find((x) => x.provider === "first_party");
-  const others = domList.filter((x) => x.provider !== "first_party");
+  const firstParty = domList.find((x) => x.provider === "first_party")
+    ?? (promotedFp ? domList.find((x) => x.domain === promotedFp) : undefined);
+  const others = domList.filter((x) => x !== firstParty);
   const fanOut = d.calls.reduce<Record<string, number>>((acc, c) => {
     acc[c.src] = (acc[c.src] ?? 0) + 1; return acc;
   }, {});
@@ -278,12 +385,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * host-based deployment maps as completely as a Kubernetes one.
    */
   /* A serverless function is a PLACEMENT, not a layer of its own: measured on
-   * lab-tenant, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
+   * the reference tenant, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
    * the shape of `runs_on HOST`. So a lambda-backed service maps with no new
    * query and no new column — the runtime card simply says "lambda" where
    * another says "host".
    *
-   * Listed even though lab-tenant has none of those edges today, because the
+   * Listed even though the dev tenant has none of those edges today, because the
    * list is read against what the placement query returned: a type absent from
    * the environment costs nothing, while a type missing from this list is a
    * service silently drawn as running on nothing. */
@@ -323,10 +430,36 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     v: "—", tone: "info", miss: true,
     det: [["Meaning", "Smartscape maps no pod/host under these services"],
           ["Action", "check OneAgent injection on the workload"]] };
-  const noLink: Elo = { nm: "No measured link", mt: "no trace reaches a service", v: "—",
-    tone: "info", miss: true,
-    det: [["Meaning", "sessions of this application carry no backend trace"],
-          ["Action", "check RUM–trace correlation or OneAgent coverage"]] };
+  /* TWO DIFFERENT FINDINGS, TWO DIFFERENT SENTENCES. "No trace reaches a
+     service" covered both an application that never propagated a trace id and
+     one whose traces landed on nothing monitored — and they call for opposite
+     actions. Measured on a customer tenant: of twenty applications, nine
+     carried thousands of requests and not one trace id, while neighbours on
+     the same tenant carried tens of thousands. That is a tracing-context gap
+     in the frontend's own configuration, and telling that reader to "check
+     OneAgent coverage" on the backend sends them to the wrong building. */
+  const noLink: Elo = scope.tracesSeen === 0
+    ? { nm: "No trace context", mt: "this application propagates none", v: "—",
+        tone: "info", miss: true,
+        det: [["Meaning", "its RUM records requests but attaches no trace id, so there is nothing to follow into the backend"],
+              ["Action", "enable W3C traceparent for this application's API domains in its RUM configuration"],
+              ["Why no deeper read is offered", "with no trace id there is nothing to look for; scanning spans would cost money to confirm an empty set"]] }
+    : scope.measured
+      ? { nm: "No measured link", mt: `${fmtN(scope.tracesSeen)} traces reach no service`, v: "—",
+          tone: "info", miss: true,
+          det: [["Meaning", "trace ids exist on this application's requests, but no span carrying them belongs to a monitored service"],
+                ["Action", "check that the receiving services report spans, and that their trace context survives the hop"]] }
+      /* TOPOLOGY HAD NOTHING TO DECLARE, and the deeper read is a purchase. */
+      : { nm: "Not measured yet", mt: `${fmtN(scope.tracesSeen)} traces available to follow`, v: "—",
+          tone: "info", miss: true,
+          act: { label: scope.measuring ? "measuring…" : "follow the traces ↗",
+                 run: scope.measure,
+                 hint: "Reads the span store for these trace ids. Spans are the "
+                   + "largest store in Grail and are billed by the window — on a "
+                   + "large estate this single read scans tens of gigabytes, so "
+                   + "the app asks instead of spending it on every page load." },
+          det: [["Meaning", "Smartscape declares no service behind this application, and the traces have not been followed"],
+                ["Why it is a button", "following them reads the span store, which is billed by what it scans — a page load must not spend that on its own"]] };
 
   /* ── the data stores those services call ────────────────────────────────
    * One card per store, not per service-to-store pair: `easytrade-db` is one
@@ -364,9 +497,14 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           nm: store, mt: `${sys} · ${fmtN(calls)} calls`,
           v: fmtMs(wAvg((s) => s.p50)), tone: "info", vol: calls,
           store, grp: "stores",
-          // No ids: there is no entity behind this card. Smartscape maps no
-          // service-to-store edge on this tenant, so signals cannot attach and
-          // the card must not pretend a drilldown exists.
+          /* ids WHEN the DB entity resolves (batched, useDbEntities): the
+           * tenant's database health alerts bind to the instances' classic
+           * CUSTOM_DEVICE- ids, and a card with no ids could never light —
+           * the Databases app showed a "Configuration" alert this chain
+           * painted calm. A store with no DB_* node (redis, mongo) still
+           * carries none, honestly. */
+          ids: (() => { const e = dbIds?.get(store);
+            return e ? [e.id, ...(e.classic ? [e.classic] : [])] : []; })(),
           det: [["Technology", sys],
                 ...(nss.length ? [["Database", nss.join(" · ")] as [string, string]] : []),
                 ["Calls (10m)", fmtN(calls)],
@@ -391,7 +529,9 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * hop, the one the whole walk exists to find, fell off the end. Ten leaves
    * the Serve layer room for at least two of its own services while letting
    * a classic-only chain arrive whole. */
-  const gen2Cards: Elo[] = (gen2 ?? []).slice(0, 10).map<Elo>((g) => ({
+  const gen2Cards: Elo[] = (gen2 ?? [])
+    .filter((g) => gen2CardKept(g, stores))
+    .slice(0, 10).map<Elo>((g) => ({
     nm: g.name, mt: `${KIND_LABEL(g.kind)} · topology-mapped`,
     v: String(g.callers.length || "·"), tone: "info",
     vol: Math.max(g.callers.length * 40, 1),
@@ -475,19 +615,47 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
                 ["Device profiles",
                  String(devices.filter((r) => originOf(r.agent, r.utype) === o)
                    .reduce((a, r) => a + r.profiles, 0))]],
-        }; }) : [noData];
+        }; }) : [quiet ? (() => {
+          /* "quiet" and "uninstrumented" are different findings — the reader
+           * saw an empty chain and asked whether the app had users AT ALL.
+           * Measured then: 0 sessions in the window, 21 in the day. The card
+           * now answers instead of shrugging "No coverage". */
+          const hoursAgo = quiet.last
+            ? Math.max(1, Math.round((Date.now() - new Date(quiet.last).getTime()) / 3.6e6))
+            : null;
+          return quiet.sessions > 0 ? {
+            nm: "No sessions in this window",
+            mt: `quiet, not uninstrumented`, v: "—", tone: "info" as Tone, miss: true,
+            det: [["Last 24 hours", `${fmtN(quiet.sessions)} sessions`],
+                  ...(hoursAgo !== null
+                    ? [["Last session", `≈${hoursAgo}h ago`] as [string, string]] : []),
+                  ["Reading", "the agent reported sessions within the day — "
+                    + "this window is simply quiet; widen the timeframe to see them"]],
+          } : {
+            nm: "No sessions in 24 hours",
+            mt: "silent for a full day", v: "—", tone: "warn" as Tone, miss: true,
+            det: [["Reading", "either genuinely no users, or the instrumentation "
+              + "stopped reporting — a full-day silence is worth checking in "
+              + "Experience Vitals"]],
+          };
+        })() : noData];
       })(),
       // the layer's KPI is the sum of the cards drawn under it, never a second
       // measurement of the same thing — the two used to disagree by ~100
       Math.max(devices.length, 1), fmtK(devSessions), "sessions"),
 
     L(others.length ? others.map<Elo>((x) => ({
-        nm: x.domain, mt: `${x.provider ?? "—"} · ${fmtN(x.reqs)} req`, v: fmtMs(x.p50), tone: "info", vol: x.reqs,
+        nm: x.domain, mt: `${x.provider ?? "—"} · ${fmtN(x.reqs)} req`,
+        v: latShort(x.p50, x.p90), tone: "info", vol: x.reqs,
         domain: x.domain,
-        det: [["Provider", x.provider ?? "—"], ["Requests", fmtN(x.reqs)], ["p50", fmtMs(x.p50)],
+        det: [["Provider", x.provider ?? "—"], ["Requests", fmtN(x.reqs)],
+              ...latRows(x.p50, x.p90),
               ["4xx/5xx errors", fmtN(x.err)],
               ["Transferred", x.bytes ? fmtK(Math.round(x.bytes / 1024)) + " KB" : "—"]] })) : [noData],
-      domList.length, fmtK(domList.reduce((a, x) => a + x.reqs, 0)), "requests"),
+      // third parties only: this column's cards ARE the non-first-party
+      // domains, and its header once said "922.5k requests" over a single
+      // "No coverage" card because every request was first-party (audit)
+      others.length, fmtK(others.reduce((a, x) => a + x.reqs, 0)), "requests"),
 
     L([{ nm: app?.name ?? "—", mt: `FRONTEND · ${fmtN(app?.views ?? 0)} views`, v: fmtK(app?.errors ?? 0),
         tone: "info", vol: app?.views ?? 0,
@@ -500,12 +668,22 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
               ["Errors", fmtN(app?.errors ?? 0)], ["View p50", fmtMs(app?.p50View ?? 0)]] }],
       1, fmtMs(app?.p50View ?? 0), "view p50"),
 
-    L(firstParty ? [{ nm: firstParty.domain, mt: `ingress · ${fmtN(firstParty.reqs)} req`, v: fmtMs(firstParty.p50),
+    L(firstParty ? [{ nm: firstParty.domain, mt: `ingress · ${fmtN(firstParty.reqs)} req`,
+        v: latShort(firstParty.p50, firstParty.p90),
         tone: "info", domain: firstParty.domain, vol: firstParty.reqs,
-        det: [["Requests", fmtN(firstParty.reqs)], ["p50", fmtMs(firstParty.p50)],
-              ["Errors", fmtN(firstParty.err)],
-              ["Transferred", fmtK(Math.round(firstParty.bytes / 1048576)) + " MB"]] }] : [noData],
-      1, firstParty ? fmtMs(firstParty.p50) : "—", "ingress p50"),
+        det: [["Requests", fmtN(firstParty.reqs)],
+              ...latRows(firstParty.p50, firstParty.p90),
+              ["Failed calls", fmtN(firstParty.err)],
+              ["Transferred", fmtK(Math.round(firstParty.bytes / 1048576)) + " MB"],
+              // a promoted domain says WHY it sits here: RUM tagged it
+              // third-party, the spans said otherwise
+              ...(firstParty.provider !== "first_party"
+                ? [["Classified by", "its traces — this app's own services serve "
+                    + "this address (RUM tags it third-party)"] as [string, string]]
+                : [])] }] : [noData],
+      1, firstParty ? latShort(firstParty.p50, firstParty.p90) : "—",
+      firstParty && firstParty.p50 <= 0 && firstParty.p90 > 0
+        ? "ingress p90" : "ingress p50"),
 
     L(scope.loading ? [measuring] : unlinked ? [noLink]
       : svcRows.length ? serveCards : [noData],
@@ -555,14 +733,18 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           return uniq.length <= 4
             ? uniq.map<Elo>((p) => ({
                 nm: p.name, mt: `${type} · runs_on`, v: label, tone: "info",
-                ids: [p.id],
+                // both id forms: Davis k8s events carry the classic one
+                ids: [p.id, ...(p.classic ? [p.classic] : [])],
                 det: [["Smartscape", `SERVICE runs_on ${type}`],
                       ["Serves", String(rows.filter((r) => r.id === p.id).length)
                         + " service(s)"]] }))
             : [{
-                nm: `${uniq.length} ${label}s`, mt: `${type} · runs_on`,
+                // "process" pluralised by suffix alone read "14 processs"
+                nm: `${uniq.length} ${label.endsWith("s") ? `${label}es` : `${label}s`}`,
+                mt: `${type} · runs_on`,
                 v: `×${uniq.length}`, tone: "info" as Tone,
-                vol: uniq.length * 40, ids: uniq.map((p) => p.id),
+                vol: uniq.length * 40,
+                ids: uniq.flatMap((p) => [p.id, ...(p.classic ? [p.classic] : [])]),
                 det: [["Type", type], ["Count", String(uniq.length)],
                       ["Names", uniq.map((p) => p.name).slice(0, 6).join(" · ")]] }];
         })
@@ -686,22 +868,31 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       continue;
     }
     const di = idxIn(1, (e) => e.nm === r.domain);
-    if (di !== null) edges.push({ s: [0, oi], t: [1, di], v: r.reqs, label: "requests" });
+    if (di !== null) edges.push({ s: [0, oi], t: [1, di], v: r.reqs, label: "requests",
+      bad: r.err, blind: unattribErr > 0, p50: r.p50, p90: r.p90, late: r.late ?? null });
   }
   // every origin also feeds the application itself
   for (const [oi, o] of layers[0].items.slice(0, NODE_CAP).entries()) {
     if (o.miss) continue;
-    const sess = devices.filter((r) => originOf(r.agent, r.utype) === o.nm)
-      .reduce((a, r) => a + r.sessions, 0);
-    if (sess) edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions" });
+    const rows = devices.filter((r) => originOf(r.agent, r.utype) === o.nm);
+    const sess = rows.reduce((a, r) => a + r.sessions, 0);
+    const late = rows.reduce<number | null>((a, r) =>
+      a == null || r.late == null ? null : a + r.late, 0);
+    if (sess) edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions",
+      // the same split the origin cards use: how many of THIS origin's
+      // sessions met an error (null while the impact scan is in flight)
+      bad: hitPerOrigin(o.nm as Origin, sess), late });
   }
   // third-party domain ← the application's page (render order: app fetches it)
   for (const [di, dcard] of layers[1].items.slice(0, NODE_CAP).entries()) {
     if (dcard.miss) continue;
     const agg = domAgg.get(dcard.nm);
-    if (agg) edges.push({ s: [1, di], t: [2, 0], v: agg.reqs, label: "requests" });
+    if (agg) edges.push({ s: [1, di], t: [2, 0], v: agg.reqs, label: "requests",
+      bad: agg.err, blind: unattribErr > 0, p50: agg.p50, p90: agg.p90, late: agg.late });
   }
-  if (firstParty) edges.push({ s: [2, 0], t: [3, 0], v: firstParty.reqs, label: "ingress requests" });
+  if (firstParty) edges.push({ s: [2, 0], t: [3, 0], v: firstParty.reqs,
+    label: "ingress requests", bad: firstParty.err, blind: unattribErr > 0, p50: firstParty.p50,
+    p90: firstParty.p90, late: firstParty.late });
   if (!unlinked) {
     // ingress → each rendered service, weighted by its observed traces
     for (const [si, svcCard] of layers[4].items.slice(0, NODE_CAP).entries()) {
@@ -892,7 +1083,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // narrows the lower layers to what this application's traces actually reach
   const scope = useAppScope(appId,
     data.apps.find((a) => a.appId === appId)?.entity);
-  const ahead = useAppForecast(appId);
+  const ahead = useAppForecast(appId, data.tf);
   // Not lazy any more: measured impact now decides colour, so it has to be
   // here before the first paint. Memoised per application and window, and the
   // landing page asks for the same key — arriving from the overview is free.
@@ -909,15 +1100,87 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // the stores this application's services query, asked only once the scope
   // named them — no services, no question worth paying for
   const stores = useDataStores([...scope.services], scope.resolved);
+  /* the DB entities behind those stores, batched — health alerts bind to
+   * their classic ids, and an id-less card can never light */
+  const dbIds = useDbEntities(stores);
   // what the classic topology knows and Smartscape does not — asked with the
   // same key, so an application whose two models agree pays for one query and
   // draws nothing extra
   const gen2 = useGen2Closure([...scope.services], scope.resolved);
+  /* frontend.name per entity — the sessions hand-off's vocabulary */
+  const feNames = useFrontendNames();
+    /* FIRST-PARTY BY TRACES. RUM's provider tag failed the audit: the Android
+   * app's only contacted domain is its own backend, tagged third_party —
+   * firstParty = 0 and the Route layer read "No coverage" forever. When no
+   * domain wears the tag, the top contacted domains are asked the direct
+   * question instead: do spans with this server.address exist? A CDN or a
+   * font host has none; the app's own ingress has tens of thousands
+   * (measured: 93,250 in 30m for the Android backend). One memoised spans
+   * scan, only for apps the tag already failed. */
+  const appDomainRows = data.domains.filter((r) => r.appId === appId);
+  const hasTaggedFp = appDomainRows.some((r) => r.provider === "first_party");
+  const fpCandidates = useMemo(() => {
+    if (hasTaggedFp) return [];
+    const agg = new Map<string, number>();
+    for (const r of appDomainRows) agg.set(r.domain, (agg.get(r.domain) ?? 0) + r.reqs);
+    return [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([dm]) => dm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasTaggedFp, appId, data.domains]);
+  const servedDomains = useDomainTraces(fpCandidates, data.tf, fpCandidates.length > 0);
+  const promotedFp = !hasTaggedFp && servedDomains
+    ? fpCandidates.find((dm) => servedDomains.has(dm)) ?? null : null;
+  /* the 24h probe, asked only when THIS window's sessions are zero —
+   * "quiet" and "uninstrumented" must not share a card */
+  const appSessions = data.origins.filter((r) => r.appId === appId)
+    .reduce((a, r) => a + r.sessions, 0);
+  /* the entity, derived when the qApps row is gone — which is EXACTLY the
+   * quiet case: zero events in the window means no row to read it from.
+   * Measured: a mobile RUM id is the entity's hex as a dashed uuid
+   * (21cb4989-d0a5-46c7-… ⇔ MOBILE_APPLICATION-21CB4989D0A546C7); a web
+   * RUM id is the 16-hex itself. */
+  const quietEntity = data.apps.find((a) => a.appId === appId)?.entity
+    ?? (/^[0-9a-f]{16}$/.test(appId) ? `APPLICATION-${appId.toUpperCase()}`
+      : /^[0-9a-f-]{36}$/.test(appId)
+        ? `MOBILE_APPLICATION-${appId.replace(/-/g, "").slice(0, 16).toUpperCase()}`
+        : undefined);
+  const quiet = useQuietProbe(quietEntity, !data.loading && appSessions === 0);
   const built = useMemo(
-    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2),
-    [data, appId, scope, ahead, impacted, cloud, stores, gen2]);
+    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2, dbIds,
+      quiet, promotedFp),
+    [data, appId, scope, ahead, impacted, cloud, stores, gen2, dbIds, promotedFp, quiet]);
   const tiers = built.layers;
-  const edges = built.edges;
+  /* Density decides the SCALE, not just the height: a chain of one node per
+   * layer drew the same 18–44px icons and 11px type as a nine-node estate,
+   * so a sparse diagram was small figures adrift in dark. Sparse gets big. */
+  const chainRows = Math.max(...tiers.map((t) => Math.min(t.items.length, 12)), 1);
+/* One fixed scale. Two attempts at a data-driven one both failed the eye:
+   recomputed per render it shrank as data arrived; latched at settle it
+   jumped mid-viewing. Size that depends on streaming data cannot be stable,
+   so the diagram is simply DRAWN LARGER for everyone — which is what was
+   asked for in the first place. */
+  const gscale = 1.25;
+  /* THE PIVOT: mapping every backend relation stopped being this app's job.
+   * Smartscape and the problem path already own that picture; what only this
+   * app sees is the RUM side (Consume→Route) and the BRIDGE — which backend
+   * this application's sessions actually reach. So the chain draws its four
+   * RUM layers and hands the rest to one summarised Backend block, keyed on
+   * everything the scope still measures. The deep edges keep being computed
+   * (their tones and counts feed the block); they are no longer drawn. */
+  const edges = useMemo(() => {
+    const kept = built.edges.filter((e) => e.s[0] < 4 && e.t[0] < 4);
+    // the seam: everything past the edge/ingress funnels into one block
+    const from: [number, number] =
+      built.layers[3]?.items[0]?.miss ? [2, 0] : [3, 0];
+    const vol = [...scope.traces.values()].reduce((a, v) => a + v, 0);
+    // only when the Serve layer holds a REAL card: `miss` covers noData,
+    // noLink and noPlace, and drawing "reaches the backend" into a card that
+    // says "no trace reaches a service" contradicted it (audit)
+    if (!built.layers[4]?.items[0]?.miss) {
+      kept.push({ s: from, t: [4, 0], v: Math.max(vol, 1),
+        label: vol > 0 ? "traces" : "reaches the backend" });
+    }
+    return kept;
+  }, [built, scope]);
   // the setter mirrors useState's signature so the existing toggles still read
   // naturally, but the value it writes lands in the query string
   const setSel = (v: string | null | ((cur: string | null) => string | null)) => {
@@ -991,7 +1254,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
            <path d="M0,0 L8,4 L0,8 Z" fill="${t === "accent" ? "var(--accent)" : TVAR[t]}"/>
          </marker>`).join("");
       const vmax = Math.max(1, ...edges.map((e) => e.v));
-      const drawn: Array<{ mx: number; my: number; v: number; label: string; op: number }> = [];
+      const drawn: Array<{ mx: number; my: number; v: number; label: string; op: number;
+        next: number | null; fcArrow: string; gapL: number; gapR: number }> = [];
       for (const e of edges) {
         const a = anchor(`nd-${e.s[0]}-${e.s[1]}`, "r");
         const b = anchor(`nd-${e.t[0]}-${e.t[1]}`, "l");
@@ -1000,16 +1264,51 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         const dst = tiers[e.t[0]]?.items[e.t[1]];
         if (!src || !dst) continue;
         const touches = sel === `${e.s[0]}-${e.s[1]}` || sel === `${e.t[0]}-${e.t[1]}`;
-        const worse: Tone = src.tone === "bad" || dst.tone === "bad" ? "bad"
+        /* THE ROUTE'S OWN HEALTH, not just its endpoints'. One rule with the
+         * CARDS the leg connects (utils/verdict HIT_BAD/HIT_WARN) — the old
+         * inline 25% floor turned a leg red while the card at its end, on
+         * the same numbers, stayed amber. Locations keep their own three-arm
+         * rule (geoVerdict); components and their legs speak verdict.ts. */
+        const rate = e.bad != null && e.v > 0 ? e.bad / e.v : null;
+        const own: Tone = rate == null ? "info"
+          : rate >= HIT_BAD ? "bad" : rate >= HIT_WARN ? "warn" : "info";
+        const RANK: Record<Tone, number> = { info: 0, good: 0, warn: 1, bad: 2 };
+        const endp: Tone = src.tone === "bad" || dst.tone === "bad" ? "bad"
           : src.tone === "warn" || dst.tone === "warn" ? "warn" : "info";
+        const worse: Tone = RANK[own] > RANK[endp] ? own : endp;
         const w = 1.4 + 8.6 * (Math.log10(e.v + 1) / Math.log10(vmax + 1));
         const dur = Math.max(1.1, 8 - 1.6 * Math.log10(e.v + 1));
         // Health IS the colour, always — no click required: green means no
-        // Davis signal on either end, amber and red mean one. Selection only
-        // adjusts brightness; it never changes what a colour means.
+        // Davis signal on either end AND a clean leg; amber and red mean one
+        // of them said otherwise. Selection only adjusts brightness; it
+        // never changes what a colour means.
         const toneKey = worse === "info" ? "good" : worse;
         const stroke = TVAR[toneKey];
         const op = sel ? (touches ? 1 : 0.5) : 0.9;
+        /* the hover carries the leg's facts: casualties and cost */
+        const hurtWord = e.label === "sessions" ? "met an error" : "failed";
+        // "clean" is EARNED, not defaulted: a transport leg whose app has
+        // failed calls that carry no domain cannot claim it — silence there,
+        // never a false all-clear
+        const hurt = e.bad == null || rate == null ? ""
+          : e.bad === 0 ? (e.blind ? "" : " · clean")
+          : ` · ${fmtN(e.bad)} ${hurtWord} (${(rate * 100).toFixed(rate >= 0.1 ? 0 : 1)}%)`;
+        const lat = e.p50 && e.p50 > 0 ? ` · p50 ${fmtMs(e.p50)}`
+          : e.p90 && e.p90 > 0 ? ` · p90 ${fmtMs(e.p90)} (the median reports 0)` : "";
+        /* THE LEG'S FORECAST: second half of the window against the first,
+         * continued for one FULL window ahead — next = 2·(2·h2 − h1)
+         * = 6·late − 2·v, so steady traffic projects ≈v. The first cut
+         * projected only the next HALF and compared it against the whole,
+         * which read every steady leg as "falling to half". Free — the scan
+         * already paid for the split; small legs (<10) stay quiet because a
+         * two-point line through noise is not a forecast. */
+        const next = e.late != null && e.v >= 10
+          ? Math.max(0, 6 * e.late - 2 * e.v) : null;
+        const fcArrow = next == null ? ""
+          : next > e.v * 1.1 ? "↗" : next < e.v * 0.9 ? "↘" : "→";
+        const pace = next == null ? ""
+          : fcArrow === "→" ? " · steady pace"
+          : ` · heading to ≈${fmtN(next)} at the current pace`;
         // circuit-trace routing: straight runs with a 45° bend, like a PCB —
         // the geometry itself reads as technology, no decoration needed
         const mx = (a.x + b.x) / 2;
@@ -1020,25 +1319,69 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         parts.push(`<path class="e-base" d="${d}"
           stroke="${stroke}" marker-end="url(#ar-${toneKey})"
           style="color:${stroke};opacity:${op};stroke-width:${w.toFixed(1)}">
-          <title>≈ ${fmtN(e.v)} ${e.label}</title></path>`);
+          <title>≈ ${fmtN(e.v)} ${e.label}${hurt}${lat}${pace}</title></path>`);
         // the data pulse: one bright packet travelling the trace, speed by volume
         if (op > 0.3) {
           parts.push(`<path class="e-pulse" d="${d}"
             stroke="color-mix(in srgb, ${stroke} 40%, #ffffff)"
             style="opacity:${Math.min(1, op + 0.15)};stroke-width:${(w * 0.5).toFixed(1)};animation-duration:${dur.toFixed(1)}s"/>`);
         }
-        drawn.push({ mx, my: (a.y + b.y) / 2, v: e.v, label: e.label, op });
+        /* The label must live in the GAP between the two columns, not at the
+         * geometric midpoint of the curve — on a narrow window the midpoint
+         * slides under the neighbouring column's cards and the number is the
+         * part that disappears. The gap is what the anchors already know:
+         * a.x is the source column's right edge, b.x the target's left. */
+        drawn.push({ mx, my: (a.y + b.y) / 2, v: e.v, label: e.label, op,
+          next, fcArrow,
+          /* The RIGHT edge of the writable gap is the target COLUMN's border,
+           * not the target node: the backend elbow sits deep inside its band,
+           * so clamping to the node let "288" slide under the panel and be
+           * cut at its border. The node's column element knows where the band
+           * begins. */
+          gapL: a.x + 8,
+          gapR: (() => {
+            const el = document.getElementById(`nd-${e.t[0]}-${e.t[1]}`);
+            const col = el?.closest(".gcol");
+            if (col) {
+              const cb = col.getBoundingClientRect();
+              return (cb.left - box.left) / z - 8;
+            }
+            return b.x - 8;
+          })() });
       }
-      // The heaviest flows carry their number on the line itself — the top
-      // three tell the throughput story without a single hover.
+      // A label EARNS its place or the line stays clean. Volume is already
+      // said twice — on the card and by the line's width — and repeating it
+      // here was called out as clutter. So the only thing written on a line
+      // is a FINDING: this leg is leaving its pace (±10%), and where it
+      // lands. Steady legs carry nothing; the full facts stay on hover.
       drawn.sort((x, y) => y.v - x.v);
       const seen = new Set<string>();
       for (const dd of drawn.filter((x) => x.op > 0.3)) {
+        if (dd.next == null || dd.fcArrow === "→") continue;
         // one label per distinct figure: consecutive hops carry the same volume
         const k = `${dd.v}|${dd.label}`;
-        if (seen.has(k) || seen.size >= 3) continue;
+        if (seen.has(k)) continue;
         seen.add(k);
-        parts.push(`<text x="${dd.mx}" y="${dd.my - 7}">${fmtK(dd.v)} ${dd.label}</text>`);
+        // ~7.4px per mono glyph at the label's 12px (theme: .dcf-svg text).
+        // A PERCENTAGE, because "↘ ≈24.1k" had to be decoded ("o que quer
+        // dizer?") while "sessions ↘ 21%" reads itself. The absolute
+        // projection moves into the label's own hover, which spells the
+        // whole mechanism out.
+        const pct = Math.round(Math.abs(dd.next / dd.v - 1) * 100);
+        const full = `${dd.label} ${dd.fcArrow} ${pct}%`;
+        /* the NOUN survives the squeeze, not the percentage: two bare
+         * "↘ 17%" labels on neighbouring legs read as the same thing, and
+         * the reader asked why one origin had two lines — the words
+         * "requests" vs "sessions" ARE the answer */
+        const short = `${dd.label} ${dd.fcArrow}`;
+        const fit = (s: string) => dd.gapR - dd.gapL >= s.length * 7.4;
+        const txt = fit(full) ? full : fit(short) ? short : null;
+        if (!txt) continue;
+        const need = txt.length * 7.4;
+        const lx = Math.min(Math.max(dd.mx, dd.gapL + need / 2), dd.gapR - need / 2);
+        const word = dd.fcArrow === "↘" ? "slowing" : "growing";
+        parts.push(`<text x="${lx}" y="${dd.my - 7}">${txt}
+          <title>This flow is ${word}: the window's second half ran ${pct}% ${dd.fcArrow === "↘" ? "under" : "over"} the first. At that pace the next window carries ≈${fmtN(dd.next)} ${dd.label} (now: ${fmtN(dd.v)}).</title></text>`);
       }
       svg.innerHTML = `<defs>${defs}</defs>` + parts.join("");
     };
@@ -1092,6 +1435,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const selDomainTraces = useDomainTraces(
     selAddress ? [selAddress] : [], data.tf, !!selAddress);
 
+
   // Whether the open drawer's element carries detected signals — it decides
   // which rows the drawer offers, not whether impact gets fetched (impact is
   // now loaded up front, because it colours the graph).
@@ -1099,7 +1443,121 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     (problemsFor(selElo.ids ?? []).length > 0 || signalsFor(selElo.ids ?? []).length > 0);
   // Whatever made this element amber or red, the reader is owed the count of
   // people behind it — measured harm earns the row exactly as a Davis problem does.
+  /* the layer drawer folds its unremarkable tail; a new selection folds it back */
+  const [drawerAll, setDrawerAll] = useState(false);
+  /* the reshape the reader asked for ("ao selecionar vejo isso… confuso"):
+   * verdict + one primary action above the fold; the ledger and the persona
+   * routes behind their own ▸. A new selection folds both back. */
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  /* routes OPEN by default — the reader tried the fold and asked for them
+   * loaded; the button stays so they can be put away */
+  const [routesOpen, setRoutesOpen] = useState(true);
+  const [tpickAll, setTpickAll] = useState(false);
+  /* the retired "-all" drawer's own data, fetched only if someone opens it */
+  const layerStats = useLayerStats(data.tf, sel !== null && sel.endsWith("-all"));
+  const layerJourneys = useJourneys(data.tf, sel !== null && sel.endsWith("-all"));
+  useEffect(() => { setDrawerAll(false); setLedgerOpen(false); setRoutesOpen(true);
+    setTpickAll(false); }, [sel]);
+  /* Opening a LAYER lands on its most deserving element — the reader kept
+   * arriving at the wall of 21 rows ("ao clicar ainda vejo isso") when the
+   * element view now carries the picker to switch targets. Worst first,
+   * busiest on a tie; the "-all" list survives only for direct links. */
+  const openLayer = (ti: number, only?: (n: Elo) => boolean) => {
+    const items = tiers[ti]?.items ?? [];
+    let best = -1; let bestScore = Infinity;
+    items.forEach((n, i) => {
+      // the row's own filter travels: "Services" landed on the DATA STORE
+      // (92% of the shared tier's volume) until the pick respected it
+      if (n.miss || (only && !only(n))) return;
+      const r = problemsFor(n.ids ?? []).length > 0 ? 0
+        : signalsFor(n.ids ?? []).length > 0 ? 1
+        : n.tone === "bad" ? 2 : n.tone === "warn" ? 3 : 4;
+      const score = r * 1e12 - (n.vol ?? 0);
+      if (score < bestScore) { bestScore = score; best = i; }
+    });
+    setSel((x) => {
+      const target = best >= 0 ? `${ti}-${best}` : `${ti}-all`;
+      return x === target ? null : target;
+    });
+  };
+
   const selShowsImpact = !!selElo && (selElo.tone === "bad" || selElo.tone === "warn");
+
+  /* The element's investigation routes, computed once: the drawer's TOP
+   * proposes the destination apps from them (the reader's rule — summarise
+   * what matters, then name where to act), and the bottom still walks the
+   * full routes. */
+  const elRoutes = React.useMemo(() => {
+    if (!selElo) return null;
+    const fcObj = metTarget?.kind === "app" ? ahead : met?.fc;
+    const fcRising = (!!fcObj && fcObj.slope > 0) || selElo.spark?.rising === true;
+    const nProbs = problemsFor(selElo.ids ?? []).length;
+    const nSigs = signalsFor(selElo.ids ?? []).length;
+    const scopedApp = data.apps.find((a) => a.appId === appId);
+    return {
+      list: investigationPaths({
+                  ids: selElo.ids ?? [],
+                  name: selElo.nm,
+                  tf: data.tf,
+                  // buildTiers already knows exactly what kind of card this
+                  // is — decided once, here, not re-guessed from ids prefixes
+                  // inside investigationPaths (see kindOf's own comment).
+                  kind: kindOf(selTier ?? -1, selElo),
+                  problems: nProbs,
+                  problem: problemsFor(selElo.ids ?? [])[0],
+                  problemHints: problemsFor(selElo.ids ?? [])
+                    .map((x) => `${x.category} ${x.name}`),
+                  // Every element in this chain belongs to the one scoped
+                  // application, whichever layer it sits in — not only the
+                  // application card itself. A Consume-layer origin bucket
+                  // (Mobile, Robots…) used to have no way to reach "Sessions
+                  // and conversion" at all because this was gated to tier 2.
+                  rumAppId: appId,
+                  scopedAppName: scopedApp?.name,
+                  // the sessions-store vocabulary for the Frontends chip —
+                  // the inventory name filled it with a value the bar
+                  // accepts and matches nothing (audit, EasyTrade LD)
+                  scopedFrontend: scopedApp?.entity
+                    ? feNames?.get(scopedApp.entity) : undefined,
+                  scopedEntity: scopedApp?.entity,
+                  // lets the route offer Error Inspector — the Gen3 app whose
+                  // whole subject is the thing this element is failing at.
+                  // Passed for every card; the kind switch decides which of
+                  // them actually offer it (the app card and the origins).
+                  errors: scopedApp?.errors,
+                  // the processes this service card runs on, for the logs
+                  // hop's arms — a VM service's logs are keyed by PGI only
+                  logPgis: scope.placements
+                    .filter((p) => (selElo.ids ?? []).includes(p.svc)
+                      && p.type === "PROCESS" && p.classic)
+                    .map((p) => p.classic!) as string[],
+                  // an origin card's vol IS its session count — the sessions
+                  // hand-off is gated on it, so a segment with nothing to
+                  // list offers no list
+                  sessions: selTier === 0 ? selElo.vol : undefined,
+                  // the fatal subset, so a mobile application's route can
+                  // lead with the thing its card leads with
+                  crashes: scopedApp?.crashes,
+                  dbEntity: dbEntity ?? undefined,
+                  // A store card carries no `domain`, it carries `store` — the
+                  // same address shape, just named for what it is.
+                  domain: selElo.domain ?? selElo.store,
+                  domainHasSpans: !!selAddress && !!selDomainTraces?.has(selAddress),
+                  impacted: selShowsImpact && impacted && impacted.hit > 0 ? impacted : undefined,
+                  signals: nSigs,
+                  forecastRising: fcRising,
+                  assist,
+                  apps,
+                  // the element's own measured numbers travel as hidden context,
+                  // so Assist reads this element rather than the environment
+                  facts: { lines: selElo.det.map(([k, v]) => `${k}: ${v}.`) },
+      }),
+      mode: (selElo.tone === "good" ? "optimize" : "incident") as "optimize" | "incident",
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selElo, selTier, appId, data, met, ahead, dbEntity, selAddress,
+      selDomainTraces, impacted, assist, apps, feNames, scope]);
+
 
   const bar = (items: Array<[string, number]>, tone: (k: string) => Tone) => {
     const tot = items.reduce((a, i) => a + i[1], 0) || 1;
@@ -1116,73 +1574,92 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const stats = () => {
     if (selTier === null) return null;
     if (selTier === 0) {
-      const tot = data.devices.reduce((a, r) => a + r.sessions, 0) || 1;
+      // the pillar header is this application's — so is the drawer now
+      const devices = (layerStats?.devices ?? []).filter((r) => r.appId === appId);
+      const tot = devices.reduce((a, r) => a + r.sessions, 0) || 1;
       return (<>
         <div className="dd">
           <Kpi l="Sessions" v={fmtN(tot)} t="info" />
-          <Kpi l="Distinct profiles" v={String(data.devices.length)} t="good" />
-          <Kpi l="Views" v={fmtK(data.devices.reduce((a, r) => a + r.views, 0))} t="warn" />
+          <Kpi l="Distinct profiles" v={String(devices.length)} t="good" />
+          <Kpi l="Views" v={fmtK(devices.reduce((a, r) => a + r.views, 0))} t="warn" />
         </div>
         <div className="dd__h">Screen resolution <em>device.screen · measured</em></div>
-        {bar(Object.entries(data.devices.reduce<Record<string, number>>((a, r) => {
+        {bar(Object.entries(devices.reduce<Record<string, number>>((a, r) => {
           a[r.res] = (a[r.res] ?? 0) + r.sessions; return a;
         }, {})).sort((a, b) => b[1] - a[1]), (k) => (Number(k.split("×")[0]) < 800 ? "info" : "good"))}
-        <div className="dd__h">Device profiles <em>{data.devices.length} combinations</em></div>
+        <div className="dd__h">Device profiles <em>{devices.length} combinations</em></div>
         <Table cols={["Resolution", "DPR", "Orientation", "Agent", "Type", "Sessions", "Views"]}
-          rows={data.devices.map((r) => [r.res, r.dpr ?? "—", r.orient ?? "—", r.agent ?? "—",
+          rows={devices.map((r) => [r.res, r.dpr ?? "—", r.orient ?? "—", r.agent ?? "—",
             r.utype ?? "—", fmtN(r.sessions), fmtN(r.views)])} />
       </>);
     }
     if (selTier === 1 || selTier === 3) {
+      // the pillar header is this application's — so is the drawer now
+      const doms = data.domains.filter((r) => r.appId === appId);
+      const pths = (layerStats?.paths ?? []).filter((r) => r.appId === appId);
       return (<>
         <div className="dd">
-          <Kpi l="Domains" v={String(data.domains.length)} t="good" />
-          <Kpi l="Requests" v={fmtK(data.domains.reduce((a, r) => a + r.reqs, 0))} t="good" />
-          <Kpi l="4xx/5xx errors" v={fmtN(data.domains.reduce((a, r) => a + r.err, 0))} t="good" />
+          <Kpi l="Domains" v={String(new Set(doms.map((r) => r.domain)).size)} t="good" />
+          <Kpi l="Requests" v={fmtK(doms.reduce((a, r) => a + r.reqs, 0))} t="good" />
+          <Kpi l="4xx/5xx errors" v={fmtN(doms.reduce((a, r) => a + r.err, 0))} t="good" />
         </div>
-        <div className="dd__h">Contacted domains <em>url.domain · measured</em></div>
+        <div className="dd__h">Contacted domains <em>url.domain · this application</em></div>
         <Table cols={["Domain", "Provider", "Req", "p50", "Errors"]}
-          rows={data.domains.map((r) => [r.domain, r.provider ?? "—", fmtN(r.reqs), fmtMs(r.p50), fmtN(r.err)])} />
-        <div className="dd__h">Most requested paths <em>url.path · measured</em></div>
+          rows={doms.map((r) => [r.domain, r.provider ?? "—", fmtN(r.reqs), fmtMs(r.p50), fmtN(r.err)])} />
+        <div className="dd__h">Most requested paths <em>url.path · this application</em></div>
         <Table cols={["Path", "Method", "Status", "Req", "p50", "p90"]}
-          rows={data.paths.slice(0, 8).map((r) => [r.path, r.method ?? "—", r.status ?? "—",
+          rows={pths.slice(0, 8).map((r) => [r.path, r.method ?? "—", r.status ?? "—",
             fmtN(r.reqs), fmtMs(r.p50), fmtMs(r.p90)])} />
       </>);
     }
     if (selTier === 2) {
-      const vs = data.views.filter((v) => v.appId === appId).slice(0, 8);
+      const vs = (layerJourneys?.views ?? []).filter((v) => v.appId === appId).slice(0, 8);
       return (<>
         <div className="dd">
           <Kpi l="Detected views" v={String(vs.length)} t="good" />
-          <Kpi l="Sequences" v={String(data.sequences.filter((s) => s.appId === appId).length)} t="info" />
+          <Kpi l="Sequences" v={String((layerJourneys?.sequences ?? []).filter((s) => s.appId === appId).length)} t="info" />
         </div>
         <div className="dd__h">Application views <em>view_summary · measured</em></div>
         <Table cols={["View", "Sessions", "Views", "p50", "Perf"]}
           rows={vs.map((v) => [v.view, fmtN(v.sessions), fmtN(v.views), fmtMs(v.p50), String(perfScore(v.p50))])} />
         <div className="dd__h">Discovered sequences <em>mined per session</em></div>
         <Table cols={["Journey", "Sessions"]}
-          rows={data.sequences.filter((s) => s.appId === appId).slice(0, 6)
+          rows={(layerJourneys?.sequences ?? []).filter((s) => s.appId === appId).slice(0, 6)
             .map((s) => [s.journey.join(" → "), fmtN(s.sessions)])} />
       </>);
     }
+    /* THE DRILL-DOWN RULE, sharpened again by the reader ("muitos dados que
+     * não fazem nada"): the environment-wide KPI tiles and the dependency
+     * table were inventory wearing the clothes of a finding — twelve rows of
+     * service→service pairs nobody acts on here, when the relation map has
+     * an owner (Smartscape, one hop from any element above). What remains is
+     * the ONE scope fact the counts need so the header's totals never look
+     * like the list's length. */
     if (selTier === 4) {
-      return (<>
-        <div className="dd">
-          <Kpi l="Services" v={fmtN(data.topology.find((t) => t.type === "SERVICE")?.nodes ?? 0)} t="good" />
-          <Kpi l="Call relations" v={fmtN(data.calls.length)} t="good" />
-        </div>
-        <div className="dd__h">Mapped dependencies <em>smartscapeEdges "calls"</em></div>
-        <Table cols={["Service", "Calls"]}
-          rows={data.calls.slice(0, 12).map((c) => [c.src.split(" - ")[0], c.dst.split(" - ")[0]])} />
-      </>);
+      const mine = new Set((tiers[4]?.items ?? []).map((n) => n.nm));
+      const chainCalls = data.calls.filter((c) =>
+        mine.has(c.src.split(" - ")[0]) || mine.has(c.dst.split(" - ")[0]));
+      return (
+        <p className="dd__note">
+          {fmtN(chainCalls.length)} of the environment&apos;s {fmtN(data.calls.length)} call
+          relations touch this chain. The relation map itself is Smartscape&apos;s job —
+          open an element above and take &quot;See its relations&quot;.
+        </p>
+      );
     }
-    return (<>
-      <div className="dd">
-        {data.topology.slice(0, 4).map((t) => <Kpi key={t.type} l={t.type} v={fmtN(t.nodes)} t="good" />)}
-      </div>
-      <div className="dd__h">Pods and where they run <em>runs_on · Smartscape</em></div>
-      <Table cols={["Pod", "Node"]} rows={data.runtime.slice(0, 10).map((r) => [r.pod, r.node])} />
-    </>);
+    const mineNames = new Set((selTier !== null ? tiers[selTier]?.items ?? [] : []).map((n) => n.nm));
+    const chainPods = data.runtime.filter((r) => mineNames.has(r.pod) || mineNames.has(r.node));
+    return (
+      <p className="dd__note">
+        {chainPods.length > 0
+          ? `${fmtN(chainPods.length)} of the environment's ${fmtN(data.runtime.length)} mapped pods serve this chain.`
+          : data.runtime.length > 0
+            ? `None of the environment's ${fmtN(data.runtime.length)} mapped pods serve this chain — this layer runs elsewhere.`
+            : "No pods are mapped in this environment."}
+        {" "}The placement map is Smartscape&apos;s job — open an element above and take
+        &quot;See its relations&quot;.
+      </p>
+    );
   };
 
   return (
@@ -1193,19 +1670,33 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                ? undefined
                : { transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
           <svg className="dcf-svg" ref={svgRef} aria-hidden="true" />
-          <div className={`graph${highlight ? " graph--hl" : ""}`} role="list">
+          {/* THE FRAME FOLLOWS THE DENSEST COLUMN. The column height was a
+              fixed 540px sized for a busy estate; an application with one node
+              per layer drew five icons floating in a page of dark. The busiest
+              column decides the height it needs, the fixed number only remains
+              as a ceiling — a chain diagram should be as tall as its chain. */}
+          <div className={`graph graph--sum${highlight ? " graph--hl" : ""}`} role="list"
+            style={{ ["--chain-rows" as string]: String(chainRows),
+              ["--gs" as string]: String(gscale) }}>
             {highlight && (
               <button className="hlbar" onClick={() => onHighlightClear?.()}
                 title="Clear the spotlight">
-                ⚠ {fmtN(data.signals.filter((sg) => sg.provider === "BASELINING"
-                    && [...(scope.services ?? new Set()), ...(scope.runtime ?? new Set()),
-                      ...(data.apps.find((a) => a.appId === appId)?.entity
-                        ? [data.apps.find((a) => a.appId === appId)!.entity!] : [])]
-                      .includes(sg.entityId)).length)} anomalies spotlighted —
+                ⚠ {fmtN((() => {
+                  // distinct anomalies matched to DRAWN cards — the banner
+                  // once counted a scope-set the cards did not share, and
+                  // "each lit card wears its count" could disagree with it
+                  const lit = new Set<string>();
+                  for (const t of tiers) for (const n of t.items) {
+                    if (n.miss) continue;
+                    for (const sg of signalsFor(n.ids ?? []))
+                      if (sg.provider === "BASELINING") lit.add(`${sg.entityId}|${sg.name}`);
+                  }
+                  return lit.size;
+                })())} anomalies spotlighted —
                 each lit card wears its count · click anywhere to dismiss ✕
               </button>
             )}
-            {tiers.map((layer, ti) => {
+            {tiers.slice(0, 4).map((layer, ti) => {
               // A layer with nothing in it is not drawn. Only the last one can
               // be empty — Cloud, where the machines have no provider behind
               // them — and an empty eighth column would be the very thing this
@@ -1222,14 +1713,14 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   style={{ ["--ci" as string]: String(ti) }}>
                   <button
                     className={`gcol__hd ${sel === `${ti}-all` ? "gcol__hd--on" : ""}`}
-                    onClick={() => setSel((x) => (x === `${ti}-all` ? null : `${ti}-all`))}>
+                    onClick={() => openLayer(ti)}>
                     <span className="gcol__ic" aria-hidden="true">
                       {React.createElement(LAYER_ICON[ti], { size: 16 })}
                     </span>
                     <b>{TIERS[ti][2]}</b>
                     <span className="gcol__n">{fmtN(layer.total)}</span>
                     {probs > 0 && (
-                      <span className="pb" title={` active problem(s)`}>⚠ {probs}</span>
+                      <span className="pb" title={`${probs} active problem${probs > 1 ? "s" : ""}`}>⚠ {probs}</span>
                     )}
                     {(() => {
                       const nSig = tierIds.length ? signalsFor(tierIds)
@@ -1264,7 +1755,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                         .filter((sg) => sg.provider === "BASELINING").length;
                       // measured volume sets the radius — 68k requests reads
                       // bigger than 3 pods before any label is read
-                      const r = 9 + (n.vol ? Math.min(13, 3.4 * Math.log10(n.vol + 1)) : 2);
+                      const r = gscale * (9 + (n.vol ? Math.min(13, 3.4 * Math.log10(n.vol + 1)) : 2));
                       return (<React.Fragment key={id}>
                         {seam && (
                           <div className="gdiv" aria-hidden="true">
@@ -1297,14 +1788,20 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                           )}
                           <span className="gnode__nm">{n.nm}</span>
                           <span className="gnode__v">{n.v} {n.spark?.rising && (
-                            <em className="gnode__fc" title="Forecast: errors rising over the next 12h">↗ forecast</em>
+                            <em className="gnode__fc" title={ahead ? `Forecast: errors rising over the next ${aheadOf(ahead)} — the platform's own predictive analyzer, over this application's error series` : "This component's error count is rising across the window"}>↗ forecast</em>
                           )}</span>
+                          {n.act && (
+                            <button className="gnode__act" title={n.act.hint}
+                              onClick={(e) => { e.stopPropagation(); n.act!.run(); }}>
+                              {n.act.label}
+                            </button>
+                          )}
                         </div>
                       </React.Fragment>);
                     })}
                     {hidden > 0 && (
                       <button className="gnode gnode--more" data-node
-                        onClick={() => setSel((x) => (x === `${ti}-all` ? null : `${ti}-all`))}>
+                        onClick={() => openLayer(ti)}>
                         <i className="gnode__c gnode__c--info" style={{ width: 18, height: 18 }} aria-hidden="true" />
                         <span className="gnode__nm">+{fmtN(hidden)} more</span>
                       </button>
@@ -1313,6 +1810,167 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 </div>
               );
             })}
+
+            {/* ── THE BACKEND, summarised ──
+                Everything the four RUM layers hand off to, as one block: the
+                counts the scope still measures, the worst verdict among them,
+                and one row per subject pointing at the platform app that
+                already manages it. The deep per-node mapping this replaced is
+                Smartscape's job — and the problem path draws it on demand. */}
+            {(() => {
+              const beIds = [4, 5, 6, 7].flatMap((ti) => [...(idsOfTier[ti] ?? [])]);
+              const beProbs = problemsFor(beIds).length;
+              const beAnoms = signalsFor(beIds)
+                .filter((sg) => sg.provider === "BASELINING").length;
+              const beTone: Tone = [4, 5, 6, 7].reduce<Tone>(
+                (acc, ti) => worseOf(acc, tiers[ti]?.tone ?? "good"), "good");
+              const storeCount = new Set((stores ?? []).map((st) => st.store)).size;
+              /* THIS app's runtime, not the tenant's: `data.runtime` is the
+               * whole environment, and it sent a VM-deployed application's
+               * reader to the Kubernetes app — measured, easytravel's 8
+               * services run on zero pods. While the scope is still
+               * resolving, the environment-wide guess stands in. */
+              const isK8s = scope.resolved
+                ? scope.placements.some((pl) => pl.type === "K8S_POD")
+                : data.runtime.length > 0;
+              const lam = (cloud ?? []).filter((c) => c.kind === "lambda");
+              const inst = (cloud ?? []).filter((c) => c.kind !== "lambda");
+              const region = [...new Set([
+                ...lam.map((c) => c.region).filter(Boolean),
+                ...inst.map((c) => c.zoneName).filter(Boolean)])].join(" · ");
+              const row = (
+                ti: number, label: string, value: string,
+                target: keyof AppMap | null, sub?: string,
+                /** A destination MORE specific than the app's home — an
+                 *  intent URL already scoped to this chain's entities. */
+                go?: { href: string; title: string },
+                /** Which of the tier's cards this row actually summarises —
+                 *  Services and Data stores SHARE tier 4, and without the
+                 *  split the store row wore the service row's aching names
+                 *  and problem badges verbatim (the reader's screenshot). */
+                only?: (n: Elo) => boolean,
+              ) => {
+                const t = target ? apps[target] : undefined;
+                const tone = tiers[ti]?.tone ?? "info";
+                const mine = (tiers[ti]?.items ?? []).filter(only ?? (() => true));
+                const ids = only
+                  ? mine.flatMap((n) => n.ids ?? [])
+                  : [...(idsOfTier[ti] ?? [])];
+                const rProbs = ids.length ? problemsFor(ids).length : 0;
+                const rAnoms = ids.length ? signalsFor(ids)
+                  .filter((sg) => sg.provider === "BASELINING").length : 0;
+                /* "If the layer has a problem, I need to know WHICH entity" —
+                   the aching ones are named on the row itself, worst first.
+                   The FIRST name only, clamped: a Spring service's full name
+                   with its [eks] tags ran the row across the screen. */
+                const aching = mine
+                  .filter((n) => !n.miss && (n.tone === "bad" || n.tone === "warn"))
+                  .sort((a, b) => (a.tone === "bad" ? 0 : 1) - (b.tone === "bad" ? 0 : 1))
+                  .map((n) => n.nm).slice(0, 2);
+                /* EMPTY RENDERED AS ONE — worse than zero. A tier that found
+                 * nothing still holds ONE card ("No measured link", "No
+                 * coverage"), and the summary printed the LIST's length: a
+                 * mobile app with no trace reaching any service read
+                 * "Services 1 · Runtime 1 · Infrastructure 1" beside a
+                 * diagram that correctly drew no line to the backend. The
+                 * count is a count of things found, so when nothing was
+                 * found it says so, in that card's own words. */
+                const allMiss = mine.length > 0 && mine.every((n) => n.miss);
+                const shownValue = allMiss ? "—" : value;
+                const shownSub = allMiss ? (mine[0]?.mt ?? "nothing measured here") : sub;
+                return (
+                  <div key={label}
+                    className={`bsum__row bsum__row--ent bsum__row--${tone}`}
+                    role="button" tabIndex={0}
+                    title="Investigate this layer — opens its most deserving element, with the picker to switch"
+                    onClick={() => openLayer(ti, only)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault(); openLayer(ti, only); } }}>
+                    <i className={`gnode__c gnode__c--${tone} bsum__ic`} aria-hidden="true">
+                      {React.createElement(LAYER_ICON[ti], { size: 13 })}
+                      {rAnoms > 0 && <em className="gnode__sig bsum__sig">{rAnoms}</em>}
+                    </i>
+                    <span className="bsum__l">{label}
+                      {rProbs > 0 && <b className="bsum__pb"> ⚠ {rProbs}</b>}
+                    </span>
+                    <b className={`bsum__v${allMiss ? " bsum__v--none" : ""}`}>{shownValue}</b>
+                    {(aching.length > 0 || shownSub) && (
+                      <em className={`bsum__s${aching.length ? " bsum__s--hurt" : ""}`}>
+                        {aching.length ? aching.join(" · ") : shownSub}
+                      </em>
+                    )}
+                    {/* THE READER'S RULE, stated after the audit: an
+                        unfiltered door is not a drilldown — "Services →"
+                        opening the app's home says nothing about THIS chain,
+                        so it says nothing at all. A row's foot link renders
+                        only when it arrives already scoped (today: the
+                        Kubernetes namespace). The row itself still opens the
+                        layer drawer, where every element carries its own
+                        filtered routes. */}
+                    {t && go && (
+                      <a className="bsum__go" href={go.href}
+                        target="_blank" rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title={go.title}>
+                        {t.name} →
+                      </a>
+                    )}
+                  </div>
+                );
+              };
+              return (
+                <div className={`gcol gcol--bsum ${beTone === "bad" ? "gcol--bad"
+                    : beTone === "warn" ? "gcol--warn" : ""}`
+                    + (highlight ? (beAnoms > 0 || beProbs > 0
+                      ? " bsum--spot" : " bsum--dim") : "")}
+                  role="listitem">
+                  <div className="gcol__hd" style={{ cursor: "default" }}>
+                    <span className="gcol__ic" aria-hidden="true">
+                      {React.createElement(ServicesIcon, { size: 16 })}
+                    </span>
+                    <b>BACKEND</b>
+                    {beProbs > 0 && <span className="pb">⚠ {beProbs}</span>}
+                    {beAnoms > 0 && <span className="pb pb--warn">⚠ {beAnoms}</span>}
+                  </div>
+                  <span className="gcol__name">Serve · Run · Host · Cloud</span>
+                  <span className="gcol__sub">managed by the platform&apos;s own apps</span>
+                  <div className="bsum" >
+                    {/* the seam's landing point — the mesh draws into this */}
+                    <i id="nd-4-0" className={`gnode__c gnode__c--${beTone} bsum__c`}
+                      aria-hidden="true">
+                      {React.createElement(ServicesIcon, { size: 15 })}
+                    </i>
+                    {scope.loading
+                      ? <div className="bsum__row"><em className="bsum__s">resolving the scope…</em></div>
+                      : (<>
+                        {row(4, "Services", fmtN(Math.max(0, (tiers[4]?.total ?? 0) - storeCount)), "services",
+                          (() => { const n = (gen2 ?? []).filter((g) => gen2CardKept(g, stores)).length;
+                            return n > 0 ? `${n} topology-mapped` : undefined; })(),
+                          undefined, (n) => !n.store)}
+                        {storeCount > 0 && row(4, "Data stores", fmtN(storeCount), "databases",
+                          undefined, undefined, (n) => !!n.store)}
+                        {/* NO namespace shortcut. Both declared intents were
+                           tried and BOTH opened the Kubernetes app's home,
+                           reader-verified twice: view-entity-dt.smartscape.
+                           k8s_namespace (nodeId, Smartscape id) and
+                           view-entity-dt.entity.cloud_application_namespace
+                           (meId, classic id — the pod pattern's form). An
+                           unfiltered door is not a drilldown; the filtered
+                           path to Kubernetes is each pod's own route in the
+                           drawer, whose intent IS navigation-verified. */}
+                        {row(5, "Runtime", fmtN(tiers[5]?.total ?? 0),
+                          isK8s ? "kubernetes" : "hosts",
+                          tiers[5]?.kpiLabel)}
+                        {row(6, "Infrastructure", fmtN(tiers[6]?.total ?? 0), "hosts",
+                          tiers[6]?.kpiLabel)}
+                        {(lam.length > 0 || inst.length > 0) && row(7, "Cloud",
+                          lam.length ? `${lam.length} lambda` : `${inst.length} instances`,
+                          null, region || undefined)}
+                      </>)}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
         <div className="zoomctl">
@@ -1333,26 +1991,99 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         <aside className="panel drawer" role="dialog" aria-modal="true"
           aria-label={selElo ? `Details: ${selElo.nm}` : "Layer details"}>
         <div className="panel__hd">
-          <span className="lbl">Selected link</span>
-          <span className="hint">{selAll !== null ? `layer ${String(selAll + 1).padStart(2, "0")} · all`
-            : `layer ${String((selTier ?? 0) + 1).padStart(2, "0")}`}</span>
+          {/* say WHAT it is, not "Selected link · layer 05" — the reader
+              opened a database and the header spoke internal jargon */}
+          <span className="lbl">{selAll !== null
+            ? `${TIER_NAME[selAll] ?? "layer"} — all elements`
+            : selElo ? ENTITY_WORD[kindOf(selTier ?? -1, selElo)] : "element"}</span>
+          <span className="hint">{TIER_NAME[selTier ?? selAll ?? 0] ?? ""}</span>
           <button className="drawer__x" onClick={() => setSel(null)} aria-label="Close">✕</button>
         </div>
         <div className="pad side__body drawer__body">
           {selAll !== null ? (
             <>
-              <div className="dd__h">All elements in this layer
-                <em>{fmtN(tiers[selAll].total)} total · {fmtN(tiers[selAll].items.length)} mapped</em></div>
-              {tiers[selAll].items.map((n, i) => (
-                <div key={i} className="lrow" style={{ ["--tone" as string]: TVAR[n.tone] }}
-                     role="button" tabIndex={0}
-                     onClick={() => setSel(`${selAll}-${i}`)}
-                     onKeyDown={(e) => { if (e.key === "Enter") setSel(`${selAll}-${i}`); }}>
-                  <span className="lrow__n">{n.nm}</span>
-                  <span className="lrow__m">{n.mt}</span>
-                  <span className="lrow__v">{n.v}</span>
-                </div>
-              ))}
+              {/* Impact leads, always: the elements dragging this layer come
+                  first, wearing their signals — a drill-down that buries the
+                  aching element under the healthy ones answers nothing. The
+                  original index rides along so selection still lands right. */}
+              {(() => {
+                const rows = tiers[selAll].items.map((n, i) => ({
+                  n, i,
+                  probs: n.miss ? 0 : problemsFor(n.ids ?? []).length,
+                  sigs: n.miss ? 0 : signalsFor(n.ids ?? []).length,
+                }));
+                const impacted = rows.filter((r) => r.probs > 0 || r.sigs > 0).length;
+                const rank = (r: typeof rows[number]) =>
+                  (r.probs > 0 ? 0 : r.sigs > 0 ? 1 : r.n.tone === "bad" ? 2
+                    : r.n.tone === "warn" ? 3 : 4);
+                const orderly = [...rows].sort((a, b) =>
+                  rank(a) - rank(b) || (b.probs - a.probs) || (b.sigs - a.sigs)
+                    || (b.n.vol ?? 0) - (a.n.vol ?? 0));
+                /* THE CALCULATING CUT, sharpened by the reader's second rule:
+                 * show only what needs attention. When anything aches — a
+                 * problem, a signal, an amber or red tone — ONLY the aching
+                 * open; even high-traffic healthy elements fold, because
+                 * during an incident they are noise. Only when the whole
+                 * layer is quiet does volume earn a place: the three
+                 * heaviest, where optimisation pays. Either way the fold is
+                 * honest — counted on the button, one click away. */
+                const topVol = new Set([...rows]
+                  .sort((a, b) => (b.n.vol ?? 0) - (a.n.vol ?? 0))
+                  .slice(0, 3).map((r) => r.i));
+                const aching = orderly.filter((r) => r.probs > 0 || r.sigs > 0
+                  || r.n.tone === "bad" || r.n.tone === "warn");
+                const lead = aching.length > 0 ? aching
+                  : orderly.filter((r) => topVol.has(r.i));
+                const shown = drawerAll ? orderly : lead;
+                const hidden = orderly.length - shown.length;
+                const layerVol = rows.reduce((acc, r) => acc + (r.n.vol ?? 0), 0);
+                return (<>
+                  <div className="dd__h">All elements in this layer
+                    <em>{fmtN(tiers[selAll].total)} total · {fmtN(tiers[selAll].items.length)} mapped
+                      {impacted > 0 && <> · <b className="lrow__impn">{impacted} under an active signal</b></>}</em></div>
+                  {aching.length === 0 && rows.length > 1 && (
+                    <p className="dd__calm">Nothing here needs attention. The elements shown
+                      carry the most traffic — where optimisation pays; the rest are healthy
+                      and folded.</p>
+                  )}
+                  {shown.map(({ n, i, probs, sigs }) => (
+                    <div key={i}
+                         className={`lrow${probs > 0 || sigs > 0 ? " lrow--imp" : ""}`}
+                         style={{ ["--tone" as string]: TVAR[n.tone] }}
+                         role="button" tabIndex={0}
+                         onClick={() => setSel(`${selAll}-${i}`)}
+                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") {
+                           e.preventDefault(); setSel(`${selAll}-${i}`); } }}>
+                      <span className="lrow__n">{n.nm}
+                        {probs > 0 && <i className="lrow__tag lrow__tag--p"
+                          title="Active Davis problems on this element">
+                          {probs} problem{probs > 1 ? "s" : ""}</i>}
+                        {sigs > 0 && <i className="lrow__tag lrow__tag--a"
+                          title="Anomalies Davis is watching on this element">
+                          {sigs} anomal{sigs > 1 ? "ies" : "y"}</i>}
+                      </span>
+                      <span className="lrow__m">{n.mt}
+                        {probs === 0 && sigs === 0 && topVol.has(i) && layerVol > 0
+                          && (n.vol ?? 0) / layerVol >= 0.05
+                          && <> · carries {Math.round(((n.vol ?? 0) / layerVol) * 100)}% of the layer&apos;s volume</>}
+                      </span>
+                      <span className="lrow__v">{n.v}</span>
+                    </div>
+                  ))}
+                  {hidden > 0 && (
+                    <button className="lrow lrow--fold" onClick={() => setDrawerAll(true)}>
+                      {aching.length > 0
+                        ? `show ${fmtN(hidden)} healthy — folded while ${fmtN(aching.length)} element${aching.length > 1 ? "s" : ""} need${aching.length > 1 ? "" : "s"} attention ▾`
+                        : `show ${fmtN(hidden)} more — nothing failing, nothing remarkable ▾`}
+                    </button>
+                  )}
+                  {drawerAll && orderly.length > lead.length && (
+                    <button className="lrow lrow--fold" onClick={() => setDrawerAll(false)}>
+                      fold the healthy tail ▴
+                    </button>
+                  )}
+                </>);
+              })()}
               {tiers[selAll].total > tiers[selAll].items.length && (
                 <p className="dd__note">
                   {fmtN(tiers[selAll].total - tiers[selAll].items.length)} further elements exist in this layer
@@ -1367,33 +2098,240 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 <span className="chain__node">
                   <i className="sig" style={{ background: TVAR[selElo.tone] }} />{selElo.nm}
                 </span>
+                {/* the identity line: an IP alone said nothing — the card's
+                    own meta (technology · volume) travels with the name */}
+                {selElo.mt && (
+                  <em style={{ display: "block", marginTop: 4, fontStyle: "normal",
+                    font: "400 10.5px var(--mono)", color: "var(--ink-3)" }}>
+                    {selElo.mt}
+                  </em>
+                )}
               </div>
+
+              {/* THE TARGET PICKER — the reader's own design: the routes and
+                  the "which one do I investigate" choice live in one place.
+                  Siblings of the same layer as chips, the aching first and
+                  wearing their signal; a click re-aims the verdict, the
+                  primary action and the routes without going back. */}
+              {(() => {
+                const sibs = (tiers[selTier ?? -1]?.items ?? [])
+                  .map((n, i) => ({ n, i,
+                    probs: n.miss ? 0 : problemsFor(n.ids ?? []).length,
+                    sigs: n.miss ? 0 : signalsFor(n.ids ?? []).length }))
+                  .filter((x) => !x.n.miss);
+                if (sibs.length < 2) return null;
+                const rank = (x: typeof sibs[number]) =>
+                  x.probs > 0 ? 0 : x.sigs > 0 ? 1
+                    : x.n.tone === "bad" ? 2 : x.n.tone === "warn" ? 3 : 4;
+                const ordered = [...sibs].sort((a, b) =>
+                  rank(a) - rank(b) || (b.n.vol ?? 0) - (a.n.vol ?? 0));
+                const shown = tpickAll ? ordered : ordered.slice(0, 8);
+                return (
+                  <div className="tpick">
+                    <span className="tpick__l">investigate</span>
+                    {shown.map(({ n, i, probs: p, sigs: sg }) => {
+                      const on = sel === `${selTier}-${i}`;
+                      const hurt = p > 0 || n.tone === "bad" ? "bad"
+                        : sg > 0 || n.tone === "warn" ? "warn" : "good";
+                      return (
+                        <button key={i}
+                          className={`tpick__c tpick__c--${hurt}${on ? " tpick__c--on" : ""}`}
+                          onClick={() => setSel(`${selTier}-${i}`)}
+                          title={p > 0 ? `${n.nm} — ${p} active problem${p > 1 ? "s" : ""}`
+                            : sg > 0 ? `${n.nm} — ${sg} signal${sg > 1 ? "s" : ""} on it`
+                            : n.nm}>
+                          <i />{n.nm.length > 22 ? `${n.nm.slice(0, 21)}…` : n.nm}
+                          {p > 0 && <b>⚠{p}</b>}
+                        </button>
+                      );
+                    })}
+                    {ordered.length > 8 && (
+                      <button className="tpick__c" style={{ borderStyle: "dashed" }}
+                        onClick={() => setTpickAll((o) => !o)}>
+                        {tpickAll ? "fewer ▴" : `+${ordered.length - 8} more ▾`}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* THE VERDICT, FOR EVERY ELEMENT — the reshape the reader
+                  asked for: a click used to open on seven key-value rows and
+                  only then propose apps ("confuso"). One sentence now
+                  answers "is this ok and what matters", composed from the
+                  facts already fetched; the ledger becomes evidence behind
+                  a fold, and one primary action stands where three persona
+                  walls stood. */}
+              {(() => {
+                const probs = problemsFor(selElo.ids ?? []);
+                const sigs = signalsFor(selElo.ids ?? []);
+                const d0 = (k: RegExp) =>
+                  selElo.det.find(([kk]) => k.test(kk))?.[1] as string | undefined;
+                const v = (() => {
+                  // ONE verdict vocabulary (Critical/Warning/Healthy) — the
+                  // ledger box below says "Critical" and this sentence said
+                  // "Needs attention" for the same state
+                  if (probs.length) return { t: "bad" as const,
+                    txt: `Critical — ${probs[0].name}`,
+                    sub: `${probs[0].display_id} · ${probs[0].category}`
+                      + (probs.length > 1 ? ` · +${probs.length - 1} more` : "") };
+                  if (selElo.tone === "bad" || selElo.tone === "warn") {
+                    const hit = d0(/hit by errors/i);
+                    return { t: selElo.tone,
+                      txt: hit ? `Users are feeling it — ${hit}`
+                        : `Wearing a ${selElo.tone === "bad" ? "critical" : "warning"} signal`,
+                      sub: "the evidence is below" };
+                  }
+                  if (sigs.length) return { t: "warn" as const,
+                    txt: `Warning — ${sigs[0].name} under watch`,
+                    sub: `anomaly under watch${sigs.length > 1 ? ` · +${sigs.length - 1} more` : ""}; nothing failing yet` };
+                  const short = (s?: string) => s && s.length <= 28 ? s : undefined;
+                  const calls = short(d0(/^calls/i)); const p50 = short(d0(/^p50$/i));
+                  // only a COUNT may ride the sentence — a service card's
+                  // "Called by" lists callers by name and rebuilt the very
+                  // wall this verdict replaces
+                  const servedRaw = d0(/^called by/i);
+                  const served = servedRaw && /^\d+\s/.test(servedRaw) ? servedRaw : undefined;
+                  const sess = short(d0(/^sessions$/i));
+                  const reqs = short(d0(/^requests$/i));
+                  const fact = calls
+                    ? `${calls} calls at p50 ${p50 ?? "—"}${served ? `, answering ${served}` : ""}`
+                    : sess ? `${sess} sessions in the window`
+                    : reqs ? `${reqs} requests${p50 ? ` at p50 ${p50}` : ""}`
+                    : "nothing from Davis on it";
+                  const silence = /not reported/i.test(String(d0(/failed/i) ?? ""))
+                    ? " Failure is not reported on these spans — silence is not proof of clean."
+                    : "";
+                  return { t: "good" as const, txt: `Healthy — ${fact}.${silence}`, sub: null };
+                })();
+                return (
+                  <div className="elsum">
+                    <span className={`elsum__v elsum__v--${v.t}`}>
+                      {v.t === "good" ? "" : "⚠ "}{v.txt}
+                      {v.sub && <em>{v.sub}</em>}
+                    </span>
+                  </div>
+                );
+              })()}
+              {/* ONE PRIMARY ACTION — the technical route's own first step,
+                  which the route builder already orders best-first (a Davis
+                  problem leads when one exists). The full persona walk waits
+                  behind the fold at the bottom. */}
+              {elRoutes && (() => {
+                const first = elRoutes.list[0]?.steps?.[0] as
+                  { label?: string; app?: string; href?: string; proves?: string } | undefined;
+                if (!first?.href || !first.label) return null;
+                return (
+                  <a className="drill-primary" href={first.href}
+                    target="_blank" rel="noreferrer"
+                    title={first.proves ?? undefined}>
+                    {first.label}{first.app ? ` — ${first.app}` : ""} →
+                  </a>
+                );
+              })()}
               {met && (() => {
                 const fc = metTarget?.kind === "app" ? ahead : met.fc;
                 const fcRising = !!fc && fc.slope > 0;
                 return (<>
-                  <div className="dd__h">Vitals <em>last 30 min</em></div>
+                  {/* The window is part of the number. These come from the
+                      metric store's last 30 minutes while the ledger below
+                      counts the selected timeframe — which is why "failures 1"
+                      could sit above "errors 10" and read as a contradiction.
+                      Both windows are now stated where their numbers are. */}
+                  <div className="dd__h">How it is answering right now
+                    <em>live · last 30 min</em></div>
                   <div className="dd" style={{ marginBottom: 6 }}>
                     {/* The metric store keeps an average, not percentiles.
                         Printing it under p50, p90 and p95 would be the same
                         number three times, each claiming to be something it
                         is not — so a fallback reading says what it is. */}
-                    {met.avgOnly
-                      ? <Kpi l="avg (metric store)"
-                          v={met.ready ? fmtMs(met.p50) : "…"} t="info" />
-                      : <>
-                          <Kpi l="p50" v={met.ready ? fmtMs(met.p50) : "…"} t="info" />
-                          <Kpi l="p90" v={met.ready ? fmtMs(met.p90) : "…"} t="info" />
-                          <Kpi l="p95" v={met.ready ? fmtMs(met.p95) : "…"} t="info" />
-                        </>}
-                    <Kpi l="Throughput" v={met.ready ? fmtK(met.thr) : "…"} t="info" />
-                    <Kpi l="Failures" v={met.ready ? fmtN(met.fails) : "…"}
-                      t={met.ready && met.fails > 0 ? "bad" : met.ready ? "good" : "info"} />
+                    {met.avgOnly && (
+                      <Kpi l="avg (metric store)"
+                        v={met.ready ? fmtMs(met.p50) : "…"} t="info" />
+                    )}
                   </div>
+                  {/* TRAFFIC AS ONE FACT, NOT TWO NUMBERS.
+                    * "Throughput 216.3k" beside "Failures 0" is two boxes the
+                    * reader has to divide in their head, and on an element with
+                    * no percentiles they were the whole panel. One strip says
+                    * it: the volume, the failing share drawn against it, and
+                    * the rate spelled out. A clean element reads as a full
+                    * green bar — an answer, where before there was arithmetic
+                    * homework. */}
+                  {met.ready && (() => {
+                    const rate = met.thr > 0 ? met.fails / met.thr : 0;
+                    // one failure-rate rule with the overview card:
+                    // bad >= 1%, warn >= 0.1% — 'any failure = amber' made
+                    // one blip in a million wear a warning here only
+                    const bad = rate >= 0.01, warn = rate >= 0.001 && rate < 0.01;
+                    const col = bad ? "var(--bad)" : warn ? "var(--warn)" : "var(--good)";
+                    return (
+                      <div className="trf">
+                        <div className="trf__top">
+                          <b className="num">{fmtK(met.thr)}</b>
+                          <span>calls · last 30 min</span>
+                          <em style={{ color: col }}>
+                            {met.fails === 0 ? "none failed"
+                              : `${fmtN(met.fails)} failed · ${(rate * 100).toFixed(rate < 0.001 ? 3 : 2)}%`}
+                          </em>
+                        </div>
+                        <div className="trf__bar">
+                          <i className="trf__ok" />
+                          <i className="trf__no" style={{
+                            width: `${Math.min(100, Math.max(rate > 0 ? 1.5 : 0, rate * 100))}%`,
+                            background: col }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* THE LATENCY LADDER. Three boxes reading 1.4s · 9.7s · 11.5s
+                    * hid the only thing that matters about them: the SPREAD.
+                    * The same three numbers on one logarithmic rail show the
+                    * tail as distance — a p95 eight times the median stops
+                    * being three tidy figures and becomes a gap you can see.
+                    * Log, because latency spans decades and a linear rail
+                    * would pin the median to the left edge. */}
+                  {!met.avgOnly && met.ready && met.p95 > 0 && (() => {
+                    const lo = Math.max(1, Math.min(met.p50, 100));
+                    const hi = Math.max(met.p95 * 1.15, lo * 2);
+                    const at = (v: number) => {
+                      const t = (Math.log(Math.max(v, lo)) - Math.log(lo))
+                        / Math.max(Math.log(hi) - Math.log(lo), 0.0001);
+                      return Math.min(97, Math.max(0, t * 100));
+                    };
+                    const tail = met.p50 > 0 ? met.p95 / met.p50 : 0;
+                    const marks: Array<[string, number, string]> = [
+                      ["p50", met.p50, "var(--t-cyan)"],
+                      ["p90", met.p90, "var(--warn)"],
+                      ["p95", met.p95, "var(--bad)"],
+                    ];
+                    return (
+                      <div className="lad">
+                        <div className="lad__rail">
+                          <i className="lad__fill" style={{ left: `${at(met.p50)}%`,
+                            width: `${Math.max(2, at(met.p95) - at(met.p50))}%` }} />
+                          {marks.map(([k, v, c]) => (
+                            <i key={k} className="lad__tick" style={{ left: `${at(v)}%`, background: c }} />
+                          ))}
+                        </div>
+                        <div className="lad__legend">
+                          {marks.map(([k, v, c]) => (
+                            <span key={k}><i style={{ background: c }} />{k}
+                              {" "}<b className="num">{fmtMs(v)}</b></span>
+                          ))}
+                          {tail >= 2 && (
+                            <em className={tail >= 5 ? "lad__tail lad__tail--bad" : "lad__tail"}>
+                              the slowest 5% wait {tail.toFixed(1)}× the median
+                            </em>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {fc && (
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 14,
                       fontSize: 12, padding: "5px 0", borderTop: "1px solid var(--border)" }}>
-                      <span className="dim">Forecast (next 12h)</span>
+                      <span className="dim">Forecast (next {aheadOf(fc)})</span>
                       <b className="num" style={{ fontSize: 12,
                         color: fcRising && metTarget?.kind === "app" ? "var(--warn)" : "var(--ink)" }}>
                         ≈ {fmtK(Math.round(fc.total))} {metTarget?.kind === "app" ? "errors" : "calls"}
@@ -1426,13 +2364,62 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   </div>
                 );
               })()}
-              {selElo.det.map(([k, v]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 14,
-                  fontSize: 12, padding: "5px 0", borderTop: "1px solid var(--border)" }}>
-                  <span className="dim">{k}</span>
-                  <b className="num" style={{ fontSize: 12, textAlign: "right" }}>{v}</b>
-                </div>
-              ))}
+              {/* THE VERDICT FIRST, THE LEDGER AFTER.
+                *
+                * This was a flat key-value dump with the verdict last: a
+                * reader met "Sessions / Views / Errors / View p50" and only at
+                * the bottom learned the thing was in Warning. Worse, the
+                * numbers read as contradictory — "FAILURES 1" in the vitals
+                * card beside "Errors 10" in the list — because the two are
+                * measured over DIFFERENT WINDOWS and neither said so. The
+                * status is lifted to the top as a verdict, and the ledger
+                * below carries the window it belongs to. */}
+              {(() => {
+                const rows = selElo.det;
+                const status = rows.find(([k]) => /^status$/i.test(k));
+                const rest = rows.filter(([k]) => !/^status$/i.test(k));
+                /* the verdict WORD decides the colour — the old regex
+                 * defaulted everything else to green, so "No users" and
+                 * "Not measured" (info verdicts, not judgements) wore the
+                 * healthy colour. Info renders in ink, as everywhere. */
+                const sv = String(status?.[1] ?? "");
+                const tone = /^warning/i.test(sv) ? "var(--warn)"
+                  : /^critical/i.test(sv) || /(down|fail)/i.test(sv) ? "var(--bad)"
+                  : /^healthy/i.test(sv) ? "var(--good)"
+                  : "var(--ink-2)";
+                return (<>
+                  {status && (
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 9,
+                      margin: "10px 0 2px", padding: "8px 11px", borderRadius: 8,
+                      border: `1px solid color-mix(in srgb, ${tone} 45%, var(--border))`,
+                      background: `color-mix(in srgb, ${tone} 10%, transparent)` }}>
+                      <span className="dim" style={{ fontSize: 9, letterSpacing: ".12em",
+                        textTransform: "uppercase", color: tone }}>verdict</span>
+                      <b style={{ fontSize: 12, color: tone }}>{status[1]}</b>
+                    </div>
+                  )}
+                  {/* evidence, one click away — the open drawer used to BE
+                      this wall, and the verdict above now carries what it
+                      proves */}
+                  {rest.length > 0 && (
+                    <button onClick={() => setLedgerOpen((o) => !o)}
+                      style={{ display: "block", width: "100%", textAlign: "left",
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase",
+                        color: "var(--ink-3)", margin: "12px 0 2px", padding: 0,
+                        fontFamily: "var(--mono)" }}>
+                      the ledger · {data.tf.label} · {rest.length} facts {ledgerOpen ? "▾" : "▸"}
+                    </button>
+                  )}
+                  {ledgerOpen && rest.map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 14,
+                      fontSize: 12, padding: "5px 0", borderTop: "1px solid var(--border)" }}>
+                      <span className="dim">{k}</span>
+                      <b className="num" style={{ fontSize: 12, textAlign: "right" }}>{v}</b>
+                    </div>
+                  ))}
+                </>);
+              })()}
               {/* Signals only, as data: each block exists exactly when the
                   Davis has something on THIS entity — no prose, no empty
                   states, no environment-wide tables. Routes stay below. */}
@@ -1471,75 +2458,56 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     </>)}
                     {exts.length > 0 && (<>
                       <div className="dd__h" style={{ color: "var(--accent)" }}>
-                        Extension events <em>24h</em>
+                        Extension events <em>24h · first line of each signal</em>
                       </div>
+                      {/* A signal's name can be a page of process dumps (the
+                          zombie-accumulation event ships its samples inline).
+                          The row keeps the first line — the finding — and the
+                          detail stays in the platform that raised it. */}
                       <Table cols={["Provider", "Signal", "Events"]}
-                        rows={exts.slice(0, 6).map((x) => [x.provider, x.name, fmtN(x.events)])} />
+                        rows={exts.slice(0, 6).map((x) => {
+                          const one = String(x.name).split(/[.;](\s|$)/)[0];
+                          return [x.provider,
+                            one.length > 110 ? one.slice(0, 110) + "…" : one,
+                            fmtN(x.events)];
+                        })} />
                     </>)}
                   </div>
                 );
               })()}
 
-              {(() => {
-                const fcObj = metTarget?.kind === "app" ? ahead : met?.fc;
-                const fcRising = (!!fcObj && fcObj.slope > 0) || selElo.spark?.rising === true;
-                const nProbs = problemsFor(selElo.ids ?? []).length;
-                const nSigs = signalsFor(selElo.ids ?? []).length;
-                const scopedApp = data.apps.find((a) => a.appId === appId);
-                return <Routes list={investigationPaths({
-                  ids: selElo.ids ?? [],
-                  name: selElo.nm,
-                  tf: data.tf,
-                  // buildTiers already knows exactly what kind of card this
-                  // is — decided once, here, not re-guessed from ids prefixes
-                  // inside investigationPaths (see kindOf's own comment).
-                  kind: kindOf(selTier ?? -1, selElo),
-                  problems: nProbs,
-                  problem: problemsFor(selElo.ids ?? [])[0],
-                  problemHints: problemsFor(selElo.ids ?? [])
-                    .map((x) => `${x.category} ${x.name}`),
-                  // Every element in this chain belongs to the one scoped
-                  // application, whichever layer it sits in — not only the
-                  // application card itself. A Consume-layer origin bucket
-                  // (Mobile, Robots…) used to have no way to reach "Sessions
-                  // and conversion" at all because this was gated to tier 2.
-                  rumAppId: appId,
-                  scopedAppName: scopedApp?.name,
-                  scopedEntity: scopedApp?.entity,
-                  // lets the route offer Error Inspector — the Gen3 app whose
-                  // whole subject is the thing this element is failing at.
-                  // Passed for every card; the kind switch decides which of
-                  // them actually offer it (the app card and the origins).
-                  errors: scopedApp?.errors,
-                  // an origin card's vol IS its session count — the sessions
-                  // hand-off is gated on it, so a segment with nothing to
-                  // list offers no list
-                  sessions: selTier === 0 ? selElo.vol : undefined,
-                  // the fatal subset, so a mobile application's route can
-                  // lead with the thing its card leads with
-                  crashes: scopedApp?.crashes,
-                  dbEntity: dbEntity ?? undefined,
-                  // A store card carries no `domain`, it carries `store` — the
-                  // same address shape, just named for what it is.
-                  domain: selElo.domain ?? selElo.store,
-                  domainHasSpans: !!selAddress && !!selDomainTraces?.has(selAddress),
-                  impacted: selShowsImpact && impacted && impacted.hit > 0 ? impacted : undefined,
-                  signals: nSigs,
-                  forecastRising: fcRising,
-                  assist,
-                  apps,
-                  // the element's own measured numbers travel as hidden context,
-                  // so Assist reads this element rather than the environment
-                  facts: { lines: selElo.det.map(([k, v]) => `${k}: ${v}.`) },
-                })}
-                  // The element's own verdict decides the framing, not the
-                  // Davis signals alone. Judging by signals only, easytrade —
-                  // 675 of 2,041 sessions hit, every one of them a real person
-                  // — was announced as "nothing is failing", two lines under a
-                  // Status row that said Warning. The header must never
-                  // contradict the drawer it sits in.
-                  mode={selElo.tone === "good" ? "optimize" : "incident"} />;
+              {/* WHY THERE IS NO "OPEN THE DATABASE" here — said, not implied.
+                  The Databases app's vendor list was READ OFF ITS OWN FILTER
+                  BAR (observed 2026-08-25): PostgreSQL, MSSQL, HanaDB, MySQL,
+                  Oracle — plus a SAP instance in its inventory. A store on
+                  any other engine has no page there, and an absent button
+                  with no reason reads as our defect, not their coverage. */}
+              {selStore && !dbEntity && (() => {
+                const sys = (stores ?? []).find((st) => st.store === selStore)?.sys ?? "";
+                const covered = /postgres|mssql|sqlserver|hana|mysql|oracle|sap/i.test(sys);
+                return !covered && sys ? (
+                  <p className="dd__note">
+                    No Databases-app door for this store: that app covers
+                    PostgreSQL, MSSQL, HanaDB, MySQL, Oracle and SAP —
+                    {" "}{sys} is not among them. Its truth lives in the
+                    traces route below.
+                  </p>
+                ) : null;
               })()}
+              {/* the persona walks, folded: three sections of circles were
+                  the wall AFTER the wall — useful, never the first gesture */}
+              {elRoutes && elRoutes.list.length > 0 && (
+                <button onClick={() => setRoutesOpen((o) => !o)}
+                  style={{ display: "block", width: "100%", textAlign: "left",
+                    background: "none", border: "1px dashed var(--border-2)",
+                    borderRadius: 8, cursor: "pointer", marginTop: 18,
+                    padding: "8px 11px", fontSize: 10, letterSpacing: ".1em",
+                    textTransform: "uppercase", color: "var(--ink-2)",
+                    fontFamily: "var(--mono)" }}>
+                  {routesOpen ? "▾" : "▸"} all investigation routes — technical · tactical · executive
+                </button>
+              )}
+              {routesOpen && elRoutes && <Routes list={elRoutes.list} mode={elRoutes.mode} />}
             </>
           )}
         </div>
@@ -1549,13 +2517,6 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     </div>
   );
 }
-
-const SEV_COLOR: Record<Insight["severity"], string> = {
-  critical: "var(--bad)", warning: "var(--warn)", notable: "var(--info)", good: "var(--good)",
-};
-const SEV_LABEL: Record<Insight["severity"], string> = {
-  critical: "critical", warning: "watch", notable: "context", good: "cleared",
-};
 
 const P_HUE: Record<Persona, string> = {
   technical: "var(--t-cyan)", tactical: "var(--t-violet)", executive: "var(--t-pink)",
@@ -1657,31 +2618,6 @@ function Routes({ list, mode = "incident" }: {
 }
 
 /** Only what the data actually supports — an empty list says so plainly. */
-function Insights({ list }: { list: Insight[] }) {
-  if (!list.length) {
-    return (
-      <p className="ins__none">
-        Nothing stands out for this element: its numbers sit within the range of its peers and no
-        problem, alert or extension event is attributed to it.
-      </p>
-    );
-  }
-  return (
-    <div className="ins">
-      {list.map((i, k) => (
-        <div className="ins__c" key={k} style={{ ["--sv" as string]: SEV_COLOR[i.severity] }}>
-          <div className="ins__h">
-            <span className="ins__s">{SEV_LABEL[i.severity]}</span>
-            <span className="ins__t">{i.title}</span>
-          </div>
-          <div className="ins__b">{i.body}</div>
-          <div className="ins__e">{i.evidence}</div>
-          {i.action && <div className="ins__a">{i.action}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function Kpi({ l, v, t }: { l: string; v: string; t: Tone }) {
   return (

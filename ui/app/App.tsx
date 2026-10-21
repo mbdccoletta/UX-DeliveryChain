@@ -5,26 +5,28 @@
 // is what makes an app feel like it belongs rather than like a page that
 // happens to be hosted here — so the header, the navigation and the title bar
 // are Strato components, while everything they frame stays exactly as it was.
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { AppHeader, HelpMenu, PageLayout, TitleBar } from "@dynatrace/strato-components/layouts";
 import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
-import { fmtK, fmtN, tfFrom } from "./utils/dql";
+import { tfFrom } from "./utils/dql";
 import { FlowSankey } from "./components/FlowSankey";
 import { DeliveryChain } from "./components/DeliveryChain";
-import { Overview } from "./components/Overview";
 import { Pulse } from "./components/Pulse";
-import { JourneyMap } from "./components/JourneyMap";
+import { NoRumState } from "./components/NoRumState";
 import { ReportView } from "./components/ReportView";
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
 import { useUrlState } from "./hooks/useUrlState";
 import { useUxOverview } from "./hooks/useUxOverview";
+import { useFrontendNames } from "./hooks/useFrontendNames";
+import { useJourneys } from "./hooks/useJourneys";
+import { resetScan } from "./utils/cost";
 import { usePageTitle } from "./hooks/usePageTitle";
 import { Boundary } from "./components/Boundary";
 
-type Tab = "home" | "flow" | "chain" | "health" | "report";
+type Tab = "home" | "flow" | "chain" | "report";
 /**
  * Tab id, header label, and the sentence the title bar puts under it.
  *
@@ -42,9 +44,8 @@ const TABS: Array<[Tab, string, string]> = [
   // one page, two altitudes: Flow aggregates where users go; Journey replays
   // the steps one session class takes. A view toggle switches between them
   // without losing the application or the window.
-  ["flow", "Journeys", "Where users go and how they get there — aggregated, or step by step"],
-  ["health", "Health", "The environment as a whole, aggregated"],
-  ["report", "Report", "What is worth telling someone who will not read a chart"],
+  ["flow", "Journeys", "Where users go and how they get there"],
+  ["report", "Business Control", "Two fronts, one board — numbers and trends, this window against the last"],
 ];
 /** Everything a link has to carry for someone else to see the same screen. */
 /** The window the app opens on, in the selector's own grammar. */
@@ -53,7 +54,6 @@ const URL_DEFAULTS = {
   tab: "home", from: TF0.from, to: TF0.to,
   app: null, sel: null, session: null,
   /** Journeys page altitude: the aggregated flow, or the ordered steps. */
-  view: "flow",
 } as const;
 
 export function App() {
@@ -61,22 +61,56 @@ export function App() {
     tab: string; from: string; to: string; app: string | null; sel: string | null;
     /** Validation: pin every RUM query to one session. */
     session: string | null;
-    view: string;
     /** "anomalies" spotlights the chain's anomalous components on arrival. */
     hl: string | null;
-  }>({ ...URL_DEFAULTS, hl: null });
+    /** A cohort intent the Flow opens straight into an infographic:
+     *  "unconverted" = the journeys that reached no goal. */
+    coh: string | null;
+    /** The value of one conversion + its currency — set on Business Control,
+     *  read wherever money is derived (route economics included). In the URL
+     *  so a shared link carries the same figures. */
+    tkt: string | null;
+    cur: string | null;
+    /** Monitored-share (coverage %) — url state for the same reason as tkt:
+     *  a shared link must carry the same figures. */
+    cov: string | null;
+    /** Routes picked on Journeys, handed to Business Control so its journey
+     *  front recomputes for exactly them. Pick ids, tab-separated. */
+    rt: string | null;
+  }>({ ...URL_DEFAULTS, hl: null, coh: null, tkt: null, cur: null, cov: null, rt: null });
 
   // old ?tab=journey links keep working: they land on the merged page,
   // already switched to the journey view
   const tab = (state.tab === "journey" ? "flow"
     : TABS.some(([id]) => id === state.tab) ? state.tab : "home") as Tab;
-  const jview = state.tab === "journey" || state.view === "journey" ? "journey" : "flow";
+  // The step-by-step JourneyMap and its toggle were removed by request; the
+  // Flow (whose step mode now takes custom paths) is the Journeys page.
   // Any window the platform selector can express — presets and custom ranges
   // alike — travels in the URL as the two expressions the queries will use.
-  const tf = React.useMemo(
-    () => tfFrom(state.from || TF0.from, state.to || TF0.to),
-    [state.from, state.to],
-  );
+  /* THE 24-HOUR CEILING. Scan cost is linear in the window (measured:
+   * ~16.9 GB for 2h of this estate — a 30-day pick would be ~6 TB), so the
+   * window's LENGTH is capped at 24h: the END the reader chose is kept and
+   * the start is pulled up to 24h before it. Recency is not constrained —
+   * yesterday's 2h window is as valid as today's. The label says when the
+   * cap acted, because a silently different window is the lie this app
+   * refuses to tell. */
+  const tf = React.useMemo(() => {
+    const raw = tfFrom(state.from || TF0.from, state.to || TF0.to);
+    if (raw.minutes <= 1440) return raw;
+    if (/^now\(\)$/i.test(raw.to.trim())) {
+      const capped = tfFrom("-24h", "now");
+      return { ...capped, label: `${capped.label} — capped at 24h` };
+    }
+    const endIso = raw.to.replace(/"/g, "");
+    const end = new Date(endIso);
+    if (!Number.isFinite(end.getTime())) {
+      const capped = tfFrom("-24h", "now");
+      return { ...capped, label: `${capped.label} — capped at 24h` };
+    }
+    const start = new Date(end.getTime() - 24 * 3600e3);
+    const capped = tfFrom(start.toISOString(), end.toISOString());
+    return { ...capped, label: `${capped.label} — capped at 24h` };
+  }, [state.from, state.to]);
   const appId = state.app;
 
   // a new view or a different application is worth a history entry; changing
@@ -86,25 +120,60 @@ export function App() {
   const setTf = (from: string, to: string) => set({ from, to }, false);
 
 
+  /* What this window has read stays counted even though nothing prints it any
+   * more: the readout is gone, the accounting is not. It is what a ceiling
+   * reads before deciding a query is too wide to run. */
+  useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
+
+  /** A journey handed back to the flow to be re-picked; saving replaces it. */
+  /* Pressing "define a conversion journey" anywhere must START the process,
+   * not deposit the reader on another page to hunt for a second button. This
+   * token travels with the navigation and opens the flow already in
+   * definition mode, waiting for the one click that is actually theirs. */
+
   const d = useChainData(tf, state.session);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   const uxMap = useUxOverview(tf);
+  /* Users & Sessions filters by frontend.name, not the inventory name —
+   * see useFrontendNames for the measured mismatch. */
+  const feNames = useFrontendNames();
+  /* journeys data only where journeys are read (Journeys + Business
+   * Control) — four user.events scans Overview and the chain stopped paying */
+  /* warmed the moment the pointer TOUCHES the Journeys/Business Control
+   * tab — by the click, the four scans are usually already in flight */
+  const [warmJourneys, setWarmJourneys] = useState(false);
+  const jd = useJourneys(tf,
+    warmJourneys || tab === "flow" || tab === "report", state.session);
+  // the customer's own conversion definitions — taught on Journeys, read by
+  // every screen that speaks of conversion
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
 
-  const current = appId ?? d.apps[0]?.appId ?? "";
-  // The header quotes the same per-session scan the pages quote, so the title
-  // bar and the card below it can never state two different session counts.
-  const totalSessions = uxMap
-    ? d.apps.reduce((a, x) => a + (uxMap.get(x.appId)?.sessions ?? x.sessions), 0)
-    : d.apps.reduce((a, x) => a + x.sessions, 0);
-  const totalErrors = d.apps.reduce((a, x) => a + x.errors, 0);
-  const activeProblems = d.problems.length;
-  // The classic model and RUM both key a mobile app's entity as
-  // MOBILE_APPLICATION-…, whichever of the two named it — verified against
-  // every mobile app currently listed. A web app's entity never starts this
-  // way, so absence defaults an app into "Web" rather than hiding it.
-  const mobileApps = d.apps.filter((a) => a.entity?.startsWith("MOBILE_APPLICATION-"));
-  const webApps = d.apps.filter((a) => !a.entity?.startsWith("MOBILE_APPLICATION-"));
+  /* An appId the loaded window does not know (a quiet app whose RUM id
+   * vanished from qApps, a stale share link) used to render a GHOST chain:
+   * empty selector, "No coverage" columns, a nameless Render card — the
+   * reader's screenshot. Unknown falls back exactly like null does: to the
+   * busiest application. While loading, the url's choice stands so the
+   * selection does not flicker away and back. */
+  const current = d.loading
+    ? (appId ?? "")
+    : appId && d.apps.some((a) => a.appId === appId)
+      ? appId
+      : d.apps[0]?.appId ?? "";
+  // the engineer's reading of the same anatomy Business Control speaks in
+  // business words — shown on the two technical pages, one scan shared
+  // the flow page reads its technical vitals from the INFOGRAPHIC now, where
+  // they answer the filtered question; only the chain needs this scan
+
+  /* THE PLATFORM'S OWN CLASSIFICATION FIRST. This used to infer the kind
+   * from a MOBILE_APPLICATION- entity prefix, and defaulted to "Web" when the
+   * entity was absent — so on a Smartscape-only tenant, where dt.rum.application.entity comes
+   * back null, a native Android app was listed under Web (the reader caught
+   * it). Smartscape's FRONTEND node states frontend.type as a fact; the
+   * prefix stays as the fallback for apps that have no such node. */
+  const isMobile = (a: { kind?: string; entity?: string }) =>
+    a.kind ? a.kind === "mobile" : !!a.entity?.startsWith("MOBILE_APPLICATION-");
+  const mobileApps = d.apps.filter(isMobile);
+  const webApps = d.apps.filter((a) => !isMobile(a));
 
   const view = TABS.find(([id]) => id === tab);
 
@@ -113,9 +182,20 @@ export function App() {
       <AppHeader>
         <AppHeader.Navigation>
           {/* the standard: clicking the logo lands on the first tab */}
-          <AppHeader.Logo appName="DeliveryChain UX" onClick={() => setTab("home")} />
+          {/* WHY A REGISTRY URL, NOT A DATA URI: AppIcon fetch()es its src
+              and the CSP's connect-src has no data: — the data-URI attempt
+              failed silently into the "?" fallback. The dev server serves
+              app.config's icon.png at this same registry path for OUR app
+              id (measured: 200 image/png; the component's default asks for
+              "local-dev-mode" and 404s), and after a deploy the platform
+              registry answers the identical URL. One src, both worlds. */}
+          <AppHeader.Logo appName="UX Delivery Chain"
+            appIcon="/platform/app-engine/registry/v1/app-icons/my.deliverychain.ux"
+            onClick={() => setTab("home")} />
           {TABS.map(([id, label]) => (
-            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}>
+            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}
+              onMouseEnter={(id === "flow" || id === "report")
+                ? () => setWarmJourneys(true) : undefined}>
               {label}
             </AppHeader.NavigationItem>
           ))}
@@ -155,18 +235,14 @@ export function App() {
           )}
           <TitleBar.Suffix>
             <div className="ctl">
-              {!d.loading && (
-                <span className="lbl">
-                  {d.apps.length} applications · {fmtN(totalSessions)} sessions ·{" "}
-                  {activeProblems} active problems
-                </span>
-              )}
-              {!d.loading && d.apps.length > 0 && tab !== "report" && (
+              {/* the estate line (apps · sessions · problems · env alerts)
+                  was removed by request — the pages themselves carry their
+                  numbers, and the bar keeps only the controls */}
+              {!d.loading && d.apps.length > 0 && (
                 <Select
-                  value={tab === "flow" && jview === "flow" ? appId : current}
-                  clearable={tab === "flow" && jview === "flow"}
-                  onChange={(v) => setAppId((v as string | null) ?? null)}>
-                  <Select.Trigger placeholder="All applications" />
+                  value={current}
+                  onChange={(v) => { if (v) setAppId(v as string); }}>
+                  <Select.Trigger placeholder="Application" />
                   <Select.Content>
                     {/* Web and mobile read differently in the rest of this app —
                         mobile carries no ingress, no third-party requests, and
@@ -201,7 +277,19 @@ export function App() {
               {/* the platform's own selector: presets, custom range, stepper */}
               <TimeframeSelector
                 value={{ from: state.from || TF0.from, to: state.to || TF0.to }}
-                onChange={(v) => setTf(v?.from.value ?? TF0.from, v?.to.value ?? TF0.to)} />
+                onChange={(v) => setTf(v?.from.value ?? TF0.from, v?.to.value ?? TF0.to)}>
+                {/* only windows the 24h ceiling allows — the platform's
+                    default list offers 7/30/90 days, which the cap above
+                    would silently shrink; better not to offer them */}
+                <TimeframeSelector.Presets>
+                  <TimeframeSelector.PresetItem value={{ from: "-30m", to: "now" }}>Last 30 minutes</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-1h", to: "now" }}>Last 1 hour</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-2h", to: "now" }}>Last 2 hours</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-6h", to: "now" }}>Last 6 hours</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-12h", to: "now" }}>Last 12 hours</TimeframeSelector.PresetItem>
+                  <TimeframeSelector.PresetItem value={{ from: "-24h", to: "now" }}>Last 24 hours</TimeframeSelector.PresetItem>
+                </TimeframeSelector.Presets>
+              </TimeframeSelector>
             </div>
           </TitleBar.Suffix>
         </TitleBar>
@@ -219,15 +307,49 @@ export function App() {
         </div>
       )}
 
-      {d.errors.length > 0 && (
-        <div className="banner">
-          <b>Failed queries ({d.errors.length}):</b> {d.errors.slice(0, 3).join(" · ")}
-          {d.errors.length > 3 && " …"} — check the app scopes in <span className="num">app.config.json</span>.
-        </div>
-      )}
+      {d.errors.length > 0 && (() => {
+        /* A FAILURE SHOULD NAME ITS OWN CAUSE. The banner blamed the app
+           scopes for everything, and on a Playground tenant that was simply
+           wrong: the classic `dt.entity.*` objects are RETIRED there
+           (UNKNOWN_DATA_OBJECT), which is an environment fact no scope can
+           fix. The two kinds are separated, and the raw DQL — three
+           paragraphs of syntax error — moves into the tooltip where a reader
+           can still reach it. */
+        const retired = d.errors.filter((e) => /UNKNOWN_DATA_OBJECT/i.test(e));
+        const other = d.errors.filter((e) => !/UNKNOWN_DATA_OBJECT/i.test(e));
+        const label = (e: string) => e.split(":")[0].trim();
+        return (
+          <div className="banner" title={d.errors.join("\n\n")}>
+            {retired.length > 0 && (
+              <>
+                <b>Not available on this environment ({retired.length}):</b>{" "}
+                {retired.map(label).slice(0, 4).join(" · ")} — these read the classic
+                entity model, which this tenant has retired. Everything Smartscape
+                and Grail can answer is on screen; only the classic fallbacks are
+                missing.{other.length > 0 ? " " : ""}
+              </>
+            )}
+            {other.length > 0 && (
+              <>
+                <b>Failed queries ({other.length}):</b> {other.map(label).slice(0, 4).join(" · ")}
+                {" "}— check the app scopes in <span className="num">app.config.json</span>.
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {d.loading ? (
         <div className="loading"><i />querying Grail and Smartscape…</div>
+      ) : !d.apps.length ? (
+        /* NO APPLICATION, NO BLANK PAGE. Every view below is gated on a
+           selected application, so an environment without one used to render
+           nothing at all and explain nothing — which reads as a broken app
+           rather than as a fact about the data. This measures what the
+           environment does send and says which half of the product that
+           supports. Chiefly for OpenTelemetry-first customers, whose telemetry
+           is backend-shaped and carries no RUM application. */
+        <Boundary label="No RUM application"><NoRumState /></Boundary>
       ) : (
         <>
           {tab === "home" && current && (
@@ -239,37 +361,32 @@ export function App() {
                   // application; standalone (no intent bus) falls back to the
                   // in-app Journey view
                   const a = d.apps.find((x) => x.appId === current);
-                  if (intentsAvailable() && a) {
-                    openIntent(sessionsLink(tf, a.name,
+                  const fe = a ? feNames?.get(a.entity ?? "") : undefined;
+                  /* RESOLVED frontend name only — the inventory-name fallback
+                   * filled the bar with a name the store never uses and the
+                   * list read "no sessions" (documented failure) */
+                  if (intentsAvailable() && a && fe) {
+                    openIntent(sessionsLink(tf, fe,
                       uxMap?.get(current)?.sessions ?? a.sessions));
-                  } else { setAppId(current); set({ tab: "flow", view: "journey", sel: null }); }
-                }}
-                onSeeEstate={() => setTab("health")} />
+                  } else { setAppId(current); set({ tab: "flow", sel: null }); }
+                }} />
             </Boundary>
           )}
 
-          {tab === "flow" && (
+          {tab === "flow" && !jd && (
+            <div className="loading"><i />mining the journeys…</div>
+          )}
+          {tab === "flow" && jd && (
             <div className="stack">
-              <div className="seg seg--views" role="group" aria-label="Journeys view">
-                <button className={jview === "flow" ? "on" : ""}
-                  aria-pressed={jview === "flow"}
-                  onClick={() => set({ view: "flow", tab: "flow" })}>
-                  Flow · where they go</button>
-                <button className={jview === "journey" ? "on" : ""}
-                  aria-pressed={jview === "journey"}
-                  onClick={() => set({ view: "journey", tab: "flow" })}>
-                  Journey · step by step</button>
-              </div>
-              {jview === "flow" ? (
-                <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={d.sequences} appId={appId}
-                  transitions={d.transitions} friction={d.friction} views={d.views} ux={uxMap}
-                  onPickApp={(id) => { setAppId(id); }}
-                  onOpen={(t, id) => { setAppId(id);
-                    if ((t as string) === "journey") set({ view: "journey", tab: "flow", sel: null });
-                    else setTab("chain"); }} /></Boundary>
-              ) : current ? (
-                <Boundary label="Journey"><JourneyMap data={d} appId={current} /></Boundary>
-              ) : null}
+              {/* friction/onOpen retired with the audit: the prop was never
+                  read and the hand-off callback had no consumer */}
+              <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={jd.sequences} appId={current || null}
+                transitions={jd.transitions} views={jd.views} ux={uxMap}
+                tf={tf}
+                cohort={state.coh === "unconverted" ? "unconverted" : null}
+                onCohortConsumed={() => set({ coh: null }, false)}
+                onBizScope={(picks) => set({ tab: "report", rt: picks.join("\t") })}
+                onPickApp={(id) => { setAppId(id); }} /></Boundary>
             </div>
           )}
 
@@ -281,86 +398,25 @@ export function App() {
                 onHighlightClear={() => set({ hl: null }, false)} />
             </Boundary>
           )}
-          {tab === "report" && <Boundary label="Report"><ReportView data={d} /></Boundary>}
-
-          {tab === "health" && (
-            <div className="stack">
-              {/* the estate heatmap — the triage table for whoever owns 500 apps */}
-              <Boundary label="Estate">
-                <Overview data={d} onOpen={(id) => { setAppId(id); setTab("chain"); }} />
-              </Boundary>
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Environment health</span>
-                  <span className="hint">aggregated · {tf.label}</span></div>
-                <div className="pad">
-                  <div className="dd">
-                    <K l="Applications" v={String(d.apps.length)} c="var(--info)" />
-                    <K l="Sessions" v={fmtN(totalSessions)} c="var(--info)" />
-                    <K l="Errors" v={fmtK(totalErrors)} c={totalErrors ? "var(--bad)" : "var(--good)"} />
-                    <K l="Active problems" v={String(activeProblems)} c={activeProblems ? "var(--bad)" : "var(--good)"} />
-                    <K l="Services in Smartscape" v={fmtN(d.topology.find((t) => t.type === "SERVICE")?.nodes ?? 0)} c="var(--info)" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Applications</span>
-                  <span className="hint">sessions · views · errors</span></div>
-                <div className="pad" style={{ overflowX: "auto" }}>
-                  <table className="dt">
-                    <thead><tr><th>Application</th><th>Sessions</th><th>Views</th><th>Errors</th><th>Errors/view</th></tr></thead>
-                    <tbody>
-                      {d.apps.map((a) => (
-                        <tr key={a.appId}>
-                          <td style={{ fontFamily: "var(--sans)" }}>{a.name}</td>
-                          <td>{fmtN(uxMap?.get(a.appId)?.sessions ?? a.sessions)}</td>
-                          <td>{fmtN(a.views)}</td>
-                          <td style={{ color: a.errors > a.views ? "var(--bad)" : undefined }}>{fmtN(a.errors)}</td>
-                          <td>{a.views ? (a.errors / a.views).toFixed(1) : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Problems detected by the AI</span>
-                  <span className="hint">dt.davis.problems · active</span></div>
-                <div className="pad" style={{ overflowX: "auto" }}>
-                  <table className="dt">
-                    <thead><tr><th>ID</th><th>Problem</th><th>Category</th><th>Entities</th></tr></thead>
-                    <tbody>
-                      {d.problems.map((p) => (
-                        <tr key={p.display_id}>
-                          <td className="hi">{p.display_id}</td>
-                          <td style={{ fontFamily: "var(--sans)" }}>{p.name}</td>
-                          <td>{p.category}</td>
-                          <td>{(p.affected ?? []).join(", ") || "—"}</td>
-                        </tr>
-                      ))}
-                      {!d.problems.length && <tr><td colSpan={4}>No active problems.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel__hd"><span className="lbl">Custom alerts &amp; extensions</span>
-                  <span className="hint">event.provider · 24h</span></div>
-                <div className="pad" style={{ overflowX: "auto" }}>
-                  <table className="dt">
-                    <thead><tr><th>Provider</th><th>Event type</th><th>Volume</th></tr></thead>
-                    <tbody>
-                      {d.providers.slice(0, 14).map((p) => (
-                        <tr key={p.provider + p.type}>
-                          <td className="hi">{p.provider}</td><td>{p.type}</td><td>{fmtN(p.events)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+          {tab === "report" && !jd && (
+            <div className="loading"><i />mining the journeys…</div>
+          )}
+          {/* MOUNTED even while journeys mine — hidden. Gating the mount on
+              jd serialised the board: 2.9s of journeys THEN 3.3s of its own
+              KPI scans (measured, 6.2s total). Mounted hidden, both waves
+              run in parallel and the board appears in the slower one. */}
+          {tab === "report" && (
+            <div style={jd ? undefined : { display: "none" }}>
+            <Boundary label="Report">
+              <ReportView data={{ ...d, views: jd?.views ?? [], sequences: jd?.sequences ?? [],
+                  transitions: jd?.transitions ?? [], friction: jd?.friction ?? [] }} scopeApp={current}
+                routePicks={state.rt ? state.rt.split("\t").filter(Boolean) : null}
+                onClearRoutes={() => set({ rt: null }, false)}
+                cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}
+                onGo={(t, id, hl) => set({ tab: t, app: id ?? state.app, sel: null,
+                  hl: t === "chain" ? (hl ?? null) : null,
+                  coh: t === "flow" ? (hl ?? null) : null })} />
+            </Boundary>
             </div>
           )}
         </>
@@ -372,10 +428,3 @@ export function App() {
   );
 }
 
-function K({ l, v, c }: { l: string; v: string; c: string }) {
-  return (
-    <div className="dd__k" style={{ borderBottomColor: c }}>
-      <div className="dd__kl">{l}</div><div className="dd__kv">{v}</div>
-    </div>
-  );
-}

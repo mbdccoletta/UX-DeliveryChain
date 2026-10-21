@@ -23,7 +23,9 @@
     "@dynatrace/strato-components": "^3.5.0",
     "@dynatrace/strato-components-preview": "^3.4.0",
     "@dynatrace/strato-design-tokens": "^1.2.0",
+    "@dynatrace/strato-geo": "^3.11.4",
     "@dynatrace/strato-icons": "^2.3.0",
+    "html-to-image": "^1.11.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

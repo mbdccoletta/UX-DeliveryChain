@@ -1,6 +1,7 @@
-// Data layer — every query here was validated against tenant lab-tenant
+// Data layer — every query here was validated against a live tenant
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
+import { isScanLimit, noteScan, noteScanStart } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
 /**
@@ -105,10 +106,14 @@ export function tfFrom(from: string, to: string): Timeframe {
  * duration. Derived, not tabled, because the window is now anything the user
  * picks rather than one of four presets.
  */
-export function binFor(minutes: number): string {
+export function binMinutesFor(minutes: number): number {
   const target = minutes / 34;
   const CHOICES = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
-  return durStr(CHOICES.find((c) => c >= target) ?? 1440);
+  return CHOICES.find((c) => c >= target) ?? 1440;
+}
+
+export function binFor(minutes: number): string {
+  return durStr(binMinutesFor(minutes));
 }
 
 /** Runs DQL, polling until the result is ready. */
@@ -116,6 +121,7 @@ export async function runDql<T = Record<string, unknown>>(
   query: string,
   maxResultRecords = 200,
 ): Promise<T[]> {
+  noteScanStart();
   let res = await queryExecutionClient.queryExecute({
     body: { query, requestTimeoutMilliseconds: 30000, maxResultRecords },
   });
@@ -123,7 +129,16 @@ export async function runDql<T = Record<string, unknown>>(
     await new Promise((r) => setTimeout(r, 400));
     res = await queryExecutionClient.queryPoll({ requestToken: res.requestToken! });
   }
-  if (res.state !== "SUCCEEDED") throw new Error(`DQL ${res.state}`);
+  if (res.state !== "SUCCEEDED") { noteScan(0); throw new Error(`DQL ${res.state}`); }
+  /* What this query cost — and whether Grail finished it. A fetch stopped at
+   * the 500 GB scan limit still returns SUCCEEDED; the only sign is a WARNING
+   * in the metadata, and a number computed from half the data must never be
+   * presented as a measurement. */
+  const grail = (res.result as unknown as {
+    metadata?: { grail?: { scannedBytes?: number;
+      notifications?: Array<{ message?: string }> } } })?.metadata?.grail;
+  noteScan(Number(grail?.scannedBytes ?? 0),
+    (grail?.notifications ?? []).some((n) => isScanLimit(n?.message)));
   return (res.result?.records ?? []) as T[];
 }
 
@@ -166,34 +181,110 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 
 /** Application names from the entity inventory. */
 /**
- * Names for every kind of RUM application, not just web. `dt.rum.application.id`
- * carries mobile apps too (a UUID there, an 8-byte hex for web), so the lookup
- * has to cover the mobile and custom entity types or those apps show up as
- * "Application 4f2a…" with no name.
+ * Names for every kind of RUM application, not just web.
+ *
+ * SMARTSCAPE, not the classic model: a Playground/dev tenant answers
+ * `fetch dt.entity.application` with UNKNOWN_DATA_OBJECT ("isn't a valid data
+ * object") and every application on screen fell back to "Application 656efe54"
+ * — the classic objects are being retired. One FRONTEND node type replaces all
+ * three classic ones (application, mobile_application, custom_application) and
+ * is strictly better here: it carries `id_classic` for the entity joins the
+ * chain already does AND `dt.rum.instrumentation.id`, which IS
+ * `dt.rum.application.id`. That makes the MOBILE join exact — the classic path
+ * had to guess it from a UUID's first half.
  */
 export const qAppNames = () => `
-fetch dt.entity.application
-| fields id, name = entity.name
-| append [ fetch dt.entity.mobile_application | fields id, name = entity.name ]
-| append [ fetch dt.entity.custom_application | fields id, name = entity.name ]
+smartscapeNodes "FRONTEND"
+// frontend.type ("web" | "mobile") is the platform's OWN classification —
+// the picker used to infer it from a MOBILE_APPLICATION- id prefix and, when
+// dt.rum.application.entity came back null (measured on a Smartscape-only tenant), filed a
+// native Android app under "Web".
+| fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
+    kind = frontend.type
 | limit 400`;
+
+/**
+ * The sessions store's own name for each application.
+ *
+ * Users & Sessions' `Frontends` facet filters on `frontend.name` from
+ * user.sessions — NOT the inventory name qAppNames reads. The two differ
+ * ("Astroshop Android" the entity, "Astroshop_Android" the frontend), and a
+ * Frontends chip carrying the inventory name is ACCEPTED and matches nothing:
+ * the reader's drilldown came back "No results found" with every chip applied.
+ * Fixed 24h window on purpose — the mapping is a property of the app, not of
+ * the timeframe, and user.sessions is a small store (134k rows/24h measured
+ * on the reference tenant, 2026-08-25).
+ */
+export const qFrontendNames = () => `
+fetch user.sessions, from: now()-24h
+| expand ent = dt.rum.application.entities
+| expand fe = frontend.name
+| summarize n = count(), by: {ent, fe}
+| sort n desc
+| limit 100`;
 
 /** Detected views per application (journeys). */
 export const qViews = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
-| filter characteristics.classifier == "view_summary" and isNotNull(view.detected_name)
+| filter characteristics.classifier == "view_summary" and isNotNull(${VIEW_NAME})
 // Normalised before the aggregation, for the same reason the journeys are: the
 // limit is applied after grouping, so one uncollapsed id splits a real view
 // into hundreds of rows of one and pushes the real ones off the end. Measured
 // on this tenant: 1,042 raw names collapse to 9. A "limit 120" over 1,042
 // fragments was returning mostly noise.
-${norm("view.detected_name", "v")}
+${norm(VIEW_NAME, "v")}
 | summarize views = count(), sessions = countDistinct(dt.rum.session.id),
     p50 = percentile(toLong(duration), 50),
   by: { appId = dt.rum.application.id, view = v }
 | sort sessions desc | limit 120`;
 
 /** Navigation sequences — path mining, one ordered path per session. */
+const VIEW_NAME = "coalesce(view.name, view.detected_name)";
+
+/**
+ * COLLAPSING IDENTIFIERS — one block, shared by every journey-mining query.
+ *
+ * It lived twice, byte for byte, in qSequences and qPathSessions; the mining
+ * and the poster's membership test MUST see the same screen names or a picked
+ * route matches nothing.
+ *
+ * Each rule is anchored on structure a real word cannot have: the hyphen
+ * groups of a UUID, a pure-integer segment, or an alphanumeric run of six or
+ * more carrying BOTH a digit and a letter. That last one replaced an
+ * upper-case-only rule that let Astroshop's lowercase SKUs through and drew
+ * six bands of the same route ("/ → /product/*vchsjnup → /cart → …" once per
+ * SKU). Measured on both tenants before shipping: every name it collapses is
+ * a product id, and "/checkout", "/api/v2/orders" and
+ * "/orange-booking-finish.jsf" pass through untouched.
+ */
+const COLLAPSE_IDS = `
+| fieldsAdd v = replacePattern(${VIEW_NAME},
+    "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
+// servlet session ids ride the PATH (";jsessionid=<hex>.route") and dodge
+// every shape here — measured: hundreds of one-session rows, each burning a
+// row of the limit before the client-side merge could collapse them
+| fieldsAdd v = splitString(v, ";jsessionid")[0]
+// The mixed-case id rule runs BEFORE the INT rule, not after: "'/' INT"
+// collapses the LEADING DIGITS of a segment, so "/product/0puk6v6ev0"
+// became "/product/*puk6v6ev0" — no longer alphanumeric, invisible to this
+// rule, and still one band per SKU on the diagram (browser-verified).
+// matchesRegex is a FULL match here, hence the surrounding [A-Za-z0-9]*.
+| fieldsAdd _seg = splitString(v, "/")
+| fieldsAdd _n = arraySize(_seg)
+| fieldsAdd _last = arrayElement(_seg, _n - 1)
+| fieldsAdd v = if(_n > 1 and stringLength(_last) >= 6
+    and matchesRegex(_last, "[A-Za-z0-9]*[0-9][A-Za-z0-9]*")
+    and matchesRegex(_last, "[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*"),
+  concat(arrayToString(arraySlice(_seg, to: _n - 1), delimiter: "/"), "/*"), else: v)
+// pure-integer segments ("/orders/12345") — shorter than the rule above needs
+| fieldsAdd v = replacePattern(v, "'/' INT", "/*")
+// Hard cap on depth. Any shape rule can be dodged by an id that does not look
+// like one; truncating past the third segment bounds the cardinality whatever
+// the ids look like. Screen names with no "/" are untouched.
+| fieldsAdd _seg = splitString(v, "/")
+| fieldsAdd v = if(arraySize(_seg) > 3, concat("/", _seg[1], "/", _seg[2], "/*"), else: v)
+| fieldsRemove _seg, _n, _last`;
+
 export const qSequences = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // UNION of navigation and view_summary, because coverage inverts between
@@ -204,30 +295,593 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // summary closes the very view its navigation opened).
 | filter (characteristics.classifier == "navigation"
     or characteristics.classifier == "view_summary")
-  and isNotNull(view.detected_name)
+  and isNotNull(${VIEW_NAME})
 // Identifiers are collapsed HERE, before the aggregation, because the limit
 // below is applied after it: leaving one order UUID uncollapsed fragments a
 // 900-session journey into 900 rows of one, and the biggest journeys fall off
-// the end. Each pattern is anchored on structure a real word cannot have — the
-// hyphen groups of a UUID, or an upper-case run containing a digit — so
-// "/cart/checkout" and "/api/v2/orders" pass through untouched.
-// view.detected_name is the screen name on mobile (rum_view_summary is emitted
-// by RUM JavaScript and OneAgent for Mobile alike), so this works for both.
-| fieldsAdd v = replacePattern(view.detected_name,
-    "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
-| fieldsAdd v = replacePattern(v, "'/' [A-Z0-9]{6,}", "/*")
-| fieldsAdd v = replacePattern(v, "'/' INT", "/*")
-// Hard cap on depth. The patterns above recognise ids by shape, and any shape
-// rule can be dodged by an id that does not look like one. Truncating past the
-// third segment bounds the cardinality no matter what the ids look like, which
-// is what keeps the diagram readable. Screen names with no "/" are untouched.
-| fieldsAdd seg = splitString(v, "/")
-| fieldsAdd v = if(arraySize(seg) > 3, concat("/", seg[1], "/", seg[2], "/*"), else: v)
-| fieldsRemove seg
+// the end.${COLLAPSE_IDS}
 | sort start_time asc
-| summarize path = collectArray(v), by: { appId = dt.rum.application.id, session = dt.rum.session.id }
-| summarize sessions = count(), by: { appId, journey = path }
-| sort sessions desc | limit 200`;
+// PLATFORM RIDES ALONG. One RUM application id can carry two platforms —
+// measured on a customer tenant, a single banking application reported both
+// iOS view controllers and Android activities — and they do not share a
+// journey shape, so they cannot share one completion depth. dt.rum.agent.type
+// is the platform's own answer ("javascript" | "ios" | "android"); a session
+// belongs to exactly one, so carrying it splits nothing that belonged together.
+| summarize path = collectArray(v), plat = takeAny(dt.rum.agent.type),
+    by: { appId = dt.rum.application.id, session = dt.rum.session.id }
+| summarize sessions = count(), by: { appId, plat, journey = path }
+// 1000, not 200: the budget is shared by every application, and at 200 the
+// audit measured 866 vmware + 28 Astroshop sessions with full journeys
+// falling off the end — then being counted as "No page telemetry"
+| sort sessions desc | limit 1000`;
+
+/**
+ * The SESSIONS behind a mined path — same pipeline as qSequences, stopped one
+ * aggregation earlier.
+ *
+ * The custom-path picker isolates journeys; this answers "show me those
+ * sessions": per-session ordered views through the identical normalisation
+ * (VIEW_NAME, the id-collapsing patterns, the depth cap), plus the session id
+ * and its first event time — exactly the pair the verified
+ * session-details-from-event intent requires. Matching against the picks
+ * happens client-side with the same rules the diagram used, so the list and
+ * the ribbon can never disagree about who belongs.
+ *
+ * Fetched on demand (the button), never with the page: it scans the window
+ * per click, and only the click has asked for it.
+ */
+export const qPathSessions = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter (characteristics.classifier == "navigation"
+    or characteristics.classifier == "view_summary")
+  and isNotNull(${VIEW_NAME})
+${COLLAPSE_IDS}
+| sort start_time asc
+| summarize path = collectArray(v), start = min(start_time),
+  by: { sid = dt.rum.session.id }
+/* 10000, not 2000. The sample decides which sessions the poster can see, and
+   at 2000 of ~5000 it was an ARBITRARY 60% cut: a picked route whose sessions
+   fell outside it produced an empty cohort — the poster read "0 sessions on
+   this route" while the flow bar beside it read 310. Grail bills the records
+   it SCANS, not the rows it returns, so a wider sample costs nothing; the
+   sampling notice still fires if even this is hit. */
+| limit 10000`;
+
+/**
+ * The cohort analytics: ONE dimension × the per-session measures, cohort
+ * beside everyone else — recomputed for whatever the reader picks.
+ *
+ * The earlier version chose eight dimensions and a 1.3× lift threshold on
+ * the reader's behalf; the reader wants to choose. So the query takes the
+ * dimension as a parameter, and returns for every bucket both sides of the
+ * comparison plus the measures an analyst pivots on: sessions, error-hit
+ * rate, crash rate, median duration, median views per session. The panel
+ * does the arithmetic (share, lift, delta) live in the browser, so a change
+ * of dimension is one query and a change of measure is none.
+ *
+ * Dimensions on offer are the ones measured POPULATED on this tenant (24h,
+ * two applications, session-level coverage): country 98–100%, OS, browser,
+ * device type/manufacturer, screen width, app version, connection type, ISP,
+ * user type, agent version, orientation, navigation type. Coverage is
+ * measured again per query — a null bucket is simply absent.
+ */
+export const COHORT_DIMS: Array<{ id: string; label: string; expr: string }> = [
+  { id: "country",   label: "Country",         expr: "geo.country.iso_code" },
+  { id: "os",        label: "OS",              expr: "os.name" },
+  { id: "osv",       label: "OS version",      expr: "os.version" },
+  { id: "browser",   label: "Browser",         expr: "browser.name" },
+  { id: "browserv",  label: "Browser version", expr: "browser.version" },
+  { id: "devtype",   label: "Device type",     expr: "device.type" },
+  { id: "manuf",     label: "Manufacturer",    expr: "device.manufacturer" },
+  { id: "screen",    label: "Screen width",    expr: "toString(device.screen.width)" },
+  { id: "appv",      label: "App version",     expr: "app.short_version" },
+  { id: "conn",      label: "Connection",      expr: "network.connection.type" },
+  { id: "isp",       label: "ISP",             expr: "client.isp" },
+  { id: "utype",     label: "User type",       expr: "dt.rum.user_type" },
+  { id: "agentv",    label: "Agent version",   expr: "dt.rum.agent.version" },
+  { id: "orient",    label: "Orientation",     expr: "device.orientation" },
+  { id: "navtype",   label: "Navigation type", expr: "navigation.type" },
+  { id: "entry",     label: "Entry view",      expr: "" },   // first view, special-cased
+];
+
+export const qCohortPivot = (
+  tf: Timeframe, rumAppId: string, cohortIds: string[], dimExpr: string,
+) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const ids = cohortIds.slice(0, 500).map((i) => `"${i.replace(/["\\]/g, "")}"`).join(",");
+  // "entry view" is the first view of the session — the sort/takeFirst pair
+  const dimAgg = dimExpr
+    ? `v = takeAny(${dimExpr})`
+    : `v = takeFirst(coalesce(view.name, view.detected_name))`;
+  return `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${app}"${dimExpr ? "" : `
+| filter characteristics.classifier == "navigation" or characteristics.classifier == "view_summary"
+| sort start_time asc`}
+| summarize ${dimAgg}, inCohort = takeAny(in(dt.rum.session.id, {${ids}})),
+    errs = countIf(characteristics.classifier == "error"),
+    crash = countIf(error.type == "crash" or error.type == "anr"),
+    views = countIf(characteristics.classifier == "view_summary"),
+    dur = max(toLong(duration)),
+  by: { sid = dt.rum.session.id }
+| filter isNotNull(v)
+| summarize sessions = count(), hit = countIf(errs > 0), fatal = countIf(crash > 0),
+    p50dur = percentile(dur, 50), p50views = percentile(views, 50),
+  by: { bucket = toString(v), inCohort }
+| sort sessions desc
+| limit 300`;
+};
+
+/**
+ * Every session CHARACTERISTIC the platform records, for the infographic.
+ *
+ * "All available" was measured, not assumed: the field inventory of
+ * user.events was read off both a web and a mobile application on the reference tenant
+ * and reduced to the categorical, session-describing fields — who the user
+ * is, on what, from where. The rest of the schema (performance.*,
+ * web_vitals.*, interaction.*, error.*) is measurement, not
+ * characteristic, and already enters the poster as outcome.
+ *
+ * Every dimension is queried for every application; one that this
+ * application does not record returns no bucket and the poster simply does
+ * not draw it. Web-only fields (browser, DPR, protocol, navigation type,
+ * page domain) and mobile-only ones (manufacturer, model, rooted, app
+ * version, bundle, connection) coexist here for that reason.
+ */
+export const INFO_DIMS: Array<{ id: string; label: string; expr: string }> = [
+  { id: "country",  label: "country",          expr: "geo.country.iso_code" },
+  { id: "isp",      label: "isp / carrier",    expr: "client.isp" },
+  { id: "os",       label: "os",               expr: "os.name" },
+  { id: "osv",      label: "os version",       expr: "os.version" },
+  { id: "browser",  label: "browser",          expr: "browser.name" },
+  { id: "browserv", label: "browser version",  expr: "browser.version" },
+  { id: "devtype",  label: "device type",      expr: "device.type" },
+  { id: "manuf",    label: "manufacturer",     expr: "device.manufacturer" },
+  { id: "model",    label: "device model",     expr: "device.model.identifier" },
+  { id: "rooted",   label: "rooted device",    expr: "toString(device.is_rooted)" },
+  { id: "screen",   label: "screen",
+    expr: "concat(toString(device.screen.width), \"×\", toString(device.screen.height))" },
+  { id: "dpr",      label: "pixel ratio",      expr: "toString(browser.window.device_pixel_ratio)" },
+  { id: "orient",   label: "orientation",      expr: "device.orientation" },
+  { id: "conn",     label: "connection",       expr: "network.connection.type" },
+  { id: "proto",    label: "network protocol", expr: "network.protocol.name" },
+  { id: "utype",    label: "user type",        expr: "dt.rum.user_type" },
+  { id: "appv",     label: "app version",      expr: "app.short_version" },
+  { id: "bundle",   label: "app bundle",       expr: "app.bundle" },
+  { id: "agentv",   label: "agent version",    expr: "dt.rum.agent.version" },
+  { id: "navtype",  label: "navigation type",  expr: "navigation.type" },
+  { id: "pagedom",  label: "page domain",      expr: "page.url.domain" },
+];
+
+/**
+ * The infographic's data in ONE per-session scan.
+ *
+ * The append-of-summaries approach hit the platform's expression limit at ~22
+ * dimensions; this reads every session once — its attributes, whether it
+ * reached an outcome, its outcome measures — and the browser buckets each
+ * dimension and both cohorts itself. One fetch, a dozen expressions, no id
+ * list, and switching dimension or measure in the poster costs nothing.
+ */
+/**
+ * WHERE THE DIFFICULTY LIVES — inside the backend or outside it — per
+ * application, both windows, one query. Two kinds of evidence:
+ *
+ * TIME (leg "slow", from view_summary): every view's wait decomposed by the
+ * agent itself — dns+connection = the user's NETWORK, ttfb waiting = the
+ * SERVER thinking, largest-paint minus first-byte = DOWNLOAD & RENDER on the
+ * user's device. Sums, so the share of total waiting is readable directly.
+ *
+ * ERRORS (leg "err"): each error's origin from its own record — request 5xx
+ * is the backend's fault; status 0/none never reached it (connection);
+ * crash/anr is the device; exception is frontend code; csp a third party or
+ * the user's own browser policy. Sessions counted per bucket.
+ */
+/**
+ * THE TECHNICAL READING of the same anatomy Business Control states in
+ * business words — for the engineers who work the Delivery Chain and the
+ * Journeys pages. Four legs, one scan each, all scoped to one application:
+ *
+ *   "app"   totals: the TTFB anatomy (cache · dns · connection · request ·
+ *           waiting — measured: they sum to ttfb.value), the Core Web Vitals
+ *           at p75 (the standard's own percentile, not p50) and long tasks.
+ *   "view"  the same per view, so the engineer sees WHICH screen and why.
+ *   "dur"   user-action and app-start durations — the technical story of an
+ *           application that carries no vitals at all (measured on Astroshop
+ *           Android: zero ttfb, zero LCP, zero foreground_time).
+ *   "err"   error counts by their platform names, not business phrasing.
+ *
+ * UNITS, measured: ttfb.* arrive in float MILLISECONDS, web_vitals.* and
+ * duration in NANOSECONDS. Everything here is normalised to milliseconds.
+ */
+export const qTechVitals = (tf: Timeframe, rumAppId: string) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const vitals = `
+  | summarize n = count(), meas = countIf(isNotNull(ttfb.value)),
+      cacheMs = percentile(toDouble(ttfb.cache_duration), 75),
+      dnsMs = percentile(toDouble(ttfb.dns_duration), 75),
+      connMs = percentile(toDouble(ttfb.connection_duration), 75),
+      reqMs = percentile(toDouble(ttfb.request_duration), 75),
+      waitMs = percentile(toDouble(ttfb.waiting_duration), 75),
+      ttfbMs = percentile(toDouble(ttfb.value), 75),
+      lcpMs = percentile(toDouble(web_vitals.largest_contentful_paint) / 1000000, 75),
+      fcpMs = percentile(toDouble(web_vitals.first_contentful_paint) / 1000000, 75),
+      cls = percentile(toDouble(web_vitals.cumulative_layout_shift), 75),
+      inpMs = percentile(toDouble(web_vitals.interaction_to_next_paint) / 1000000, 75),
+      longMs = percentile(toDouble(long_task.all.avg_duration) / 1000000, 75),
+      durMs = percentile(toLong(duration) / 1000000, 75)`;
+  return `
+data record(kind = "", bucket = "", n = 0, meas = 0, cacheMs = 0.0, dnsMs = 0.0,
+  connMs = 0.0, reqMs = 0.0, waitMs = 0.0, ttfbMs = 0.0, lcpMs = 0.0, fcpMs = 0.0,
+  cls = 0.0, inpMs = 0.0, longMs = 0.0, durMs = 0.0, sessions = 0)
+| filter false
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}" and characteristics.classifier == "view_summary"${vitals},
+    by: { kind = "app", bucket = "" } ]
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}" and characteristics.classifier == "view_summary"
+  | fieldsAdd vn = ${VIEW_NAME}
+  | filter isNotNull(vn) and vn != ""${vitals},
+    by: { kind = "view", bucket = vn }
+  | sort n desc | limit 8 ]
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}"
+      and in(characteristics.classifier, { "user_action", "app_start" })
+  | summarize n = count(), durMs = percentile(toLong(duration) / 1000000, 75),
+    by: { kind = "dur", bucket = characteristics.classifier } ]
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}" and characteristics.classifier == "error"
+  | fieldsAdd bucket = if(error.type == "crash", "crash",
+      else: if(error.type == "anr", "anr",
+      else: if(error.type == "csp", "csp",
+      else: if(error.type == "exception", "exception",
+      else: if(error.type == "request" and http.response.status_code >= 500, "http5xx",
+      else: if(error.type == "request" and http.response.status_code >= 400, "http4xx",
+      else: if(error.type == "request", "noresponse", else: "other")))))))
+  | summarize n = count(), sessions = countDistinct(dt.rum.session.id), by: { kind = "err", bucket } ]
+| limit 40`;
+};
+
+export const qDifficulty = (tf: Timeframe, rumAppId?: string | null) => {
+  const span = `${tf.minutes}m`;
+  // scoped like the board it feeds — the section describes one application
+  const appFilter = rumAppId
+    ? `\n  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
+  // UNITS, measured on the tenant: ttfb.* come in MILLISECONDS (floats —
+  // truncating them to long zeroes sub-ms waits), web_vitals.* and duration
+  // in NANOSECONDS. Everything is normalised to ns here.
+  const slow = (label: string, from: string, to: string) => `
+| append [ fetch user.events, from: ${from}, to: ${to}${appFilter}
+  | filter characteristics.classifier == "view_summary"
+  | fieldsAdd _net = (coalesce(toDouble(ttfb.dns_duration), 0.0) + coalesce(toDouble(ttfb.connection_duration), 0.0)) * 1000000
+  | fieldsAdd _srv = coalesce(toDouble(ttfb.waiting_duration), 0.0) * 1000000
+  | fieldsAdd _lcp = coalesce(toDouble(web_vitals.largest_contentful_paint), 0.0)
+  | fieldsAdd _ttfb = coalesce(toDouble(ttfb.value), 0.0) * 1000000
+  | fieldsAdd _rend = if(_lcp > _ttfb, _lcp - _ttfb, else: 0.0)
+  | filter isNotNull(dt.rum.application.id) and dt.rum.application.id != ""
+      and not(startsWith(dt.rum.application.id, "APPLICATION-"))
+  | summarize views = count(), meas = countIf(isNotNull(ttfb.value)),
+      net = sum(_net), srv = sum(_srv), rend = sum(_rend),
+    by: { appId = dt.rum.application.id, period = "${label}", kind = "slow", bucket = "" } ]`;
+  const err = (label: string, from: string, to: string) => `
+| append [ fetch user.events, from: ${from}, to: ${to}${appFilter}
+  | filter characteristics.classifier == "error"
+  | fieldsAdd bucket = if(error.type == "crash" or error.type == "anr", "device",
+      else: if(error.type == "csp",
+        if(isNotNull(csp.blocked_uri.provider) and csp.blocked_uri.provider != "first_party",
+          "third_party", else: "policy"),
+      else: if(error.type == "exception", "frontend",
+      else: if(error.type == "request" and http.response.status_code >= 500, "backend",
+      else: if(error.type == "request" and (http.response.status_code == 0
+          or isNull(http.response.status_code)), "connection",
+      else: if(error.type == "request", "request_4xx", else: "other"))))))
+  | filter isNotNull(dt.rum.application.id) and dt.rum.application.id != ""
+      and not(startsWith(dt.rum.application.id, "APPLICATION-"))
+  | summarize sessions = countDistinct(dt.rum.session.id),
+    by: { appId = dt.rum.application.id, period = "${label}", kind = "err", bucket } ]`;
+  return `
+data record(appId = "", period = "", kind = "", bucket = "", views = 0, meas = 0,
+  net = 0.0, srv = 0.0, rend = 0.0, sessions = 0)
+| filter false${slow("cur", tf.from, tf.to)}${slow("prev", `${tf.from}-${span}`, tf.from)}${err("cur", tf.from, tf.to)}${err("prev", `${tf.from}-${span}`, tf.from)}
+| limit 400`;
+};
+
+/**
+ * WHAT "NO PAGE TELEMETRY" IS — the sessions the path mining never saw,
+ * unpacked. Measured before designed: 94% of them carry exactly ONE stray
+ * event (~70 ms) of the "other" classifier WITH a page path — the session was
+ * on a real page, its navigation just fell outside the window (window-edge
+ * sessions and lone beacons); a few are request-only API traffic; some are
+ * robots. Two legs: the composition, and the pages those stray beacons name
+ * (per-session collectDistinct expanded back out — verified on the tenant).
+ */
+export const qNoTelemetry = (tf: Timeframe, rumAppId: string) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const base = `fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${app}"
+  | summarize navs = countIf(characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary"),
+      reqs = countIf(characteristics.classifier == "request"),
+      n = count(), pages = collectDistinct(page.url.path),
+      isReal = takeAny(dt.rum.user_type == "real_user"),
+      dur = max(toLong(duration)),
+    by: { sid = dt.rum.session.id }
+  | filter navs == 0`;
+  return `
+data record(kind = "", bucket = "", sessions = 0, real = 0, robots = 0,
+  oneEvent = 0, reqOnly = 0, p50dur = 0)
+| filter false
+| append [ ${base}
+  | summarize sessions = count(), real = countIf(isReal), robots = countIf(not(isReal)),
+      oneEvent = countIf(n == 1), reqOnly = countIf(reqs > 0),
+      p50dur = percentile(dur, 50),
+    by: { kind = "mix", bucket = "" } ]
+| append [ ${base}
+  | expand pg = pages
+  | filter isNotNull(pg)
+  | summarize sessions = count(), by: { kind = "page", bucket = pg }
+  | sort sessions desc | limit 8 ]
+| limit 20`;
+};
+
+/**
+ * THE OUTCOME VOCABULARY — one list, measured against every application on
+ * this tenant (audit 2026-08-16), shared by the DQL builders and the JS
+ * regex so no two screens can disagree about what "converted" means.
+ *
+ * What the audit changed: "payment" is NOT completion — on the orange apps
+ * the real completion is /orange-booking-finish.jsf and 894 sessions that
+ * stopped at the payment view were being counted converted while 204 real
+ * finishers were counted abandoned. "finish" joins the list, "payment" moves
+ * to INTENT. The banking apps complete at /deposit, /withdraw and
+ * /credit-card/order; easytravel-angular completes at a path ENDING in
+ * "/book" — endsWith, because contains("book") would swallow every
+ * "/orange-booking-…" page and convert the whole estate.
+ */
+export const OUTCOME_WORDS = ["checkout", "purchase", "confirm", "success",
+  "complete", "booked", "receipt", "thank", "finish", "deposit", "withdraw",
+  "credit-card/order"];
+/**
+ * CUSTOMER-DEFINED OUTCOMES — the intelligence rule, the reader's design:
+ * a customer who has defined nothing teaches the app by picking views on the
+ * Journeys page ("define conversion here"); the definition is stored per
+ * application and REPLACES the keyword heuristic for that application, in
+ * every query and screen at once. Apps without a definition keep the
+ * measured keyword fallback (and its honest zero).
+ */
+export type OutcomeDefs = Record<string, string[]>;
+const esc = (x: string) => x.replace(/["\\]/g, "");
+/** The DQL contains-any over a lowercased view-name variable (fallback). */
+export const OUTCOME_SUFFIX = "/book";
+const outcomeDql = (v: string) =>
+  OUTCOME_WORDS.map((w) => `contains(${v}, "${w}")`).join(" or ")
+  + ` or endsWith(${v}, "${OUTCOME_SUFFIX}")`;
+/**
+ * Outcome predicate for ONE known application: its custom view list when the
+ * customer defined one, the keyword heuristic otherwise.
+ */
+export const outcomeDqlForApp = (v: string, appId: string, defs?: OutcomeDefs) => {
+  const custom = defs?.[appId];
+  return custom?.length
+    ? `in(${v}, {${custom.map((n) => `"${esc(n.toLowerCase())}"`).join(", ")}})`
+    : `(${outcomeDql(v)})`;
+};
+/**
+ * Outcome predicate for ESTATE queries, where the row's app decides: each
+ * customised application matches its own list, everyone else the fallback.
+ */
+export const outcomeDqlByApp = (v: string, appVar: string, defs?: OutcomeDefs) => {
+  const entries = Object.entries(defs ?? {}).filter(([, l]) => l.length);
+  if (!entries.length) return `(${outcomeDql(v)})`;
+  const customIds = entries.map(([id]) => `"${esc(id)}"`).join(", ");
+  const perApp = entries.map(([id, list]) =>
+    `(${appVar} == "${esc(id)}" and in(${v}, {${list.map((n) => `"${esc(n.toLowerCase())}"`).join(", ")}}))`)
+    .join(" or ");
+  return `(${perApp} or (not(in(${appVar}, {${customIds}})) and (${outcomeDql(v)})))`;
+};
+const DONE_DQL = outcomeDql("_vn");
+
+/**
+ * The series Davis forecasts for Business Control — sessions or conversions
+ * per interval, over a history six times the window, so the projection of the
+ * NEXT window rests on enough past. Returned as a string because the Davis
+ * analyzer takes the query itself (verified: records are rejected, the query
+ * string returns OK/VALID with lower/point/upper bands).
+ */
+export const qBizSeries = (
+  tf: Timeframe, metric: "sessions" | "conversions", rumAppId?: string | null,
+  defs?: OutcomeDefs,
+) => {
+  const span = Math.max(tf.minutes, 30);
+  /* THREE windows of history, not six. Measured both against the analyzer:
+   * 12h and 6h of history for a 2h view both return OK / VALID with the same
+   * eight forecast points — the extra six hours bought no quality and cost
+   * 17 GB per call on this tenant (two calls per board load). Merging the
+   * two metrics into one call was tried and rejected: the analyzer forecasts
+   * only the first series and silently drops the second. */
+  const history = `now()-${span * 3}m`;
+  const interval = Math.max(5, Math.round(span / 8));
+  const appFilter = rumAppId
+    ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
+  const agg = metric === "sessions" ? "sessions = count()" : "conversions = sum(reached)";
+  return `fetch user.events, from: ${history}${appFilter}
+| fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+| fieldsAdd _done = if(${rumAppId ? outcomeDqlForApp("_vn", rumAppId, defs) : outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
+| summarize reached = max(_done), t = takeMin(start_time), by: { sid = dt.rum.session.id }
+| makeTimeseries ${agg}, time: t, interval: ${interval}m`;
+};
+
+/**
+ * Business Control's breakdown, one query: per-app conversion split by
+ * error-touch (what failure costs), and conversion per segment bucket for the
+ * dimensions a business reader acts on. Every leg lands in the same shape
+ * { d, bucket, appId, sessions, conv, realN, realConv }, per application so
+ * the board's scope filter cuts it client-side.
+ */
+/**
+ * Business Control's breakdown — ONE scan, not six.
+ *
+ * It used to be an append per dimension (five of them plus the error leg),
+ * and measured on this tenant each leg paid its own 5.9 GB: 35.4 GB for one
+ * board load, the single most expensive query in the app. Every leg read the
+ * same rows to group them differently, so the whole thing collapses into one
+ * per-session scan that carries the dimensions as columns; the browser does
+ * the grouping, which costs nothing.
+ *
+ * Scoped to one application, because the board has shown one since the estate
+ * view was removed — measured, that alone halves what remains (0.24 GB for a
+ * small application). 35.4 GB → 2.9 GB, same numbers on screen.
+ */
+export const qBizBreakdown = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | null) => {
+  const appFilter = rumAppId
+    ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
+  const done = rumAppId
+    ? outcomeDqlForApp("_vn", rumAppId, defs)
+    : outcomeDqlByApp("_vn", "dt.rum.application.id", defs);
+  return `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${appFilter}
+| fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+| fieldsAdd _done = if(${done}, 1, else: 0)
+| summarize reached = max(_done),
+    errs = countIf(characteristics.classifier == "error"),
+    // deterministic, like every other session verdict in this file
+    real = min(if(not(dt.rum.user_type == "robot")
+      and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
+    country = takeAny(geo.country.iso_code),
+    os = takeAny(os.name),
+    browser = takeAny(browser.name),
+    deviceType = takeAny(device.type),
+    userType = takeAny(dt.rum.user_type),
+  by: { sid = dt.rum.session.id, appId = dt.rum.application.id }
+| filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
+| fields appId, reached, errs, real, country, os, browser, deviceType, userType
+| limit 20000`;
+};
+
+export const qCohortSessions = (tf: Timeframe, rumAppId: string, defs?: OutcomeDefs) => {
+  const app = rumAppId.replace(/["\\]/g, "");
+  const DONE = outcomeDqlForApp("_vn", rumAppId, defs).replace(/^\(|\)$/g, "");
+  const field = (id: string, expr: string) => `${id} = takeAny(${expr})`;
+  const cols = INFO_DIMS.filter((d) => d.expr).map((d) => field(d.id, d.expr)).join(",\n      ");
+  return `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${app}"
+| fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
+| fieldsAdd _done = if(${DONE}, 1, else: 0)
+| sort start_time asc
+| summarize
+      ${cols},
+      entry = takeFirst(if(characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary", coalesce(view.name, view.detected_name), else: null)),
+      reached = max(_done),
+      // the session's WORST measured load — for a SPA that is simply the app
+      // load, the only hard navigation it has (measured: 1,880 of 1,881
+      // sessions carry exactly one); for a multi-page app it is the worst of
+      // its ~5 timed views. Milliseconds: ttfb.* arrive in ms, vitals in ns.
+      measured = countIf(isNotNull(ttfb.value)),
+      ttfbMs = takeMax(toDouble(ttfb.value)),
+      lcpMs = takeMax(toDouble(web_vitals.largest_contentful_paint) / 1000000),
+      fcpMs = takeMax(toDouble(web_vitals.first_contentful_paint) / 1000000),
+      errs = countIf(characteristics.classifier == "error"),
+      // made to wait: an action past the platform's own satisfaction threshold
+      waited = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_T_NS}),
+      crash = countIf(error.type == "crash" or error.type == "anr"),
+      /* SCREENS, not view_summary EVENTS. Measured on this tenant: the median
+       * session emits ONE view_summary while its mined journey shows TWO
+       * distinct screens, and 2,514 of 6,029 sessions (42%) emit none at all —
+       * so the poster could say "median views 1.0" for a cohort the stage
+       * column called "Two views in". Counting distinct screen names over the
+       * same events the journey is mined from makes the two agree, and stops
+       * a soft-navigating app from reading as a one-screen app. */
+      views = countDistinct(if(characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary", _vn, else: null)),
+      dur = max(toLong(duration)),
+      /* min, not takeAny — 157 measured sessions carry two user_type values
+       * and takeAny flips the customer count between runs */
+      isReal = min(if(not(dt.rum.user_type == "robot")
+        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
+    by: { sid = dt.rum.session.id }
+| fields sid, reached, errs, waited, crash, views, dur, isReal, entry,
+    measured, ttfbMs, lcpMs, fcpMs,
+    ${INFO_DIMS.filter((d) => d.expr).map((d) => d.id).join(", ")}
+| limit 10000`;
+};
+
+
+/**
+ * Business Control — the KPIs of both fronts, this window beside the one
+ * before it of the same length, per application and for the estate.
+ *
+ * A control panel needs the trend, not a sentence about it. So one query
+ * measures the same eight per-session facts twice: `cur` over the window on
+ * screen and `prev` over the window immediately before it, both derived from
+ * the same DQL expressions the screen already uses (real user = not robot,
+ * not synthetic; hit = a session with an error; fatal = crash or anr; engaged
+ * = more than one view; abandoned = an action ended by page_hide; the Apdex
+ * bands over user actions). The panel does the deltas.
+ *
+ * `prev` is expressed as `now()-2×span` → `now()-span` for rolling windows —
+ * the only shape a "before" can take without knowing the calendar; for an
+ * absolute range the caller passes its own start and the same span. Rows
+ * carry the RUM app id so per-application tiles and the estate tile come
+ * from one scan.
+ */
+export const qBizKpis = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | null) => {
+  /* SCOPED BY DEFAULT. Measured: an unfiltered leg over this tenant's 2h of
+   * user.events scans 5.9 GB, the same leg filtered to one application 2.9 GB
+   * (0.24 GB for a small one) — filters cut what projection cannot. The board
+   * has shown ONE application since the estate view was removed, so the
+   * estate aggregate this used to build had no reader at all. */
+  const appFilter = rumAppId
+    ? `\n  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
+  const span = `${Math.max(1, Math.round(tf.minutes))}m`;
+  // a session "converted" if any of its views names an outcome — the ONE
+  // vocabulary (OUTCOME_WORDS) reachesOutcome() also uses
+  const DONE_MATCH = outcomeDqlByApp("vn", "dt.rum.application.id", defs);
+  const both = (label: string, from: string, to: string) => `
+| append [ fetch user.events, from: ${from}, to: ${to}${appFilter}
+  | fieldsAdd real = not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
+  | fieldsAdd vn = lower(coalesce(view.name, view.detected_name, ""))
+  | fieldsAdd done1 = if(${DONE_MATCH}, 1, else: 0)
+  | summarize isReal = min(if(real, 1, else: 0)), conv = max(done1),
+      errs = countIf(characteristics.classifier == "error"),
+      fatal = countIf(error.type == "crash" or error.type == "anr"),
+      // DISTINCT SCREENS over nav∪view_summary — the one engagement rule
+      // (see qUxByApp); event-counting overstated bounces on soft-nav apps
+      views = countDistinct(if((characteristics.classifier == "navigation"
+        or characteristics.classifier == "view_summary") and vn != "", vn, else: null)),
+      acts = countIf(characteristics.classifier == "user_action"),
+      // WEB-ONLY by construction: the mobile agent never emits page_hide
+      // (measured — its complete_reason is always "completed"), so a mobile
+      // application's abandonment is structurally zero, not measured-zero
+      aband = countIf(characteristics.classifier == "user_action" and user_action.complete_reason == "page_hide"),
+      sat = countIf(characteristics.classifier == "user_action" and toLong(duration) <= ${APDEX_T_NS}),
+      tol = countIf(characteristics.classifier == "user_action" and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
+      fru = countIf(characteristics.classifier == "user_action" and toLong(duration) > ${APDEX_4T_NS}),
+    by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
+  | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
+  | summarize sessions = count(), realSessions = countIf(isReal == 1),
+      converted = countIf(conv == 1), convertedReal = countIf(isReal == 1 and conv == 1),
+      hitReal = countIf(isReal == 1 and errs > 0), fatalSessions = countIf(fatal > 0),
+      // customers made to WAIT — at least one action past the platform's own
+      // satisfaction threshold T. A distinct harm from meeting an error, and
+      // measured: on easytravel 18 customers waited where 5 met a failure, so
+      // the board would otherwise report the rarer of the two harms only.
+      waitedReal = countIf(isReal == 1 and tol + fru > 0),
+      engaged = countIf(views > 1),
+      realEngaged = countIf(isReal == 1 and views > 1),
+      actions = sum(acts), abandoned = sum(aband),
+      satisfied = sum(sat), tolerating = sum(tol), frustrated = sum(fru),
+    by: { appId, period = "${label}" } ]`;
+  return `
+data record(appId = "", period = "", sessions = 0, realSessions = 0, converted = 0,
+  convertedReal = 0, hitReal = 0, fatalSessions = 0, waitedReal = 0,
+  engaged = 0, realEngaged = 0, actions = 0, abandoned = 0,
+  satisfied = 0, tolerating = 0, frustrated = 0)
+| filter false${both("cur", tf.from, tf.to)}${both("prev", `${tf.from}-${span}`, tf.from)}
+| limit 200`;
+};
 
 /**
  * Collapses the identifier-looking parts of a view name, so two sessions that
@@ -244,11 +898,26 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
  * and a mobile screen (`CheckoutActivity`) alike. A heuristic, not a contract:
  * callers must handle the case where an application uses none of these words.
  */
-export const DONE = /checkout|payment|purchase|confirm|success|thank|complete|receipt|booked/i;
-export const INTENT = /cart|basket|bag|order|booking|reserv|signup|register|subscribe|apply|quote/i;
+// DERIVED from OUTCOME_WORDS — two hand-kept literals claiming to be one
+// vocabulary was itself an incoherence waiting to happen (auditor's nit)
+export const DONE = new RegExp(
+  [...OUTCOME_WORDS.map((w) => w.replace(/[/-]/g, "\\$&")), "\\/book$"].join("|"), "i");
+export const INTENT =
+  /cart|basket|bag|order|booking|reserv|signup|register|subscribe|apply|quote|payment/i;
 
 /** True when this journey reaches a recognisable final step. */
 export const reachesOutcome = (journey: string[]) => journey.some((v) => DONE.test(v));
+
+/** The per-view outcome test for ONE application — custom list first. */
+export const outcomeTestFor = (appId?: string | null, defs?: OutcomeDefs):
+  ((v: string) => boolean) => {
+  const custom = appId ? defs?.[appId] : undefined;
+  if (custom?.length) {
+    const set = new Set(custom.map((n) => n.toLowerCase()));
+    return (v: string) => set.has(v.toLowerCase());
+  }
+  return (v: string) => DONE.test(v);
+};
 
 export function normalizeView(name: string): string {
   return name
@@ -263,6 +932,23 @@ export function normalizeView(name: string): string {
 }
 
 /** The id-collapsing passes, shared by every query that groups by view name. */
+/**
+ * The view's display name, wherever the agent put it.
+ *
+ * Measured on the reference tenant, Astroshop Android, 2h: `view.detected_name` is null
+ * on ALL 332 mobile navigation events — the real names ("Home", "Product
+ * detail", "Cart", "Checkout") live in `view.name` — while the few mobile
+ * rows that DO carry detected_name carry the Activity class
+ * (com.opentelemetry.astroshop.MainActivity), which is the junk this app was
+ * showing as the only mobile journey. Web carries both, equal on ~96% of
+ * rows, and where they differ `view.name` is the platform's own display
+ * name — the same value the Users & Sessions viewer prints and the Error
+ * Inspector's "View Name" facet matches, so name-first also keeps the
+ * drill-downs aligned. Every journey query keyed on detected_name alone was
+ * silently dropping the mobile estate into "No page telemetry".
+ */
+
+
 const norm = (src: string, out = "v") => `
 | fieldsAdd ${out} = replacePattern(${src},
     "'/' ALNUM{8} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{4} '-' ALNUM{12}", "/*")
@@ -282,7 +968,7 @@ export const qTransitions = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | filter characteristics.classifier == "user_action" and isNotNull(view.source.detected_name)
 ${norm("view.source.detected_name", "s")}
-${norm("view.detected_name", "d")}
+${norm(VIEW_NAME, "d")}
 | filter s != d
 | summarize sessions = countDistinct(dt.rum.session.id), actions = count(),
     p50 = percentile(toLong(duration), 50), p90 = percentile(toLong(duration), 90),
@@ -305,7 +991,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | filter characteristics.classifier == "user_action"
 | filter user_action.complete_reason == "page_hide"
      or user_action.complete_reason == "timeout" or cls.value > 0.1
-${norm("view.detected_name")}
+${norm(VIEW_NAME)}
 | summarize actions = count(),
     abandoned = countIf(user_action.complete_reason == "page_hide"),
     timeouts = countIf(user_action.complete_reason == "timeout"),
@@ -333,7 +1019,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | summarize res = takeAny(concat(device.screen.width, "×", device.screen.height)),
     dpr = takeAny(toString(browser.window.device_pixel_ratio)),
     orient = takeAny(device.orientation),
-    agent = takeAny(dt.rum.agent.type), utype = takeAny(dt.rum.user_type),
+    agent = takeAny(dt.rum.agent.type),
+    // deterministic: 157 measured sessions carry two user_type values, and
+    // takeAny flipped their origin between runs (same fix as qImpacted)
+    utype = if(countIf(dt.rum.user_type == "robot") > 0, "robot",
+      else: if(countIf(dt.rum.user_type == "synthetic") > 0, "synthetic",
+      else: takeAny(dt.rum.user_type))),
     views = countIf(characteristics.classifier == "view_summary"),
   by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
 | summarize sessions = count(), views = sum(views),
@@ -341,15 +1032,36 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | sort sessions desc | limit 20`;
 
 /** Contacted domains (layer 02). */
-export const qDomains = (tf: Timeframe) => `
+export const qDomains = (tf: Timeframe) => {
+  /* On a shifted/absolute window tfMid is null — emit a literal null so the
+   * client keeps its "no forecast" contract. The old fallback "now()" turned
+   * unknown into a hard 0 and every leg forecast "heading to ≈0". */
+  const mid = tfMid(tf);
+  return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
-| filter characteristics.classifier == "request" and isNotNull(url.domain)
-| summarize reqs = count(), p50 = percentile(toLong(duration), 50),
-    err = countIf(toLong(http.response.status_code) >= 400),
-    bytes = sum(toLong(performance.transfer_size)),
-  by: { appId = dt.rum.application.id, domain = url.domain, provider = url.provider,
-        utype = dt.rum.user_type, agent = dt.rum.agent.type }
+/* Requests UNION failed calls. Request records carry only 200/201 on both
+ * measured tenants (bwm: 445k requests, statuses {200, 0, null}) — every
+ * failed call is filed as an error with source "fetch", so counting
+ * status >= 400 here was a structural 0 wearing "clean". The error rows ride
+ * the same scan; on gru they carry url.domain (99%), on bwm they do not —
+ * those group under domain "" and the client reports them as unattributable
+ * instead of pretending zero. */
+| filter (characteristics.classifier == "request" and isNotNull(url.domain))
+    or (characteristics.classifier == "error" and error.source == "fetch")
+| fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
+| summarize reqs = countIf(_req == 1),
+    p50 = percentile(if(_req == 1, toLong(duration)), 50),
+    // p90 rides along (free column) because the audit measured p50 = 0 on
+    // 916k first-party requests — over half report zero duration, and a
+    // bare "0ms" was truth wearing the clothes of nonsense
+    p90 = percentile(if(_req == 1, toLong(duration)), 90),
+    err = countIf(_req == 0),
+    bytes = sum(if(_req == 1, toLong(performance.transfer_size))),
+    late = ${mid ? `countIf(_req == 1 and start_time >= ${mid})` : "toLong(null)"},
+  by: { appId = dt.rum.application.id, domain = coalesce(url.domain, ""),
+        provider = url.provider, utype = dt.rum.user_type, agent = dt.rum.agent.type }
 | sort reqs desc | limit 160`;
+};
 
 /**
  * Users hit by errors, and the one session worth opening.
@@ -371,17 +1083,20 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
 | summarize errs = countIf(characteristics.classifier == "error"),
     st = min(start_time), inst = takeAny(dt.rum.instance.id),
-    utype = takeAny(dt.rum.user_type),
+    // deterministic, not takeAny: 157 sessions (measured) carry two
+    // user_type values across their events and takeAny flipped a coin —
+    // one robot-marked event now marks the session, every run the same
+    robotEv = countIf(dt.rum.user_type == "robot"),
+    synthEv = countIf(dt.rum.user_type == "synthetic"),
     synth = countIf(isNotNull(dt.synthetic.monitor.id)),
   by: { sid = dt.rum.session.id }
 | sort errs desc
 | summarize sessions = count(), hit = countIf(errs > 0),
     // same "real" rule as qUxByApp — see the note there
-    realSessions = countIf(not(utype == "robot") and not(utype == "synthetic") and synth == 0),
-    hitReal = countIf(errs > 0 and not(utype == "robot")
-      and not(utype == "synthetic") and synth == 0),
-    hitRobot = countIf(errs > 0 and utype == "robot"),
-    hitSynth = countIf(errs > 0 and (utype == "synthetic" or synth > 0)),
+    realSessions = countIf(robotEv == 0 and synthEv == 0 and synth == 0),
+    hitReal = countIf(errs > 0 and robotEv == 0 and synthEv == 0 and synth == 0),
+    hitRobot = countIf(errs > 0 and robotEv > 0),
+    hitSynth = countIf(errs > 0 and (synthEv > 0 or synth > 0)),
     exSid = takeFirst(sid), exStart = takeFirst(st),
     exInst = takeFirst(inst), exErrs = takeFirst(errs)`;
 
@@ -399,24 +1114,34 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // second kind: 404s on its own /credit-card-order-service endpoints.
     // Third party is claimed only when the data SAYS so; unattributed counts
     // as our own, so nothing hides behind a null.
+    // http.request.provider and exception.file.provider are null on 100% of
+    // this tenant's events (measured); the only third-party attribution the
+    // data actually carries is the CSP blocked-uri provider — counted when it
+    // names anyone but first_party. Unattributed still counts as our own.
     errsThird = countIf(characteristics.classifier == "error"
-      and (isNotNull(http.request.provider) or exception.file.provider == "third_party")),
+      and (isNotNull(http.request.provider) or exception.file.provider == "third_party"
+        or (error.type == "csp" and isNotNull(csp.blocked_uri.provider)
+          and csp.blocked_uri.provider != "first_party"))),
     // Errors that reached a person, split the same way.
-    views = countIf(characteristics.classifier == "view_summary"),
+    // DISTINCT SCREENS, not view_summary events — the median session emits
+    // one view_summary while walking two screens, and 42% emit none
+    // (measured); event-counting understated engagement on soft-nav apps
+    views = countDistinct(if((characteristics.classifier == "navigation"
+      or characteristics.classifier == "view_summary")
+      and isNotNull(coalesce(view.name, view.detected_name)),
+      lower(coalesce(view.name, view.detected_name)), else: null)),
+    viewEvs = countIf(characteristics.classifier == "view_summary"),
     acts = countIf(characteristics.classifier == "user_action"),
     aband = countIf(user_action.complete_reason == "page_hide"),
-    // Apdex bands, counted on USER ACTIONS — the unit Dynatrace rates. An
-    // action with no duration falls in none of the three, so it never inflates
-    // the score by being treated as satisfied; see utils/apdex.ts for T.
-    sat = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) <= ${APDEX_T_NS}),
-    tol = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
-    fru = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_4T_NS}),
     navs = countIf(characteristics.classifier == "navigation"),
+    mob = countIf(characteristics.classifier == "app_start"
+      or characteristics.classifier == "user_interaction"),
     reqs = countIf(characteristics.classifier == "request"),
-    utype = takeAny(dt.rum.user_type),
+    // deterministic, not takeAny: 157 sessions (measured) carry two
+    // user_type values across their events and takeAny flipped a coin —
+    // one robot-marked event now marks the session, every run the same
+    robotEv = countIf(dt.rum.user_type == "robot"),
+    synthEv = countIf(dt.rum.user_type == "synthetic"),
     synth = countIf(isNotNull(dt.synthetic.monitor.id)),
   by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
 | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
@@ -424,20 +1149,48 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // "Real" is anything not positively identified as a robot or a monitor —
     // an unlabelled session counts as a person, so an unknown never buys the
     // application a quieter verdict than it deserves.
-    realSessions = countIf(not(utype == "robot") and not(utype == "synthetic") and synth == 0),
-    hitReal = countIf(errs > 0 and not(utype == "robot")
-      and not(utype == "synthetic") and synth == 0),
-    hitRobot = countIf(errs > 0 and utype == "robot"),
-    hitSynth = countIf(errs > 0 and (utype == "synthetic" or synth > 0)),
+    realSessions = countIf(robotEv == 0 and synthEv == 0 and synth == 0),
+    hitReal = countIf(errs > 0 and robotEv == 0 and synthEv == 0 and synth == 0),
+    hitRobot = countIf(errs > 0 and robotEv > 0),
+    hitSynth = countIf(errs > 0 and (synthEv > 0 or synth > 0)),
     engaged = countIf(views >= 2),
     actions = sum(acts), abandoned = sum(aband),
     errors = sum(errs), errorsThird = sum(errsThird),
     // errors carried by sessions belonging to real people
-    realErrors = sum(if(not(utype == "robot") and not(utype == "synthetic")
-      and synth == 0, errs, else: 0)),
-    satisfied = sum(sat), tolerating = sum(tol), frustrated = sum(fru),
-    fragments = countIf(navs == 0 and views == 0 and acts == 0 and reqs == 0),
-  by: { appId }`;
+    realErrors = sum(if(robotEv == 0 and synthEv == 0 and synth == 0, errs, else: 0)),
+    // app_start/user_interaction are activity too — without them 20 of the
+    // mobile app's 27 "fragments" were real users who launched and tapped
+    fragments = countIf(navs == 0 and viewEvs == 0 and acts == 0 and reqs == 0 and mob == 0),
+  by: { appId }
+// APDEX, in its own leg at VIEW-INSTANCE grain, because Dynatrace's rule —
+// "user actions with reported errors are rated as Frustrated" — needs the
+// error linked to the action, and this tenant's error events carry no
+// user_action.id. view.instance_id is the grain both sides share (verified:
+// 1,224 view instances hold both), so an errored view frustrates its own
+// actions. An error without a view instance frustrates nothing — the rule
+// only fires where the data actually links.
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter (characteristics.classifier == "user_action"
+      or characteristics.classifier == "error")
+    // real people only — 35% of the estate's rated actions were synthetic or
+    // robot traffic, and no session metric beside the score counts those
+    and not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
+    and isNull(dt.synthetic.monitor.id)
+  | summarize verrs = countIf(characteristics.classifier == "error"),
+      sat0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) <= ${APDEX_T_NS}),
+      tol0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
+      fru0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_4T_NS}),
+    by: { appId = dt.rum.application.id, vi = view.instance_id }
+  | filter isNotNull(appId) and appId != "" and not(startsWith(appId, "APPLICATION-"))
+  | fieldsAdd bad = verrs > 0 and isNotNull(vi)
+  | summarize satisfied = sum(if(bad, 0, else: sat0)),
+      tolerating = sum(if(bad, 0, else: tol0)),
+      frustrated = sum(fru0) + sum(if(bad, sat0 + tol0, else: 0)),
+      fruErr = sum(if(bad, sat0 + tol0, else: 0)),
+    by: { appId } ]`;
 
 /** Sessions and errors over time, for the landing page's trend chart. */
 export const qPulseSeries = (tf: Timeframe, rumAppId: string) => `
@@ -464,8 +1217,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     starts = countIf(characteristics.classifier == "app_start"),
     actions = countIf(characteristics.classifier == "user_action"),
     requests = countIf(characteristics.classifier == "request"),
-    reqfail = countIf(characteristics.classifier == "request"
-      and toLong(http.response.status_code) >= 400),
+    // failed CALLS, not status codes — request records carry only 200/201
+    // on both measured tenants; failures are filed as fetch-source errors
+    reqfail = countIf(characteristics.classifier == "error"
+      and error.source == "fetch"),
     exceptions = countIf(error.type == "exception"),
   by: { os = os.name, osv = os.version, man = device.manufacturer,
         model = device.model.identifier, ver = app.short_version,
@@ -552,20 +1307,67 @@ fetch dt.davis.problems, from: now()-24h
  *
  * Ten-minute window, fixed, and 300 traces sampled: membership in a topology is
  * not a fast-moving fact. Measured, 10m returns the same 12 services as 30m for
- * 0.36 GB against 1.06 GB — three times the spend for an identical answer. The
- * span side dominates either way, since a join reads the whole window whatever
- * the other side is filtered to.
+ * 0.36 GB against 1.06 GB — three times the spend for an identical answer.
+ *
+ * TWO ROUND TRIPS, NOT A JOIN. This used to carry the span fetch as a join
+ * subquery, and the subquery could only be filtered by `isNotNull(service)` —
+ * the left side's trace ids are not visible inside it, so it read the whole
+ * window. On a large estate that hits the platform's own ceiling: measured on a
+ * customer tenant, HTTP 400 `JOIN_RIGHT_TABLE_SIZE`, "the join command's
+ * subquery read too much data", and the chain's service layer came back empty
+ * with no visible reason. Asking for the ids first and filtering the spans BY
+ * them removes the subquery entirely, so no join limit applies and the span
+ * side is selective instead of exhaustive.
  */
-export const qAppServices = (rumAppId: string) => `
-fetch user.events, from: now()-10m
+/**
+ * WHAT THIS TENANT ACTUALLY SENDS, asked only when the application picker came
+ * back empty.
+ *
+ * Every journey this product draws is mined from `user.events`, which is
+ * Dynatrace RUM: 34 of the app's queries read it, and the picker itself
+ * enumerates FRONTEND nodes by `dt.rum.instrumentation.id`. A customer whose
+ * primary source is OpenTelemetry has spans and services but no such
+ * application, and the app used to answer that with a blank page.
+ *
+ * OTel defines `session.id` in its semantic conventions, so a journey mine over
+ * spans is conceivable — but only if the CLIENT is instrumented. Measured on a
+ * live estate: 147,200 OTel spans in two hours, 9 of them carrying a session
+ * id. So this counts rather than assumes, and the page reports what it found.
+ */
+export const qTelemetryShape = () => `
+fetch spans, from: now()-2h
+| summarize spans = count(),
+    otel = countIf(telemetry.sdk.name == "opentelemetry"),
+    sessionSpans = countIf(isNotNull(session.id)),
+    services = countDistinct(dt.entity.service)`;
+
+/**
+ * @param since how far back to look. Ten minutes answers a busy application
+ *   for a twelfth of the spend, but an application with a dozen sessions in two
+ *   hours has no trace at all in a ten-minute window — and an empty answer
+ *   there reads as "this application reaches no backend", which is a different
+ *   claim entirely. So the caller escalates rather than concluding.
+ */
+export const qAppTraceIds = (rumAppId: string, since = "now()-10m") => `
+fetch user.events, from: ${since}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}" and isNotNull(trace.id)
 | summarize n = count(), by: { trace.id }
+| sort n desc
 | limit 300
-| join [ fetch spans, from: now()-10m | filter isNotNull(dt.entity.service)
-         | summarize m = count(), by: { trace.id, svc = dt.entity.service } ],
-    on: { trace.id }, fields: { svc }
-| filter isNotNull(svc)
-| summarize traces = countDistinctExact(trace.id), by: { svc }
+| fields trace.id`;
+
+/** The services those traces crossed. Empty id list means no question to ask. */
+export const qAppServices = (traceIds: string[], since = "now()-10m") => `
+fetch spans, from: ${since}
+// TRACE ID IS A uid IN THE SPAN STORE, not a string, and \`in\` compares types:
+// matching it against quoted ids silently returned ZERO rows, which the chain
+// drew as "no trace reaches a service". The platform says so in a warning
+// rather than an error, so the query succeeds and lies. Cast, then compare.
+| fieldsAdd tid = toString(trace.id)
+| filter in(tid, { ${traceIds.slice(0, 300)
+    .map((i) => `"${String(i).replace(/["\\]/g, "")}"`).join(", ")} })
+| filter isNotNull(dt.entity.service)
+| summarize traces = countDistinctExact(trace.id), by: { svc = dt.entity.service }
 // The name rides along from Smartscape (free): leaf services — the ones that
 // only RECEIVE calls — appear in no call edge, so resolving their names from
 // the calls table was silently dropping them from the chain.
@@ -578,30 +1380,41 @@ fetch user.events, from: now()-10m
 
 /**
  * Bridge #2, for classic RUM. A OneAgent-instrumented application carries
- * trace ids that are PurePaths — they exist in the classic engine and NOT in
- * Grail's spans table, so the trace join above finds nothing (measured: 88k
- * events with trace.id, zero span matches). The classic entity model still
+ * trace ids that are PurePaths — they lived only in the classic engine when
+ * this was written (measured then: 88k events with trace.id, zero span
+ * matches). RE-MEASURED 2026-08-16: that invariant is GONE — 1,108 of 78,619
+ * RUM events now carry trace ids that DO join Grail spans, and the 10-minute
+ * join alone returns 7 services. The chain still renders correctly because
+ * the trace join and this classic walk AGREE on this tenant; if they ever
+ * diverge, useAppScope's union would double-source volumes. Watch it.
+ * The classic entity model still
  * knows the truth: `calls[dt.entity.service]` is the same relationship the
  * Service Flow screen draws. No volume comes with it, only membership.
  */
 export const qAppServicesTopo = (rumAppId: string) => `
-fetch dt.entity.application
-| filter id == "APPLICATION-${rumAppId.replace(/["\\]/g, "").toUpperCase()}"
-| expand svc = calls[dt.entity.service]
-| join [ fetch dt.entity.service | fields id, nm = entity.name ],
-    on: { left[svc] == right[id] }, fields: { nm }
-| summarize name = takeAny(nm), by: { svc }
+smartscapeEdges "calls"
+| filter target_type == "SERVICE"
+| filter source_id in [ smartscapeNodes "FRONTEND"
+    | filter dt.rum.instrumentation.id == "${rumAppId.replace(/["\\]/g, "")}"
+    | fields id ]
+| lookup [ smartscapeNodes "SERVICE" | fields id, nm = name ],
+    sourceField: target_id, lookupField: id, fields: { nm }
+| summarize name = takeAny(nm), by: { svc = target_id }
 | fieldsAdd traces = 0
 | limit 60`;
 
-/** The mobile twin of the classic bridge — same relationship, other entity. */
+/** The same bridge, entered by CLASSIC ENTITY ID instead of the RUM id —
+ *  one node type now serves web and mobile alike, so this is the same walk
+ *  with a different key, not a second relationship. */
 export const qAppServicesTopoMobile = (entityId: string) => `
-fetch dt.entity.mobile_application
-| filter id == "${entityId.replace(/["\\]/g, "")}"
-| expand svc = calls[dt.entity.service]
-| join [ fetch dt.entity.service | fields id, nm = entity.name ],
-    on: { left[svc] == right[id] }, fields: { nm }
-| summarize name = takeAny(nm), by: { svc }
+smartscapeEdges "calls"
+| filter target_type == "SERVICE"
+| filter source_id in [ smartscapeNodes "FRONTEND"
+    | filter id_classic == "${entityId.replace(/["\\]/g, "")}"
+    | fields id ]
+| lookup [ smartscapeNodes "SERVICE" | fields id, nm = name ],
+    sourceField: target_id, lookupField: id, fields: { nm }
+| summarize name = takeAny(nm), by: { svc = target_id }
 | fieldsAdd traces = 0
 | limit 60`;
 
@@ -618,9 +1431,12 @@ smartscapeEdges "runs_on"
   // `in (…)` rejects function calls, so membership is spelled out
   .map((s) => `source_id == toSmartscapeId("${s.replace(/["\\]/g, "")}")`).join(" or ")}
 | fieldsAdd target = target_id
-| join [ smartscapeNodes "*" | fields id, nm = name, tp = type ],
-    on: { left[target] == right[id] }, fields: { nm, tp }
-| fields src = source_id, id = target, name = nm, type = tp
+// id_classic travels too — Davis attributes k8s events to the CLASSIC forms
+// (CLOUD_APPLICATION_INSTANCE-, KUBERNETES_NODE-), and the audit measured 11
+// active events that could never light a card keyed by Smartscape id alone
+| join [ smartscapeNodes "*" | fields id, nm = name, tp = type, idc = id_classic ],
+    on: { left[target] == right[id] }, fields: { nm, tp, idc }
+| fields src = source_id, id = target, name = nm, type = tp, classic = idc
 | limit 800`;
 
 /**
@@ -651,12 +1467,17 @@ fetch user.events, from: now()-30m
 
 export const qDomMetrics = (rumAppId: string, domain: string) => `
 fetch user.events, from: now()-30m
+/* failed CALLS ride as fetch-source errors, not status >= 400 on request
+ * records (those carry only 200/201 — measured on both tenants) */
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
-    and characteristics.classifier == "request"
     and url.domain == "${domain.replace(/["\\]/g, "")}"
-| summarize p50 = percentile(toLong(duration), 50), p90 = percentile(toLong(duration), 90),
-    p95 = percentile(toLong(duration), 95), thr = count(),
-    fails = countIf(toLong(http.response.status_code) >= 400)
+    and (characteristics.classifier == "request"
+      or (characteristics.classifier == "error" and error.source == "fetch"))
+| fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
+| summarize p50 = percentile(if(_req == 1, toLong(duration)), 50),
+    p90 = percentile(if(_req == 1, toLong(duration)), 90),
+    p95 = percentile(if(_req == 1, toLong(duration)), 95), thr = countIf(_req == 1),
+    fails = countIf(_req == 0)
 | limit 1`;
 
 /** Events per provider — separates Davis AI, custom alerts and extensions. */
@@ -692,6 +1513,10 @@ fetch dt.davis.events, from: now()-24h
 
 export const num = (v: unknown): number => (v == null ? 0 : Number(v));
 export const fmtN = (n: number) => n.toLocaleString("en-US");
+/** ONE share formatter (0..1): a decimal below 10%, none above — three
+ *  byte-identical copies had drifted across the board, the poster and the
+ *  flow, and Pulse inlined a fourth with a different rule. */
+export const fmtPct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
 export const fmtK = (n: number) =>
   n >= 1000 ? (n / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "k" : fmtN(n);
 /** ns → human-readable duration. */
@@ -730,14 +1555,36 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     p50 = percentile(if(characteristics.classifier == "user_action", toLong(duration)), 50),
     p90 = percentile(if(characteristics.classifier == "user_action", toLong(duration)), 90),
     p95 = percentile(if(characteristics.classifier == "user_action", toLong(duration)), 95),
-    sat = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) <= ${APDEX_T_NS}),
-    tol = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
-    fru = countIf(characteristics.classifier == "user_action"
-      and toLong(duration) > ${APDEX_4T_NS}),
-  by: { name = view.detected_name }
+  by: { name = ${VIEW_NAME} }
 | filter isNotNull(name) and name != "" and vol > 0
+| sort vol desc | limit 8
+// Apdex per view, at the grain Dynatrace's error rule links: an errored view
+// INSTANCE frustrates its own actions regardless of speed. Computed in its
+// own leg (per name+instance, then per name) and merged back by name, so the
+// percentiles above stay percentiles.
+| append [ fetch user.events, from: ${tf.from}, to: ${tf.to}
+  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+      and (characteristics.classifier == "user_action"
+        or characteristics.classifier == "error")
+  | summarize verrs = countIf(characteristics.classifier == "error"),
+      sat0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) <= ${APDEX_T_NS}),
+      tol0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_T_NS} and toLong(duration) <= ${APDEX_4T_NS}),
+      fru0 = countIf(characteristics.classifier == "user_action"
+        and toLong(duration) > ${APDEX_4T_NS}),
+    by: { name = ${VIEW_NAME}, vi = view.instance_id }
+  | filter isNotNull(name) and name != ""
+  | fieldsAdd bad = verrs > 0 and isNotNull(vi)
+  | summarize sat = sum(if(bad, 0, else: sat0)),
+      tol = sum(if(bad, 0, else: tol0)),
+      fru = sum(fru0) + sum(if(bad, sat0 + tol0, else: 0)),
+    by: { name } ]
+| summarize vol = sum(vol), errors = sum(errors), sessions = sum(sessions),
+    p50 = max(p50), p90 = max(p90), p95 = max(p95),
+    sat = sum(sat), tol = sum(tol), fru = sum(fru),
+  by: { name }
+| filter vol > 0
 | sort vol desc | limit 8`;
 
 /**
@@ -906,26 +1753,75 @@ export const qDbEntity = (address: string, ns?: string) => {
   return `
 smartscapeNodes "*"
 | filter startsWith(type, "DB_INSTANCE_") or startsWith(type, "DB_DATABASE_")
-| filter name == "${a}"${n ? ` or name == "${n}"` : ""}
+/* the STRONG arm first: the instance node itself names the host it answers
+ * on (measured: DB1's db.connection_details.hostname == the store's RDS
+ * address). The bare-name arms stay as fallback, but an address match wins
+ * the sort below — "DB1" is a generic SID and matching it alone made the
+ * reader ask whether the right database had opened. */
+| fieldsAdd exact = if(db.connection_details.hostname == "${a}", 1, else: 0)
+| filter db.connection_details.hostname == "${a}"
+    or name == "${a}"${n ? ` or name == "${n}"` : ""}
     or contains(name, "@${a}") or startsWith(name, "${a}:")
-| fields id, type, name
+| fields id, type, name, exact
+| sort exact desc
 | limit 4`;
 };
+
+/**
+ * Every store address resolved to its DB entity in ONE Smartscape lookup —
+ * the per-click qDbEntity, batched, so store CARDS can carry entity ids up
+ * front. Why it matters (audit, 2026-08-25): the tenant's active database
+ * health alerts bind to the instances' CLASSIC ids (CUSTOM_DEVICE-…), and a
+ * card with no ids can never light — the Databases app showed a store's
+ * "Configuration" alert while our chain painted it calm.
+ */
+export const qDbEntities = (targets: Array<{ addr: string; ns?: string }>) => {
+  const esc = (v: string) => v.replace(/["\\]/g, "");
+  const arm = (t: { addr: string; ns?: string }) => {
+    const a = esc(t.addr); const n = esc(t.ns ?? "");
+    return `(db.connection_details.hostname == "${a}" or name == "${a}"`
+      + (n ? ` or name == "${n}"` : "")
+      + ` or contains(name, "@${a}") or startsWith(name, "${a}:"))`;
+  };
+  return `
+smartscapeNodes "*"
+| filter startsWith(type, "DB_INSTANCE_") or startsWith(type, "DB_DATABASE_")
+| filter ${targets.slice(0, 12).map(arm).join(" or ")}
+| fields id, classic = id_classic, type, name, host = db.connection_details.hostname
+| limit 40`;
+};
+
+/**
+ * Whether a silent window means a sleeping application or a dead one.
+ *
+ * "No coverage" and "no traffic right now" are different findings wearing
+ * the same empty column — the reader saw a quiet app and asked whether it
+ * had users at all. Measured for easyTravel Mobile: 0 sessions in 2h, 21 in
+ * 24h — asleep, not uninstrumented. One small user.sessions scan (the
+ * compact store), asked only when the window shows zero.
+ */
+export const qQuietProbe = (entityId: string) => `
+fetch user.sessions, from: now()-24h
+| expand ent = dt.rum.application.entities
+| filter ent == "${entityId.replace(/["\\]/g, "")}"
+| summarize sessions = count(), last = max(start_time)`;
 
 /**
  * The provider behind a serverless placement.
  *
  * A lambda-backed service produces no HOST, so the Cloud layer — born only
  * from hosts — never existed for it, and the chain ended at Run while the
- * platform knew better. Measured on lab-tenant: the AWS_LAMBDA_FUNCTION node
+ * platform knew better. Measured on the reference tenant: the AWS_LAMBDA_FUNCTION node
  * itself carries cloud.provider "aws", aws.region "us-east-1" and
  * aws.account.id — the whole Provider card, as node properties, no edge
  * needed. A region is not an availability zone, and the card says region.
  */
 export const qLambdaPlacement = (fnIds: string[]) => `
 smartscapeNodes "AWS_LAMBDA_FUNCTION"
-| filter in(id, {${fnIds.slice(0, 40)
-  .map((f) => `"${f.replace(/["\\]/g, "")}"`).join(",")}})
+/* toSmartscapeId, ALWAYS — a Smartscape id compared to a raw string is
+ * false on every row (project rule #1), so this filter matched nothing */
+| filter ${fnIds.slice(0, 40)
+  .map((f) => `id == toSmartscapeId("${f.replace(/["\\]/g, "")}")`).join(" or ")}
 | fields fn = id, name, region = aws.region, account = aws.account.id
 | limit 40`;
 
@@ -976,7 +1872,7 @@ fetch spans, from: now()-10m, to: now()
  * What the CLASSIC topology says these services call — used only for what
  * Smartscape does not know.
  *
- * Measured on lab-tenant, on the easyTravel mainframe application, and this is
+ * Measured on the reference tenant, on the easyTravel mainframe application, and this is
  * the whole reason it exists: Smartscape Gen3 draws seven services and six
  * `calls` edges between them, and stops. The classic entity model, over the
  * SAME entity ids, adds one more — `MF easyTravelBusiness`, a
@@ -1012,7 +1908,7 @@ fetch dt.entity.service, from: now()-2h
 /* An EXTERNAL WEB service is the same code seen from its caller.
  *
  * The classic model describes one running process at more than one
- * granularity, and the walk finds every level. Measured on lab-tenant:
+ * granularity, and the walk finds every level. Measured on the reference tenant:
  *
  *   MF JourneyService                             WEB_SERVICE   external=false
  *   MF /services/JourneyService/ on port 8091     WEB_SERVICE   external=TRUE
@@ -1035,15 +1931,19 @@ fetch dt.entity.service, from: now()-2h
  * PROCESS_GROUP_INSTANCE, so "same process" would have collapsed the whole
  * business tier into one box. Tried, measured, discarded.
  */
-| filter ext != true or not(in(st, { "WEB_SERVICE", "WEB_REQUEST_SERVICE" }))
-| fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host]
+// The ext∧WEB dedup no longer happens here: the flag+type test also killed
+// real unmonitored endpoints with no monitored twin (measured: CouchDB_ET,
+// 8,482 spans/2h, invisible in every layer). The rows arrive whole and
+// useGen2Closure drops only the ones whose monitored twin it can NAME.
+| fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host],
+    ext, stype = st
 | limit 80`;
 
 /**
  * A service's vitals from the METRIC STORE, for services that have no spans.
  *
  * The drawer reads spans, which is right for anything OneAgent traces into
- * Grail — and wrong for everything else. Measured on lab-tenant: `MF
+ * Grail — and wrong for everything else. Measured on the reference tenant: `MF
  * easyTravelBusiness` has zero spans, so the tiles printed p50 0ms, p90 0ms,
  * throughput 0 for a service the metric store shows serving 17, 280 and 60
  * requests in consecutive minutes at 4.7ms, 0.3ms and 3.9ms. A confident zero
@@ -1073,7 +1973,7 @@ timeseries { rt = avg(dt.service.request.response_time),
  *
  * The selector is built from `user.events`, which is right for anything
  * sending RUM to Grail and silently wrong for everything else. Measured on
- * lab-tenant: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
+ * the reference tenant: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
  * so it could never be listed — while the platform's own service flow drew
  * its whole backend, mainframe included. `easyTravel Mobile` has 375 events
  * in 24h and simply falls out of a two-hour window.
@@ -1084,11 +1984,12 @@ timeseries { rt = avg(dt.service.request.response_time),
  * screen — the defect this project keeps hunting, in a new place.
  */
 export const qAppsGen2 = () => `
-fetch dt.entity.application, from: now()-2h
-| fields id, name = entity.name, seed = calls[dt.entity.service]
-| append [ fetch dt.entity.mobile_application, from: now()-2h
-           | fields id, name = entity.name, seed = calls[dt.entity.service] ]
-| filter isNotNull(seed)
+smartscapeNodes "FRONTEND"
+| filter id in [ smartscapeEdges "calls"
+    | filter source_type == "FRONTEND" and target_type == "SERVICE"
+    | fields source_id ]
+| fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
+    kind = frontend.type
 | limit 200`;
 
 /**
@@ -1105,17 +2006,13 @@ fetch dt.entity.application, from: now()-2h
 export const qAppSeedGen2 = (entityId: string) => {
   const e = entityId.replace(/["\\]/g, "");
   return `
-fetch dt.entity.application, from: now()-2h
-| filter id == "${e}"
-| fields id, seed = calls[dt.entity.service]
-| append [ fetch dt.entity.mobile_application, from: now()-2h
-           | filter id == "${e}"
-           | fields id, seed = calls[dt.entity.service] ]
-| filter isNotNull(seed)
-| expand seed
-| join [ fetch dt.entity.service, from: now()-2h | fields id, nm = entity.name ],
-    on: { left[seed] == right[id] }, fields: { nm }
-| fields svc = seed, name = nm
+smartscapeEdges "calls"
+| filter target_type == "SERVICE"
+| filter source_id in [ smartscapeNodes "FRONTEND"
+    | filter id_classic == "${e}" | fields id ]
+| lookup [ smartscapeNodes "SERVICE" | fields id, nm = name ],
+    sourceField: target_id, lookupField: id, fields: { nm }
+| fields svc = target_id, name = nm
 | limit 40`;
 };
 
@@ -1125,7 +2022,7 @@ fetch dt.entity.application, from: now()-2h
  * It used to read the device-profile rows, and those are a TOP-20 over the
  * whole environment: grouped by application AND resolution AND pixel ratio AND
  * orientation, twenty rows is a handful of the busiest applications. Measured
- * on lab-tenant — 248 profile rows across 14 applications, and the top twenty
+ * on the reference tenant — 248 profile rows across 14 applications, and the top twenty
  * covered seven of them. easyTravel mainframe has 26 profile rows and 431
  * sessions, none of which reach the cut, so its Consume layer drew "No
  * coverage" while the Sessions app listed 281 of them with their browsers.
@@ -1138,15 +2035,132 @@ fetch dt.entity.application, from: now()-2h
  * `profiles` is carried so the cards keep what the profile rows used to
  * give them — how many distinct screens an origin brought.
  */
-export const qOrigins = (tf: Timeframe, session?: string | null) => `
+/**
+ * The midpoint of a live window, for the free trend split: rows in the
+ * second half against the first half is a projection the scan already paid
+ * for (countIf columns cost nothing). A shifted window (to ≠ now) gets no
+ * midpoint — its "trend" would describe the past and read as a forecast.
+ */
+const tfMid = (tf: Timeframe): string | null =>
+  // tf.to is the DQL form tfFrom emits — "now()", not "now"; comparing the
+  // bare word made every live window's midpoint now() and every "late" 0
+  /^now\(?\)?$/i.test(tf.to.trim())
+    ? `now()-${Math.max(1, Math.round(tf.minutes / 2))}m` : null;
+
+export const qOrigins = (tf: Timeframe, session?: string | null) => {
+  const mid = tfMid(tf);
+  return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
-| summarize agent = takeAny(dt.rum.agent.type), utype = takeAny(dt.rum.user_type),
+| summarize agent = takeAny(dt.rum.agent.type),
+    // deterministic, like qDevices: a session carrying both robot and human
+    // events must land in the SAME origin every run
+    utype = if(countIf(dt.rum.user_type == "robot") > 0, "robot",
+      else: if(countIf(dt.rum.user_type == "synthetic") > 0, "synthetic",
+      else: takeAny(dt.rum.user_type))),
     res = takeAny(concat(device.screen.width, "×", device.screen.height)),
     views = countIf(characteristics.classifier == "view_summary"),
+    // start_time, NOT timestamp: measured, timestamp is null on every
+    // user.events row of this tenant (14,099 of 14,099 sessions)
+    t0 = min(start_time),
+    // whether THIS session met an error — summed per origin below it makes
+    // the per-origin impact MEASURED; the audit found it was a proportional
+    // estimate of the app total, worn as an exact number
+    hit = max(if(characteristics.classifier == "error", 1, else: 0)),
   by: { appId = dt.rum.application.id, sid = dt.rum.session.id }
 | summarize sessions = count(), views = sum(views),
     profiles = countDistinct(res),
+    /* null (not now()) on shifted windows — "unknown" must stay unknown,
+     * or every origin forecasts "falling to 0" on an absolute range */
+    late = ${mid ? `countIf(t0 >= ${mid})` : "toLong(null)"},
+    hitSessions = sum(hit),
   by: { appId, agent, utype }
-| filter isNotNull(appId) and appId != ""
+| filter not(startsWith(appId, "APPLICATION-")) and isNotNull(appId) and appId != ""
 | sort sessions desc
 | limit 200`;
+};
+
+
+/**
+ * ACCESS AND HEALTH BY LOCATION — one summarize over the window.
+ *
+ * geo.country.iso_code rides every RUM event, so the tile costs a single
+ * scan leg: sessions per country, and the sessions that met an error, from
+ * the same rows. Health is judged in the tile against the application's own
+ * error share, not an absolute bar — a 2% hit rate is a finding in an app
+ * averaging 0.5% and noise in one averaging 4%.
+ */
+export const qGeo = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter isNotNull(geo.country.iso_code)
+| summarize
+    sessions = countDistinct(dt.rum.session.id),
+    hitSessions = countDistinct(if(characteristics.classifier == "error",
+      dt.rum.session.id, else: null)),
+    // LATENCY per region, from the same rows: ttfb embeds the network route
+    // to the user, and projection is free — this column costs no extra scan
+    ttfbMs = percentile(toDouble(ttfb.value), 75),
+    // APDEX BANDS per region, same scan again: frustration is errors OR
+    // slowness, and the map's verdict must hear both. Duration-only bands
+    // (T = 3s, the app's own apdex.ts rule); the error side of Apdex is
+    // already the judge's other arm, so counting it here would double-charge.
+    sat = countIf(characteristics.classifier == "user_action"
+      and toLong(duration) <= 3000000000),
+    tol = countIf(characteristics.classifier == "user_action"
+      and toLong(duration) > 3000000000 and toLong(duration) <= 12000000000),
+    fru = countIf(characteristics.classifier == "user_action"
+      and toLong(duration) > 12000000000),
+  by: { country = geo.country.iso_code }
+| sort sessions desc
+| limit 12`;
+
+
+/** What ONE COUNTRY does inside this application: its screens, and where it
+ *  meets errors — the geo tile's drilldown, one leg per click, memoised. */
+/**
+ * The row for errors that belong to NO screen. Measured on the Android app:
+ * request errors and crashes carry view.name, but ANRs — the app frozen,
+ * not a page broken — arrive with view null. Filtering them out made the
+ * drill's rows sum below the country's own hit count, and sent a reader
+ * into a session whose error was "nowhere" on the list they came from.
+ */
+export const NO_SCREEN = "(no screen — app-level errors)";
+
+export const qGeoCountry = (tf: Timeframe, rumAppId: string, iso: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter geo.country.iso_code == "${iso.replace(/["\\]/g, "")}"
+| fieldsAdd vn = ${VIEW_NAME}
+| filter isNotNull(vn) or characteristics.classifier == "error"
+| fieldsAdd vn = if(isNull(vn), "${NO_SCREEN}", else: vn)
+| summarize
+    sessions = countDistinct(dt.rum.session.id),
+    hit = countDistinct(if(characteristics.classifier == "error",
+      dt.rum.session.id, else: null)),
+  by: { view = vn }
+| sort sessions desc
+| limit 8`;
+
+
+/**
+ * WHO a region's sessions are, against everyone else — the geo drill's
+ * characteristics leg. Per-session rows (one scan), pivoted in the client:
+ * the flag says in/out of the country, `hit` says whether the session met an
+ * error, and the dimensions are the ones the platform records for every
+ * agent. Everything needed to answer "what is DIFFERENT about this region,
+ * and inside it, what carries the errors" — in one leg.
+ */
+export const qGeoWho = (tf: Timeframe, rumAppId: string, iso: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| summarize
+    /* max, not takeAny — membership is "ANY event in this country", and
+     * takeAny flipped it per run for sessions with mixed/null geo rows */
+    inC = max(if(geo.country.iso_code == "${iso.replace(/["\\]/g, "")}", 1, else: 0)),
+    hit = countIf(characteristics.classifier == "error"),
+    os = takeAny(os.name), browser = takeAny(browser.name),
+    isp = takeAny(client.isp), devtype = takeAny(device.type),
+    conn = takeAny(network.connection.type),
+    osv = takeAny(os.version), browserv = takeAny(browser.version),
+  by: { sid = dt.rum.session.id }
+| limit 10000`;
