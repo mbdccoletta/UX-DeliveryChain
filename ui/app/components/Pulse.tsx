@@ -161,6 +161,24 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * instead of leaving it behind. Panning does not touch it, so a refresh of
    * the same application never yanks the view back. */
   const geoFrame = useRef<{ latitude: number; longitude: number; zoom: number } | null>(null);
+  /* CLICKING ANYTHING IN THIS TILE PUTS ITS ANSWER ON THE SCREEN.
+   * Everything a click opens — a country's screens, a state's cities —
+   * renders in the drill panel UNDER the map, which on a wide screen is
+   * below the fold. Framing the TILE was the old behaviour, and it left the
+   * answer off the bottom of it; the reader clicked, the map reacted, and
+   * the thing they asked for stayed out of sight. The drill itself is what
+   * gets framed now. The wait lets the panel mount first, so the scroll
+   * lands on the rendered block rather than on the gap where it is about
+   * to be. */
+  const revealDrill = React.useCallback(() => {
+    setTimeout(() => {
+      document.querySelector(".geo__drill")?.scrollIntoView({
+        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto" : "smooth",
+        block: "start",
+      });
+    }, 160);
+  }, []);
   /* THE JUMP ON LOAD. The marks were painted from the frame we ASKED the map
    * for, which is not where the map is during the moment it spends loading
    * its style and settling into that frame. So the country appeared off its
@@ -773,20 +791,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             onClick={() => {
                               const opening = geoSel !== g.country;
                               setGeoSel((c) => (c === g.country ? null : g.country));
-                              /* A map pin sits at the top of a tall tile; the
-                               * drill it opens renders below the fold. The
-                               * click carries the reader to what it opened —
-                               * smooth unless they asked for reduced motion. */
-                              if (opening) setTimeout(() => {
-                                /* Not the drill centred — the TILE topped: the
-                                 * reader framed it exactly, map and legend
-                                 * above, details below, all in one screen. */
-                                document.querySelector(".geo")?.scrollIntoView({
-                                  behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-                                    ? "auto" : "smooth",
-                                  block: "start",
-                                });
-                              }, 120);
+                              if (opening) revealDrill();
                             }}>
                             {(sz >= 26 || tone !== "good") && (
                               <span className="gpin__lbl">
@@ -840,15 +845,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                  cities render first, so the scroll lands on
                                  the finished block rather than on the gap
                                  where it is about to be. */
-                              if (opening) setTimeout(() => {
-                                const t = document.querySelector(".geo__r--on")
-                                  ?? document.querySelector(".geo__rows");
-                                t?.scrollIntoView({
-                                  behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-                                    ? "auto" : "smooth",
-                                  block: "center",
-                                });
-                              }, 140);
+                              if (opening) revealDrill();
                             }}>
                             {/* EVERY STATE IS NAMED. The label used to need 10
                                 sessions, which on a real estate left two
@@ -888,13 +885,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       onClick={() => {
                         const opening = geoSel !== g.country;
                         setGeoSel((c) => (c === g.country ? null : g.country));
-                        if (opening) setTimeout(() => {
-                          document.querySelector(".geo")?.scrollIntoView({
-                            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-                              ? "auto" : "smooth",
-                            block: "start",
-                          });
-                        }, 120);
+                        if (opening) revealDrill();
                       }}
                       key={g.country}
                       title={`${fmtN(g.sessions)} sessions from ${g.country} — ${fmtN(g.hit)} met an error (${(rate * 100).toFixed(1)}%, application average ${(base * 100).toFixed(1)}%) · ${WORD[tone]}: ${because(g)}`}>
@@ -944,7 +935,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         + ` ${(rate * 100).toFixed(1)}% met an error.`
                         + (c ? " Click to centre the map on it and list its cities."
                              : " No coordinate for this state, so it is counted but not placed.")}
-                      onClick={() => setRegionSel((x) => (x === r.id ? null : r.id))}>
+                      onClick={() => {
+                        const opening = regionSel !== r.id;
+                        setRegionSel((x) => (x === r.id ? null : r.id));
+                        if (opening) revealDrill();
+                      }}>
                       <i className="geo__dot" style={{ background: TOK[t] }} />
                       <b className="geo__cc">{r.id.slice(3)}</b>
                       <span className="geo__nm">{r.name}</span>

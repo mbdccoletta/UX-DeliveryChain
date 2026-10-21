@@ -1311,6 +1311,22 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         // never changes what a colour means.
         const toneKey = worse === "info" ? "good" : worse;
         const stroke = FVAR[toneKey];
+        /* WHOSE RED IS IT? A leg takes the worse of two readings: its own
+         * failure rate, and the verdict of the two cards it joins. Those are
+         * different claims and the single colour cannot tell them apart —
+         * the reader sees one red line and cannot say whether the traffic on
+         * it failed or whether one END is simply in trouble. So the hover
+         * says which. When the leg's own rate is the reason, `hurt` above
+         * already states the casualties and no more is needed. */
+        const endWorse = RANK[src.tone] >= RANK[dst.tone] ? src : dst;
+        const fromEnds = RANK[endp] > RANK[own] && endp !== "info";
+        const cause = !fromEnds ? ""
+          : src.tone === dst.tone
+            ? ` · ${endp === "bad" ? "critical" : "warning"} at BOTH ends`
+              + ` (${src.nm} and ${dst.nm}), not on this leg`
+            : ` · ${endp === "bad" ? "critical" : "warning"} at the`
+              + ` ${endWorse === src ? "source" : "destination"}`
+              + ` (${endWorse.nm}), not on this leg`;
         const op = sel ? (touches ? 1 : 0.5) : 0.9;
         /* the hover carries the leg's facts: casualties and cost */
         const hurtWord = e.label === "sessions" ? "met an error" : "failed";
@@ -1346,7 +1362,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         parts.push(`<path class="e-base" d="${d}"
           stroke="${stroke}" marker-end="url(#ar-${toneKey})"
           style="color:${stroke};opacity:${op};stroke-width:${w.toFixed(1)}">
-          <title>≈ ${fmtN(e.v)} ${e.label}${hurt}${lat}${pace}</title></path>`);
+          <title>≈ ${fmtN(e.v)} ${e.label}${hurt}${cause}${lat}${pace}</title></path>`);
         // the data pulse: one bright packet travelling the trace, speed by volume
         if (op > 0.3) {
           parts.push(`<path class="e-pulse" d="${d}"
