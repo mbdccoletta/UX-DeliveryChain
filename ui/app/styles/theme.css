@@ -56,6 +56,7 @@
   --good-fill: var(--dt-colors-background-container-success-accent, #5eb1a9);
   --warn-fill: var(--dt-colors-background-container-warning-accent, #eea746);
   --bad-fill:  var(--dt-colors-background-container-critical-accent, #c82d40);
+  --info-fill: var(--dt-colors-background-container-primary-accent, #999bed);
   /* THE PLATFORM'S OWN LINE WEIGHTS. Strato ships two and documents what
      each is for: --dt-borders-width-default (1px) and
      --dt-borders-width-emphasized (2px), the second "to emphasize borders …
@@ -120,6 +121,7 @@
   --good-fill: var(--dt-colors-background-container-success-accent, #2f6862);
   --warn-fill: var(--dt-colors-background-container-warning-accent, #eea53c);
   --bad-fill:  var(--dt-colors-background-container-critical-accent, #c62239);
+  --info-fill: var(--dt-colors-background-container-primary-accent, #474fcf);
   --accent: #4f46e5; --accent-dim: rgba(79, 70, 229, 0.1);
   --t-cyan: #0891b2; --t-azure: #2563eb; --t-indigo: #4f46e5; --t-violet: #7c3aed;
   --t-magenta: #c026d3; --t-pink: #db2777; --t-teal: #3d8a83; --t-orange: #ea580c;
@@ -169,6 +171,7 @@
   --good-fill: var(--dt-colors-background-container-success-accent, #2f6862);
   --warn-fill: var(--dt-colors-background-container-warning-accent, #eea53c);
   --bad-fill:  var(--dt-colors-background-container-critical-accent, #c62239);
+  --info-fill: var(--dt-colors-background-container-primary-accent, #474fcf);
   --accent: #4f46e5; --accent-dim: rgba(79, 70, 229, 0.1);
   --t-cyan: #0891b2; --t-azure: #2563eb; --t-indigo: #4f46e5; --t-violet: #7c3aed;
   --t-magenta: #c026d3; --t-pink: #db2777; --t-teal: #3d8a83; --t-orange: #ea580c;
