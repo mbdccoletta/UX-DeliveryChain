@@ -72,6 +72,26 @@ const TONE: Record<Tone, string> = {
 };
 const cssVar = (n: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
 
+/* ONE ALPHA CANNOT SERVE TWO GROUNDS.
+ * A ribbon is drawn translucent so the ones behind it still read. Over white,
+ * 26% of amber composites to a pale wash — fine. Over near-black the SAME 26%
+ * composites to rgb(85 66 34): a dark olive, which is the beige this chart
+ * was accused of, and the accusation was right. Translucency over black does
+ * not tint, it darkens, so the dark theme needs far more of the colour to
+ * show the same colour.
+ * The ground decides. Measured from --bg rather than from a theme attribute,
+ * because the attribute is not always the thing that moved. */
+function groundIsDark(): boolean {
+  const bg = cssVar("--bg");
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bg)
+    ?? /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(bg);
+  if (!m) return true; // this app's default ground is the platform's black
+  const [r, g, b] = bg.startsWith("#") || /^[0-9a-f]{6}$/i.test(bg)
+    ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
+    : [Number(m[1]), Number(m[2]), Number(m[3])];
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
+}
+
 type Stage = { id: string; nm: string; tone: Tone; sub: string };
 
 /** How far a session got, as a stage id. */
@@ -845,6 +865,7 @@ export function FlowSankey({
       const scale = (v: number) => (v / total) * avail;
 
       const col = (t: Tone) => cssVar(TONE[t]);
+      const darkGround = groundIsDark();
       ctx.font = "700 11px monospace";
       ctx.fillStyle = cssVar("--ink-2");
       cols.forEach((t, i) => {
@@ -902,7 +923,11 @@ export function FlowSankey({
         ctx.closePath();
         // calmer field: soft ribbons by default, brighter when on the lit
         // path, near-invisible when dimmed — labels must win over ribbons
-        const a = dim ? "0d" : sel ? "73" : "42";
+        /* see groundIsDark: over black a ribbon needs most of its colour to
+           read as that colour at all; over white it needs a third of it */
+        const a = dim ? (darkGround ? "1f" : "0d")
+          : sel ? (darkGround ? "f2" : "8c")
+          : darkGround ? "c4" : "59";
         const g = ctx.createLinearGradient(x0, 0, x1, 0);
         g.addColorStop(0, col(s.tone) + a);
         g.addColorStop(1, col(l.tone) + a);
