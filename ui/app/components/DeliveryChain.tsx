@@ -36,6 +36,17 @@ import { XmarkIcon,
 
 // info is not a judgement, so it renders in ink — colour means good/warn/bad only
 const TVAR: Record<Tone, string> = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", info: "var(--ink-2)" };
+/* THE VIVID HALF, for everything that is a MARK rather than a sentence.
+ * Strato ships each status twice: a text colour, tuned to be read as words,
+ * and a container accent, the saturated member of the family, meant for solid
+ * marks. The chain's ribbons, arrowheads, bars and dots were painting the
+ * text one — which in light theme resolves to a dark olive-amber, and drew
+ * the whole chain in the gold the reader asked about. Marks take this now;
+ * text keeps TVAR. "info" is no verdict and stays neutral ink. */
+const FVAR: Record<Tone, string> = {
+  good: "var(--good-fill)", warn: "var(--warn-fill)", bad: "var(--bad-fill)",
+  info: "var(--ink-2)",
+};
 
 /** Layer name, one-line role, and the stage verb shown above the pillar. */
 /** Identity hue per layer — a sweep around the colour wheel, cold to warm. */
@@ -1267,7 +1278,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         `<marker id="ar-${t}" viewBox="0 0 8 8" refX="6.5" refY="4"
            markerWidth="2.6" markerHeight="2.6" orient="auto-start-reverse"
            markerUnits="strokeWidth">
-           <path d="M0,0 L8,4 L0,8 Z" fill="${t === "accent" ? "var(--accent)" : TVAR[t]}"/>
+           <path d="M0,0 L8,4 L0,8 Z" fill="${t === "accent" ? "var(--accent)" : FVAR[t]}"/>
          </marker>`).join("");
       const vmax = Math.max(1, ...edges.map((e) => e.v));
       const drawn: Array<{ mx: number; my: number; v: number; label: string; op: number;
@@ -1299,7 +1310,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         // of them said otherwise. Selection only adjusts brightness; it
         // never changes what a colour means.
         const toneKey = worse === "info" ? "good" : worse;
-        const stroke = TVAR[toneKey];
+        const stroke = FVAR[toneKey];
         const op = sel ? (touches ? 1 : 0.5) : 0.9;
         /* the hover carries the leg's facts: casualties and cost */
         const hurtWord = e.label === "sessions" ? "met an error" : "failed";
@@ -1636,7 +1647,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     return items.map(([k, v]) => (
       <div className="db" key={k}>
         <span className="db__n">{k}</span>
-        <span className="db__t"><span className="db__f" style={{ width: `${(v / tot) * 100}%`, background: TVAR[tone(k)] }} /></span>
+        <span className="db__t"><span className="db__f" style={{ width: `${(v / tot) * 100}%`, background: FVAR[tone(k)] }} /></span>
         <span className="db__v">{fmtN(v)} · {((v / tot) * 100).toFixed(1)}%</span>
       </div>
     ));
@@ -2166,7 +2177,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   {shown.map(({ n, i, probs, sigs }) => (
                     <div key={i}
                          className={`lrow${probs > 0 || sigs > 0 ? " lrow--imp" : ""}`}
-                         style={{ ["--tone" as string]: TVAR[n.tone] }}
+                         style={{ ["--tone" as string]: FVAR[n.tone] }}
                          role="button" tabIndex={0}
                          onClick={() => setSel(`${selAll}-${i}`)}
                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") {
@@ -2213,7 +2224,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
             <>
               <div className="chain" style={{ marginBottom: 12 }}>
                 <span className="chain__node">
-                  <i className="sig" style={{ background: TVAR[selElo.tone] }} />{selElo.nm}
+                  <i className="sig" style={{ background: FVAR[selElo.tone] }} />{selElo.nm}
                 </span>
                 {/* the identity line: an IP alone said nothing — the card's
                     own meta (technology · volume) travels with the name */}
