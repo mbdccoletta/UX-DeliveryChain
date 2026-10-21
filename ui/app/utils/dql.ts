@@ -1304,9 +1304,24 @@ smartscapeNodes "*" | summarize nodes = count(), by: { type }
 
 /* ─────────────── Davis, alerts and extensions ─────────────── */
 
-/** Active problems detected by the AI. */
-export const qProblems = () => `
-fetch dt.davis.problems, from: now()-24h
+/**
+ * Active problems detected by the AI, over the window on screen.
+ *
+ * These read 24 hours no matter what the reader had selected, which made the
+ * chain describe a different period from every number beside it — and cost
+ * accordingly: measured on a customer tenant, the Davis reads were 26 of the
+ * 31 GiB one Overview load scanned. The platform's own apps default to two
+ * hours and follow the picker; so does this now.
+ *
+ * WHAT THAT COSTS IN MEANING, stated because it is a real trade: a problem
+ * that opened twenty hours ago and has emitted nothing since will not appear
+ * in a two-hour window. Davis re-emits while a problem is open, so an active
+ * one normally does land in the window — but a quiet long-running problem can
+ * fall out of a narrow view. Widening the picker brings it back, which is the
+ * contract the rest of this product already has with the timeframe.
+ */
+export const qProblems = (tf: Timeframe) => `
+fetch dt.davis.problems, from: ${tf.from}, to: ${tf.to}
 | filter event.status == "ACTIVE"
 // Davis marks re-raised problems as duplicates of an original. Every example
 // in the platform's own guidance drops them, and counting one incident twice
@@ -1522,8 +1537,8 @@ fetch user.events, from: now()-30m
  * — a grain the other two cannot be rebuilt from without changing their
  * numbers. Saving a scan is not worth quietly altering a count.
  */
-export const qDavisRollup = () => `
-fetch dt.davis.events, from: now()-24h
+export const qDavisRollup = (tf: Timeframe) => `
+fetch dt.davis.events, from: ${tf.from}, to: ${tf.to}
 | summarize events = count(), by: { type = event.type, provider = event.provider,
     name = event.name, status = event.status }
 // 5000, and the caller checks for truncation. Measured on a reference estate:
@@ -1538,8 +1553,8 @@ export const DAVIS_ROLLUP_CAP = 5000;
 
 /** Every signal bound to the entity it actually affects — this is what lets
  *  alerts and extension events show up only under the related element. */
-export const qSignalsByEntity = () => `
-fetch dt.davis.events, from: now()-24h
+export const qSignalsByEntity = (tf: Timeframe) => `
+fetch dt.davis.events, from: ${tf.from}, to: ${tf.to}
 /* OPEN signals only — the same event.status filter qProblems already uses.
  * Without it a baselining anomaly that closed twenty hours ago kept painting
  * its component amber, wearing a badge and counting on the Overview button:
