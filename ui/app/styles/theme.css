@@ -3388,3 +3388,59 @@ div:has(> header):has(main) > div {
   font: 400 var(--fs-mini) var(--sans); color: var(--ink-3);
   padding-top: 10px; border-top: 1px solid var(--border); }
 .intel__ft > span { flex: 1 1 18rem; min-width: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BELOW THE COUNTRY — states, then cities.
+   States are a list of clickable places; cities are counted rows with no
+   affordance, because there is nowhere for them to go: the platform records
+   no coordinate and no code for a city. Surfaces neutral, colour only in the
+   error share, which is the one judgement here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.geo__sub { display: flex; flex-direction: column; gap: 8px;
+  padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border); }
+.geo__sub-l { display: flex; flex-direction: column; gap: 2px;
+  font: 600 var(--fs-micro) var(--mono); text-transform: uppercase;
+  letter-spacing: .07em; color: var(--ink-3); }
+.geo__sub-l em { font: 400 var(--fs-mini) var(--sans); font-style: normal;
+  text-transform: none; letter-spacing: 0; color: var(--ink-3); }
+.geo__sub-rows { display: flex; flex-wrap: wrap; gap: 6px; }
+.geo__sub-r { display: inline-flex; align-items: baseline; gap: 7px;
+  padding: 4px 9px; border-radius: var(--r-field, 6px); cursor: pointer;
+  border: 1px solid var(--border); background: none;
+  font: 400 var(--fs-small) var(--mono); color: var(--ink-2); }
+.geo__sub-r:hover { border-color: var(--ink-3); color: var(--ink-hi); }
+.geo__sub-r--on { border-color: var(--ink-3); color: var(--ink-hi); }
+.geo__sub-r b.num { color: var(--ink-hi); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.geo__sub-r em.num, .geo__sub-city em.num { font-style: normal;
+  font: 400 var(--fs-mini) var(--mono); color: var(--ink-3);
+  font-variant-numeric: tabular-nums; }
+.geo__sub-cities { display: flex; flex-direction: column; gap: 3px;
+  padding-top: 8px; margin-top: 4px; border-top: 1px dashed var(--border); }
+.geo__sub-city { display: flex; align-items: baseline; gap: 8px;
+  font: 400 var(--fs-small) var(--mono); color: var(--ink-2); }
+.geo__sub-city > span:first-child { flex: 1 1 auto; min-width: 0; }
+.geo__sub-city b.num { color: var(--ink-hi); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.geo__sub-none { font: 400 var(--fs-small) var(--sans); color: var(--ink-3); }
+
+/* A STATE MARK, smaller than a country's so the two levels never read as the
+   same thing. Same verdict colours, no fill of its own — the ring carries it. */
+.gpin--sub { border-width: 2px; }
+.gpin--sub .gpin__lbl { top: 100%; font-size: 9px; }
+.gpin--sub .gpin__lbl b { font: 600 9px var(--mono); color: var(--ink-2); }
+
+/* A STATE ROW is a country row one level in: indented, quieter, same grid so
+   the numbers stay in their columns and the eye reads down a single ladder. */
+.geo__r--sub { padding-left: 22px; }
+.geo__r--sub .geo__cc { color: var(--ink-3); font-size: 10px; }
+.geo__r--sub .geo__nm { color: var(--ink-2); }
+
+/* MAPLIBRE'S OWN FOCUS RING, retoned. The canvas takes focus on click and the
+   library draws its default outline — amber here, which in this app is a
+   WARNING colour, so a focused map looked like a map with something wrong.
+   Keyboard focus still shows, in the app's own accent, and only when the
+   keyboard asked for it. */
+.maplibregl-canvas:focus { outline: none; }
+.maplibregl-canvas:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: -2px; }
