@@ -150,6 +150,20 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * instead of leaving it behind. Panning does not touch it, so a refresh of
    * the same application never yanks the view back. */
   const geoFrame = useRef<{ latitude: number; longitude: number; zoom: number } | null>(null);
+  /* THE JUMP ON LOAD. The marks were painted from the frame we ASKED the map
+   * for, which is not where the map is during the moment it spends loading
+   * its style and settling into that frame. So the country appeared off its
+   * place and then slid into it — the overlay was right about the destination
+   * and wrong about the present.
+   * It now holds still until the map reports a view of its own through
+   * onViewStateChange, and fades in on that first report. The timer is the
+   * safety net: if the map never reports — a style that fails to load, a
+   * version that does not emit on settle — the marks appear anyway, on the
+   * requested frame, rather than never. */
+  useEffect(() => {
+    const t = setTimeout(() => setGeoView((cur) => cur ?? geoFrame.current), 1200);
+    return () => clearTimeout(t);
+  }, [appId, data.tf.from, data.tf.to]);
   useEffect(() => {
     setGeoSel(null);
     /* a different estate is a different frame, and a view the reader panned
@@ -713,8 +727,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   };
                   const cx = mx(vs.longitude), cy = my(vs.latitude);
                   return (
-                    <div className="geo__ov" aria-hidden="true">
-                      {located.map((g) => {
+                    <div className={`geo__ov${geoView ? " geo__ov--on" : ""}`}
+                      aria-hidden="true">
+                      {/* ONE LEVEL AT A TIME. With a country open, its own
+                          bubble sat on top of the states it had just opened —
+                          two readings of the same ground, the bigger one
+                          hiding the detail that was the point of the click.
+                          The country marks step aside the moment there are
+                          states to show. If the drill comes back with none,
+                          they stay: there is nothing to step aside for. */}
+                      {!(geoSel && regions && regions.length > 0)
+                        && located.map((g) => {
                         const [la, lo] = CENTROID[g.country];
                         const sz = sizeOf(g);
                         const tone = judge(g);

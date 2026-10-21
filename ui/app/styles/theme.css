@@ -2985,7 +2985,13 @@ div:has(> header):has(main) > div {
 /* the animated pins the DotLayer draws — shape is a ReactNode, so the map
    itself can move: problem countries pulse a sonar ring, the busiest breathe */
 .geo__map { position: relative; }
-.geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  /* invisible until the map reports where it actually is — see geoView in
+     Pulse. The marks are laid out the whole time, so nothing moves when they
+     appear; they simply stop being painted in the wrong place first. */
+  opacity: 0; transition: opacity 220ms ease-out; }
+.geo__ov--on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .geo__ov { transition: none; } }
 .gpin { position: absolute; transform: translate(-50%, -50%);
   border: none; cursor: pointer; pointer-events: auto;
   border-radius: 50%; padding: 0; z-index: 1; }
