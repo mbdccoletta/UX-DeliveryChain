@@ -282,8 +282,18 @@ svg { shape-rendering: geometricPrecision; }
 
 /* panels */
 .panel { background: var(--panel); border: var(--bw) solid var(--border); }
+/* every close control carries Strato's XmarkIcon now, at one size */
+.mch__x svg, .drawer__x svg, .geo__drill-x svg { width: 13px; height: 13px; }
+/* the two that sit after a word carry a smaller one, sized to the text */
+.flow-pick svg, .flow-sel__b svg { width: 10px; height: 10px;
+  vertical-align: -1px; margin-left: 3px; }
+.mch__x, .drawer__x, .geo__drill-x { display: inline-flex;
+  align-items: center; justify-content: center; }
 .panel__hd { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-.panel__hd::before { content: "▪"; color: var(--accent); font-size: 12px; }
+/* The square bullet that used to sit before every panel title was a glyph
+   doing an icon's job, and it is not one of the platform's. A panel title
+   needs no mark in front of it; the panel's own border already says where
+   the panel starts. */
 .panel__hd .hint { margin-left: auto; font: 500 12px var(--mono); text-transform: uppercase;
                    letter-spacing: 0.08em; color: var(--ink-3); }
 .pad { padding: 14px 16px; }
