@@ -105,9 +105,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const [geoSel, setGeoSel] = useState<string | null>(null);
   /** The state opened inside the selected country — its cities follow. */
   const [regionSel, setRegionSel] = useState<string | null>(null);
-  /** Take the map to a place — a country, or one of its states. */
-  const flyTo = (lat: number, lng: number, z: number) =>
-    setGeoView({ latitude: lat, longitude: lng, zoom: z });
   /* Asked only once a country is open — the map's first level is one scan,
    * and these cost another only if a reader goes looking. */
   const regions = useRegions(data.tf, geoSel ? appId : null, geoSel);
@@ -637,28 +634,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
               <span className="hint">sessions and health by country · {data.tf.label}</span></div>
             <div className="pad geo__wrap">
               <div className="geo__map">
-                {/* CONTROLLED, so a click can take the reader somewhere.
-                    Uncontrolled, the map owned its own position and nothing
-                    outside could move it — a state in the list could be named
-                    but never shown. The reader's own panning still writes back
-                    through onViewStateChange, so control is shared rather than
-                    seized. */}
+                {/* UNCONTROLLED, and that is the correction.
+                    Driving latitude/longitude/zoom from state bought one thing
+                    — a click that re-centres the map — and cost two defects:
+                    a render loop (every emitted view wrote state, which
+                    re-rendered the map, which emitted again), and then a view
+                    the overlay and the map disagreed about, which put the pins
+                    in the Atlantic while the land was elsewhere. The map owns
+                    its position again; the overlay reads the same view it
+                    reports, so the marks land where the places are. */}
                 <MapView height={MAP_H}
-                  latitude={geoView?.latitude ?? cLat}
-                  longitude={geoView?.longitude ?? cLng}
-                  zoom={geoView?.zoom ?? zoom}
-                  /* WRITE BACK ONLY WHAT ACTUALLY MOVED.
-                   *
-                   * Controlling the map closed a loop: every emitted view wrote
-                   * state, the state re-rendered the map, and the map emitted
-                   * again. Measured, the page grew past 240,000px between two
-                   * reads and the cards became saturated slabs — the gradient
-                   * stretched over ten thousand pixels shows only its first
-                   * stop. The runaway was the defect; the colour was its
-                   * shadow.
-                   *
-                   * A no-op update is therefore dropped. The reader's panning
-                   * still lands, because panning changes the numbers. */
+                  initialViewState={{ latitude: cLat, longitude: cLng, zoom }}
                   onViewStateChange={(v) => {
                     const next = {
                       latitude: v.latitude ?? cLat,
@@ -790,9 +776,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       onClick={() => {
                         const opening = geoSel !== g.country;
                         setGeoSel((c) => (c === g.country ? null : g.country));
-                        // and take the map there, so the row and the picture agree
-                        const cc = CENTROID[g.country];
-                        if (opening && cc) flyTo(cc[0], cc[1], 3.4);
                         if (opening) setTimeout(() => {
                           document.querySelector(".geo")?.scrollIntoView({
                             behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -852,7 +835,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       onClick={() => {
                         const opening = regionSel !== r.id;
                         setRegionSel((x) => (x === r.id ? null : r.id));
-                        if (opening && c) flyTo(c[0], c[1], 5.2);
                       }}>
                       <i className="geo__dot" style={{ background: TOK[t] }} />
                       <b className="geo__cc">{r.id.slice(3)}</b>
