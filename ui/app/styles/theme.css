@@ -2256,9 +2256,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* a live underline, the section's own pulse */
 @keyframes bbline { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
 
-@media (max-width: 860px) { .bb-cols { grid-template-columns: 1fr; }
-@media (prefers-reduced-motion: reduce) {
-}
+/* The @media that held .bb-cols and a reduced-motion block for the same dead
+   family went with it — and took the closing brace of its wrapper, which left
+   the rest of this file INSIDE an unclosed @media. Everything after it stopped
+   being a rule: measured, `.cc-ring { position: absolute }` was present in the
+   file, present in the built CSS, and absent from the parsed stylesheets. The
+   ring's SVG then laid out in flow at the size its own ResizeObserver had just
+   measured, and the Overview's cards grew past a million pixels. One brace. */
 
 /* the Journeys page's altitude toggle */
 .seg--views { align-self: flex-start; }

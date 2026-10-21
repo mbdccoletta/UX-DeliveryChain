@@ -647,9 +647,32 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   latitude={geoView?.latitude ?? cLat}
                   longitude={geoView?.longitude ?? cLng}
                   zoom={geoView?.zoom ?? zoom}
-                  onViewStateChange={(v) => setGeoView({
-                    latitude: v.latitude ?? cLat, longitude: v.longitude ?? cLng,
-                    zoom: v.zoom ?? zoom })}>
+                  /* WRITE BACK ONLY WHAT ACTUALLY MOVED.
+                   *
+                   * Controlling the map closed a loop: every emitted view wrote
+                   * state, the state re-rendered the map, and the map emitted
+                   * again. Measured, the page grew past 240,000px between two
+                   * reads and the cards became saturated slabs — the gradient
+                   * stretched over ten thousand pixels shows only its first
+                   * stop. The runaway was the defect; the colour was its
+                   * shadow.
+                   *
+                   * A no-op update is therefore dropped. The reader's panning
+                   * still lands, because panning changes the numbers. */
+                  onViewStateChange={(v) => {
+                    const next = {
+                      latitude: v.latitude ?? cLat,
+                      longitude: v.longitude ?? cLng,
+                      zoom: v.zoom ?? zoom,
+                    };
+                    setGeoView((cur) => {
+                      const same = cur
+                        && Math.abs(cur.latitude - next.latitude) < 1e-6
+                        && Math.abs(cur.longitude - next.longitude) < 1e-6
+                        && Math.abs(cur.zoom - next.zoom) < 1e-6;
+                      return same ? cur : next;
+                    });
+                  }}>
                   {/* a faint native layer keeps the map's own tooltip */}
                   <DotLayer shape="circle" shapeSize={6} data={located.map(dot)} />
                   {/* NO STATE CHOROPLETH, and the reason is the component, not
