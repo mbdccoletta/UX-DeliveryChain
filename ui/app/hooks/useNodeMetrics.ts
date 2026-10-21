@@ -60,7 +60,7 @@ export function useNodeMetrics(target: MetricTarget | null): NodeMetrics | null 
           thr: Number(r.thr) || 0, fails: Number(r.fails) || 0 };
       } catch { /* no scope or empty window — tiles simply stay absent */ }
       /* Spans are the right source for anything OneAgent traces into Grail,
-       * and the wrong one for everything else. Measured on guu84124: `MF
+       * and the wrong one for everything else. Measured on the reference tenant: `MF
        * easyTravelBusiness` has no spans at all, so the tiles announced p50
        * 0ms and throughput 0 for a service the metric store shows serving
        * hundreds of requests a minute. When the first source finds nothing,

@@ -1,4 +1,4 @@
-/* DeliveryChain UX — operations terminal.
+/* UX Delivery Chain — operations terminal.
    Strato tokens (--dt-*) with literal fallbacks, so the app inherits the
    platform theme and still renders if Strato CSS has not loaded. */
 :root {
@@ -6,13 +6,39 @@
      surfaces, inks, status hues and indigo accent, so both apps read as one
      product family. */
   --bg:       var(--dt-colors-background-base-default, #05080f);
-  --panel:    var(--dt-colors-background-surface-default, rgba(255, 255, 255, 0.03));
-  --panel-2:  var(--dt-colors-background-container-neutral-default, rgba(255, 255, 255, 0.06));
-  --border:   var(--dt-colors-border-neutral-default, rgba(255, 255, 255, 0.06));
-  --border-2: rgba(255, 255, 255, 0.16);
+  --panel:    var(--dt-colors-background-surface-default, color-mix(in srgb, var(--ink-hi) 3%, transparent));
+  --panel-2:  var(--dt-colors-background-container-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
+  --border:   var(--dt-colors-border-neutral-default, color-mix(in srgb, var(--ink-hi) 6%, transparent));
+  --border-2: var(--dt-colors-border-neutral-accent, color-mix(in srgb, var(--ink-hi) 16%, transparent));
+  /* THE TYPE LADDER, NAMED. The app had grown 25 distinct sizes, including
+     8.5, 9.5, 10.5 and 11.5px — half-pixels are not a decision, they are what
+     happens when each rule picks its own number. These are the rungs that
+     survived, and new code should reach for one of them rather than invent a
+     twenty-sixth. Sizes stay in px because this UI is dense by design and a
+     rem ladder would fight the platform shell's own root size. */
+  --fs-micro: 9px;    /* uppercase eyebrows, tag chips              */
+  --fs-mini:  10px;   /* captions, table cells, chart labels        */
+  --fs-small: 11px;   /* secondary rows, metadata                   */
+  --fs-body:  12px;   /* the app's default reading size             */
+  --fs-lead:  13px;   /* emphasised body, drawer prose              */
+  --fs-title: 15px;   /* card and section titles                    */
+  --fs-head:  18px;   /* panel headings                             */
+  --fs-sub:   22px;   /* secondary display numbers                  */
+  --fs-num:   30px;   /* display numbers                            */
+  --fs-hero:  44px;   /* the one number a screen leads with         */
+
   --ink:      var(--dt-colors-text-neutral-default, #e2e8f0);
-  --ink-2:    var(--dt-colors-text-neutral-subdued, #94a3b8);
-  --ink-3:    var(--dt-colors-text-neutral-disabled, #64748b);
+  /* SUBDUED, NOT TRANSPARENT. The platform's own "subdued" and "disabled"
+     text tokens carry alpha (measured in the shell: rgba(177,178,210,0.5)),
+     and composited over this app's darker ground they land at 3.1:1 — under
+     the 4.5:1 minimum, on 10px uppercase labels. The reader called them
+     opaque, and they were.
+     So the STEPS are built here instead: the platform's own opaque text
+     colour mixed toward the app's background, which keeps the Strato hue,
+     stays opaque at every layer, and flips with the theme for free because
+     --bg does. Measured after: 7.7:1 and 4.7:1. */
+  --ink-2:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 93%, var(--bg));
+  --ink-3:    color-mix(in srgb, var(--dt-colors-text-neutral-default, #e2e8f0) 82%, var(--bg));
   /* Status is the PLATFORM's, not ours. Every Gen3 app paints critical,
      warning and success from these Strato tokens, so this app reads as one of
      them and flips with the shell's theme for free. The hex values are only
@@ -41,15 +67,40 @@
   --t-pink:    #ec4899;
   --t-teal:    #5eb1a9;
   --t-orange:  #f97316;
+  /* The HIGH ink — the brightest text/marks. In dark it IS the old var(--ink-hi);
+     in light it is the darkest slate, so every white-wash below flips with
+     the platform theme instead of vanishing on a white page. */
+  --ink-hi: #ffffff;
+  /* The SURFACE TINTS the tile gradients mix their hue into. Dark: the deep
+     indigo the design uses. Light: near-white, so the same gradient recipe
+     produces a pale wash instead of a dark plate on a white page. */
+  --tint:   #12122b;
+  --tint-2: #101024;
   --mono: var(--dt-typography-code-small-default-family, "Roboto Mono", monospace);
   --sans: var(--dt-typography-text-base-default-family, DynatraceFlow, Roboto, Helvetica, sans-serif);
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 [data-theme="light"] {
+  --tint: #ffffff; --tint-2: #f1f5f9;
+  --ink-hi: #0f172a;
   /* Pulse light mode: slate-on-white, same hue families one shade darker. */
-  --bg: #f8fafc; --panel: rgba(0, 0, 0, 0.02); --panel-2: rgba(0, 0, 0, 0.04);
-  --border: rgba(0, 0, 0, 0.06); --border-2: rgba(0, 0, 0, 0.18);
-  --ink: #0f172a; --ink-2: #475569; --ink-3: #94a3b8;
+  /* Bound to the SAME Strato tokens the dark block reads. Strato already
+     flips them per theme, so hard-coding light hexes here meant the app
+     ignored the platform's own palette exactly where it was mounted inside
+     it. The hexes stay as the standalone-dev fallback, nothing more. */
+  --bg:       var(--dt-colors-background-base-default, #f8fafc);
+  --panel:    var(--dt-colors-background-surface-default, rgba(0, 0, 0, 0.02));
+  --panel-2:  var(--dt-colors-background-container-neutral-default, rgba(0, 0, 0, 0.04));
+  --border:   var(--dt-colors-border-neutral-default, rgba(0, 0, 0, 0.06));
+  --border-2: var(--dt-colors-border-neutral-accent, rgba(0, 0, 0, 0.18));
+  /* Tertiary ink one step darker than the dark theme's: #94a3b8 is a fine
+     hint on near-black and a whisper on white — measured on the chain's
+     column captions ("194 SESSIONS"), which lost their legibility. */
+  --ink:   var(--dt-colors-text-neutral-default, #0f172a);
+  /* the same opaque steps, light theme — the mix rides --bg, which has
+     already flipped by this point in the cascade */
+  --ink-2: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 94%, var(--bg));
+  --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 85%, var(--bg));
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
   --good: var(--dt-colors-text-success-default, #3d8a83);
@@ -79,6 +130,40 @@ svg { shape-rendering: geometricPrecision; }
 .wrap { max-width: none; margin: 0; padding: 4px clamp(12px, 1.4vw, 28px) 40px; }
 /* A row of controls sitting in a title bar or above a view: same rhythm as the
    platform's own toolbars, without inventing a second header. */
+/* THE SCAN READOUT — an instrument, not a label. One bar per query, its
+   height what that query read; a red bar is one Grail cut short. The LED
+   breathes while queries are in flight and settles when the window is paid. */
+.scanb { display: inline-flex; align-items: center; gap: 7px; height: 26px;
+  padding: 0 10px 0 8px; border-radius: 999px; cursor: help;
+  font: 600 10px var(--mono); letter-spacing: 0.04em; color: var(--ink-2);
+  border: 1px solid var(--border-2);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--ink-hi) 5%, transparent),
+    color-mix(in srgb, var(--ink-hi) 2%, transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 7%, transparent); }
+.scanb__led { width: 5px; height: 5px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--t-teal); box-shadow: 0 0 6px var(--t-teal); }
+.scanb--live .scanb__led { animation: scanpulse 1.1s ease-in-out infinite; }
+@keyframes scanpulse { 0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); } }
+/* the trace: every query of this window, in the order it ran */
+.scanb__trace { display: flex; align-items: flex-end; gap: 1px; height: 13px;
+  min-width: 2px; }
+.scanb__b { width: 2px; border-radius: 1px; background: var(--t-teal);
+  opacity: 0.75; }
+.scanb__b--cut { background: var(--bad); opacity: 1;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--bad) 70%, transparent); }
+.scanb__n { color: var(--ink); font-size: 11px; letter-spacing: 0; }
+.scanb__cut { font: 700 9px var(--mono); font-style: normal; color: var(--bad);
+  text-transform: uppercase; letter-spacing: 0.08em; }
+.scanb--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.scanb--warn .scanb__led { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.scanb--warn .scanb__b { background: var(--warn); }
+.scanb--bad { border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); }
+.scanb--bad .scanb__led { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
+@media (prefers-reduced-motion: reduce) {
+  .scanb--live .scanb__led { animation: none; }
+}
 .ctl { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .ctl--apps { margin: 2px 0 12px; }
 
@@ -111,11 +196,11 @@ svg { shape-rendering: geometricPrecision; }
 /* header */
 .top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
-.brand h1 { margin: 0; font: 700 14px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; }
+.brand h1 { margin: 0; font: 700 15px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; }
 .brand em { font-style: normal;
             background: linear-gradient(90deg, var(--t-cyan), var(--t-violet));
             -webkit-background-clip: text; background-clip: text; color: transparent; }
-.brand span { color: var(--t-cyan); font: 700 16px var(--mono); }
+.brand span { color: var(--t-cyan); font: 700 15px var(--mono); }
 .spacer { flex: 1; }
 .tabs { display: flex; border: 1px solid var(--border); }
 .tab { background: transparent; border: none; color: var(--ink-3); font: 600 12px var(--mono);
@@ -128,7 +213,11 @@ svg { shape-rendering: geometricPrecision; }
 .seg button { background: transparent; border: none; color: var(--ink-3); font: 600 12px var(--mono);
               letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 13px; cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--border); }
-.seg button.on { background: var(--accent-dim); color: var(--accent); }
+/* accent ON accent-dim measured 4.2:1 — the selected tab of a two-way switch
+   has to be the readable one, so the label is lifted toward the brightest ink
+   while the fill keeps saying which side is chosen */
+.seg button.on { background: var(--accent-dim);
+  color: color-mix(in srgb, var(--accent) 55%, var(--ink-hi)); }
 
 /* panels */
 .panel { background: var(--panel); border: 1px solid var(--border); }
@@ -138,8 +227,11 @@ svg { shape-rendering: geometricPrecision; }
                    letter-spacing: 0.08em; color: var(--ink-3); }
 .pad { padding: 14px 16px; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
+/* bounded: the raw DQL of a failed query ran to three paragraphs and pushed
+   the whole page down — the sentence stays, the syntax lives in the title */
 .banner { border: 1px solid var(--border); border-left: 3px solid var(--warn); padding: 10px 14px;
-          font-size: 12px; color: var(--ink-2); margin-bottom: 14px; }
+          font-size: 12px; color: var(--ink-2); margin-bottom: 14px;
+          max-height: 5.4em; overflow: hidden; }
 .loading { display: flex; align-items: center; gap: 10px; padding: 40px 16px; color: var(--ink-2);
            font: 500 12px var(--mono); }
 .loading i { width: 8px; height: 8px; background: var(--accent); display: inline-block;
@@ -147,7 +239,9 @@ svg { shape-rendering: geometricPrecision; }
 @keyframes blip { 50% { opacity: 0.25; transform: scale(1.6); } }
 
 /* flow (sankey) */
-.flow-shell { height: clamp(360px, calc(100vh - 240px), 860px); padding: 0; overflow: hidden;
+.flow-shell { height: clamp(360px,
+    max(calc(100vh - 240px), calc(var(--flow-rows, 10) * 30px + 96px)),
+    1500px); padding: 0; overflow: hidden;
               display: flex; flex-direction: column; }
 .flow-shell canvas { display: block; width: 100%; flex: 1; min-height: 0; }
 
@@ -171,13 +265,186 @@ svg { shape-rendering: geometricPrecision; }
 .flow-sel { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
             padding: 8px 14px; border-bottom: 1px solid var(--border);
             border-left: 2px solid var(--accent); background: var(--panel-2); }
+
+/* the empty flow states its reason instead of a blank canvas */
+.flow-empty { padding: 26px 18px; text-align: center;
+  font: 600 12px var(--mono); color: var(--ink-2); }
+.flow-empty em { display: block; margin-top: 6px; font-style: normal;
+  font: 400 11px var(--mono); color: var(--ink-3); }
+
+/* ── the route infographic: a poster over the veil ──
+   The app's approved card language — filled blocks, few big numbers, one
+   identity hue, colour reserved for verdicts — as a single centred sheet. */
+.rinfo { position: absolute; inset: 0; margin: auto; width: min(1040px, 94vw);
+  max-height: 92vh; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 18px; padding: 26px 30px 20px; border-radius: 18px;
+  /* Dynatrace surface, not a mood: the poster wore a blue gradient of its
+     own and the reader vetoed it — the modal now sits on the platform's
+     surface token, opaque, with a neutral border. Colour stays semantic. */
+  background: var(--dt-colors-background-surface-default, var(--bg));
+  border: 1px solid var(--border-2);
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,0.7), inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 8%, transparent);
+  animation: rinfoin 260ms var(--ease); }
+@keyframes rinfoin { from { transform: translateY(14px) scale(0.985); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rinfo { animation: none; } }
+/* The journeys under analysis get their own full-width band under the header
+   rather than a narrow column beside it. A poster of percentages must answer
+   "percentages of WHAT" without the reader hunting for a small panel — so the
+   band is labelled, spans the width, and prints every journey in full. */
+.rinfo__hd { display: grid; grid-template-columns: 1fr auto; grid-template-areas:
+  "eye x" "path x" "cohort x" "mini mini"; column-gap: 16px; row-gap: 6px;
+  align-items: start; }
+/* the mini flow: what is being evaluated, as a shape. It sits beside the
+   title because that is the first question a poster of percentages raises —
+   percentages OF WHAT — and a string of arrows in a heading answers it more
+   slowly than three boxes do. */
+.rinfo__mini { grid-area: mini; justify-self: stretch; margin-top: 6px;
+  display: flex; flex-flow: row wrap; align-items: center; gap: 7px 9px;
+  padding: 10px 14px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.rinfo__mini-l { flex-basis: 100%; font: 700 10px var(--mono); letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--accent); }
+/* the mini sankey: node, band, label — the poster's subject is a flow, so it
+   is drawn as one rather than spelled as a row of pills */
+.rinfo__msk { display: block; width: 100%; overflow: visible; }
+.rinfo__msk-n { fill: color-mix(in srgb, var(--accent) 75%, transparent); }
+.rinfo__msk-b { fill: color-mix(in srgb, var(--accent) 26%, transparent); }
+.rinfo__msk-t { fill: var(--ink-hi); font: 700 9px var(--mono); }
+.rinfo__mini--all .rinfo__msk-n { fill: color-mix(in srgb, var(--ink-3) 55%, transparent); }
+.rinfo__mini--all .rinfo__msk-b { fill: color-mix(in srgb, var(--ink-3) 22%, transparent); }
+.rinfo__mini--all .rinfo__msk-t { fill: var(--ink-2); }
+/* the sequence reads left to right, like the flow it came from: the steps sit
+   on one line and the arrow between them is the join */
+.rinfo__mini-r { display: inline-flex; align-items: center; gap: 7px; width: auto; }
+.rinfo__mini-seq { font-style: normal; font: 700 13px var(--mono);
+  color: color-mix(in srgb, var(--accent) 80%, transparent); line-height: 1; }
+.rinfo__mini-r b { flex: none; font: 700 9px var(--mono); color: var(--ink-3); }
+.rinfo__mini-n { font: 700 10px var(--mono); color: var(--ink-hi);
+  padding: 5px 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  /* the route is the subject: it wraps rather than being cut */
+  overflow-wrap: anywhere; white-space: normal; line-height: 1.5; }
+.rinfo__mini-a { width: 16px; height: 2px; flex: none; position: relative;
+  background: color-mix(in srgb, var(--accent) 65%, transparent); }
+.rinfo__mini-a::after { content: ""; position: absolute; right: -1px; top: -3px;
+  border-left: 6px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+.rinfo__mini-c { flex-basis: 100%; font: 400 10px var(--mono); font-style: normal;
+  color: var(--ink-3); letter-spacing: 0.04em; }
+/* nothing picked: the shape is generic, and wears it */
+.rinfo__mini--all .rinfo__mini-n { color: var(--ink-2); border-style: dashed;
+  border-color: var(--border-2); background: none; }
+.rinfo__mini--all .rinfo__mini-a,
+.rinfo__mini--all .rinfo__mini-a::after { opacity: 0.5; }
+/* narrow poster: the shape keeps its place in the reading order but stops
+   competing with the title for the same line */
+@media (max-width: 900px) {
+  .rinfo__hd { grid-template-columns: 1fr auto;
+    grid-template-areas: "eye x" "path x" "cohort x" "mini mini"; }
+  .rinfo__mini { justify-self: stretch; max-width: none; }
+  .rinfo__mini-c { text-align: left; }
+}
+.rinfo__hd .drawer__x { grid-area: x; }
+.rinfo__eyebrow { grid-area: eye; font: 700 10px var(--mono); letter-spacing: 0.16em;
+  color: var(--accent); }
+.rinfo__path { grid-area: path; margin: 0; font: 700 22px var(--sans); color: var(--ink-hi);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  overflow-wrap: anywhere; }
+.rinfo__arrow { font-style: normal; color: color-mix(in srgb, var(--accent) 80%, var(--ink-hi)); }
+.rinfo__cohort { grid-area: cohort; display: flex; align-items: baseline; gap: 10px;
+  font: 500 12px var(--mono); color: var(--ink-2); }
+.rinfo__cohort .num { font-size: 30px; color: var(--ink-hi); line-height: 1;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 25%, transparent); }
+.rinfo__loading { padding: 40px; text-align: center; font: 600 12px var(--mono);
+  color: var(--ink-2); }
+
+/* the outcome strip: four filled tiles */
+.rinfo__strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.rinfo__kpi { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px;
+  border-radius: 12px; background: color-mix(in srgb, var(--ink-hi) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent); }
+.rinfo__kpi .num { font-size: 30px; color: var(--ink-hi); line-height: 1.1; }
+.rinfo__kpi-l { font: 600 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink-hi) 70%, transparent); }
+.rinfo__kpi em { font: 500 11px var(--mono); color: var(--ink-3); font-style: normal; }
+.rinfo__kpi--bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+  background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.rinfo__kpi--bad .num, .rinfo__kpi--bad em { color: var(--bad); }
+.rinfo__kpi--good { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.rinfo__kpi--good .num { color: var(--good); }
+
+/* the portrait blocks: solid bar = cohort, ghost = everyone else */
+.rinfo__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px; grid-auto-flow: dense; }
+.rinfo__grid > * { min-width: 0; }
+.rinfo__blk--flat { grid-column: span 1; }
+.rinfo__blk { padding: 14px 16px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ink-hi) 4.5%, transparent); border: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent);
+  display: flex; flex-direction: column; gap: 8px; }
+.rinfo__blk h3 { margin: 0 0 4px; font: 700 10px var(--mono); letter-spacing: 0.14em;
+  text-transform: uppercase; color: color-mix(in srgb, var(--ink-hi) 75%, transparent); }
+/* a dimension with one value for everyone: stated once, no bar.
+   A flex row whose children cannot shrink overflows its grid cell and lands
+   on the neighbour — measured with a long page domain
+   ("checkout.live.internal.example.com") printing over the next
+   block's label. min-width:0 lets the value wrap inside its own card. */
+.rinfo__blk--flat { flex-direction: row; align-items: baseline; gap: 10px;
+  padding: 9px 14px; min-width: 0; flex-wrap: wrap; }
+.rinfo__blk--flat h3 { margin: 0; flex: 0 0 auto; }
+.rinfo__flat { font: 600 12px var(--mono); color: var(--ink-hi);
+  min-width: 0; overflow-wrap: anywhere; }
+.rinfo__flat em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
+.rinfo__bar > * { min-width: 0; }
+/* four columns, all shrinkable: an `auto` lift column pushed 18px past the
+   card on a 311px block and the text was clipped (measured). The lift keeps
+   its own ellipsis and its full text in the title attribute. */
+.rinfo__bar { display: grid;
+  grid-template-columns: minmax(56px, 118px) minmax(24px, 1fr) 42px minmax(0, auto);
+  align-items: center; column-gap: 8px; font: 500 11px var(--mono); }
+.rinfo__bar-l { color: var(--ink-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__bar-t { position: relative; height: 12px; border-radius: 6px;
+  background: color-mix(in srgb, var(--ink-hi) 5%, transparent); overflow: hidden; }
+.rinfo__bar-ghost, .rinfo__bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 6px; }
+.rinfo__bar-ghost { background: color-mix(in srgb, var(--ink-hi) 14%, transparent); }
+.rinfo__bar-fill { background: color-mix(in srgb, var(--accent) 80%, var(--ink-hi));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); }
+.rinfo__bar-fill--up { background: var(--warn);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 60%, transparent); }
+.rinfo__bar-v { color: var(--ink-hi); text-align: right; }
+.rinfo__bar-d { color: var(--ink-3); font-style: normal; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rinfo__ft { font: 400 10px var(--mono); color: var(--ink-3); text-align: center;
+  padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent); }
+@media (max-width: 760px) {
+  .rinfo__strip { grid-template-columns: repeat(2, 1fr); }
+  .rinfo__path { font-size: 18px; }
+}
+
+/* the custom path's own band: each waypoint a removable chip */
+.flow-sel--path { border-left: 3px solid var(--accent); }
+.flow-pick { font: 600 10px var(--mono); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 999px; padding: 2px 9px; cursor: pointer;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.flow-pick:hover { border-color: var(--accent); }
 .flow-sel__nm { font: 600 12px var(--mono); color: var(--ink); }
 .flow-sel__num { font: 500 12px var(--mono); color: var(--ink-3); }
 .flow-sel__b { font: 600 12px var(--mono); color: var(--accent); background: none;
                border: 1px solid var(--border-2); padding: 4px 10px; cursor: pointer;
                white-space: nowrap; }
 .flow-sel__b:hover { border-color: var(--accent); }
-.flow-sel__b--on { background: var(--accent); color: var(--bg, #0b0b12); }
+.flow-sel__b--teach { border-color: color-mix(in srgb, var(--good) 60%, var(--border));
+  color: var(--good); }
+.flow-sel__b--teach:hover { background: color-mix(in srgb, var(--good) 12%, transparent); }
+/* the filled button: --bg on --accent measured 3.9:1. The fill is the
+   platform's accent and stays; the label goes darker than the page ground so
+   the pair clears the bar. */
+.flow-sel__b--on { background: var(--accent);
+  color: color-mix(in srgb, var(--bg) 25%, #000); }
 
 /* two-column layout: canvas on the left, detail docked on the right */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 10px var(--side-w, 380px);
@@ -218,13 +485,20 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .side__body::-webkit-scrollbar { width: 8px; }
 .side__body::-webkit-scrollbar-thumb { background: var(--border-2); }
 .side .dd { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
-.side .dd__kv { font-size: 16px; }
+.side .dd__kv { font-size: 15px; }
 .side .db { grid-template-columns: 96px 1fr 68px; gap: 8px; font-size: 12px; }
 .side .dt td, .side .dt th { padding: 5px 6px; font-size: 12px; }
 .side .chain__node { font-size: 12px; padding: 4px 9px; }
 
 /* pan + zoom stage (Smartscape-like) */
-.stage { position: relative; overflow: auto; cursor: grab; touch-action: none; }
+/* panning surface: the bar is noise on a stage that drags — auto-fit keeps
+   the content inside, and when someone zooms past it the hand does the moving */
+/* Panning here is TRANSFORM-based (usePanZoom moves x/y), so the stage never
+   needed scrolling at all — `overflow: auto` was legacy, and it manufactured
+   phantom scroll extent: a canvas scaled to fit still keeps its untransformed
+   layout box (measured: 1,204px in an 803px stage → 401px of scrollable void
+   at every zoom level). Hidden, the void is gone with nothing to hide. */
+.stage { position: relative; overflow: hidden; cursor: grab; touch-action: none; }
 .stage.dragging { cursor: grabbing; }
 .stage__canvas { position: relative; transform-origin: 0 0; width: max-content; }
 .stage__canvas.glide { transition: transform 420ms var(--ease); }
@@ -285,7 +559,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    motion IS the data: 70k requests visibly outrun 900 sessions, and a
    boundary with no measured flow does not move at all. */
 .gapcol { width: 44px; flex: none; }
-.duct { width: 34px; flex: none; align-self: stretch; margin: 44px 0 0;
+.duct { width: 30px; flex: none; align-self: stretch; margin: 44px 0 0;
         display: flex; flex-direction: column; justify-content: center; gap: 9px; }
 .duct i { display: block; height: 3px; border-radius: 2px;
           background: repeating-linear-gradient(90deg,
@@ -322,7 +596,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
    down. It is separated by a rule instead. */
 .sum { padding: 2px 4px 9px; text-align: center; background: none; border: none;
        border-bottom: 1px solid color-mix(in srgb, var(--tone) 22%, transparent); }
-.sum__n { display: block; font: 800 20px var(--mono); letter-spacing: -0.5px; color: var(--tone);
+.sum__n { display: block; font: 800 22px var(--mono); letter-spacing: -0.5px; color: var(--tone);
           font-variant-numeric: tabular-nums; line-height: 1.1; }
 .sum__l { display: block; font: 500 12px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
           color: var(--ink-3); }
@@ -342,7 +616,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
           padding: 10px 12px; background: color-mix(in srgb, var(--sv) 6%, var(--panel-2)); }
 .ins__h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
 .ins__s { font: 700 12px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--sv); flex: none; }
-.ins__t { font: 600 14px var(--sans); line-height: 1.3; }
+.ins__t { font: 600 15px var(--sans); line-height: 1.3; }
 .ins__b { font: 400 12px var(--sans); color: var(--ink-2); line-height: 1.5; }
 .ins__e { font: 400 12px var(--mono); color: var(--ink-3); line-height: 1.45; margin-top: 6px;
           padding-left: 9px; border-left: 1px solid var(--border-2); }
@@ -351,12 +625,687 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .ins__none { font: 400 12px var(--sans); color: var(--ink-3); line-height: 1.5; }
 
 /* executive report */
+/* ── Business Control: a C-level board — hero number per front, trend, support ── */
+/* Content-capped: on an ultrawide monitor the board keeps a readable measure
+   and honest margins instead of stretching cards into flat slabs with a void
+   under the shortest column. */
+.bc { gap: 16px; max-width: 1240px; margin-inline: auto; }
+.bc__bar { display: flex; align-items: center; gap: 12px; padding: 4px 2px; flex-wrap: wrap; }
+.bc__ticket { display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--mono);
+  color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--border-2);
+  border-radius: 8px; padding: 3px 8px; }
+.bc__cov input { width: 30px; text-align: right; }
+.bc__cov span { font-size: 10px; }
+.bc__ex-note { color: var(--warn); font-weight: 700; }
+.bc__ticket input { width: 100px; background: none; border: none; color: var(--ink);
+  font: 600 12px var(--mono); outline: none; }
+.bc__ticket select { background: none; border: none; color: var(--ink-2);
+  font: 600 12px var(--mono); }
+.bc__scoped { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 8px 14px; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.bc__scoped-l { font: 700 10px var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--accent); }
+.bc__scoped-v { font: 500 11px var(--mono); color: var(--ink-2); }
+.bc__scoped-x { margin-left: auto; font: 600 10px var(--mono); color: var(--ink-2);
+  cursor: pointer; background: none; border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 10px; }
+.bc__scoped-x:hover { border-color: var(--accent); color: var(--ink); }
+.bc__ftitle-note { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  text-transform: none; letter-spacing: 0; }
+.bc__front { --fh: var(--accent); }
+/* THE FRONT'S HUE, BRIGHT ENOUGH TO BE A HEADING. --fh is the front's accent
+   (pink for the brand, cyan for journeys) and at full saturation on the page
+   ground it measured 4.1:1 — a section title nobody could read at a glance.
+   Lifted toward the brightest ink: the hue still names the front, the title
+   now behaves like one. */
+.bc__ftitle { margin: 0 0 10px; font: 700 15px var(--mono); letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fh) 52%, var(--ink-hi)); }
+/* START, not stretch: the hero was pulled to the height of the stats grid
+   beside it and stood two-thirds empty — a void the reader read as a layout
+   fault, correctly. It is now as tall as what it has to say. */
+.bc__row { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 14px;
+  align-items: start; }
+/* the hero: one number the board reads first */
+/* NO GRADIENT. A diagonal wash behind a number is the house style of every
+   generated dashboard, and the reader vetoed exactly this on the poster
+   before vetoing it here. The front's hue stays as IDENTITY — a rule down the
+   left edge, the way the platform marks a section — and the surface is the
+   same flat token every other card sits on, so the number is the brightest
+   thing in the box instead of competing with its own background. */
+.bc__hero { display: flex; flex-direction: column; gap: 4px;
+  padding: 20px 22px 20px 20px;
+  border-radius: 10px; position: relative; overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fh); }
+.bc__hero--load { min-height: 150px; }
+.bc__hero-l { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink-hi) 72%, transparent); }
+.bc__hero-v { font-size: 52px; line-height: 1.05; color: var(--ink-hi); }
+.bc__hero-t { font: 700 15px var(--mono); display: flex; align-items: baseline; gap: 7px;
+  margin-top: 4px; }
+.bc__hero-t em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
+.bc__hero-s { font: 400 12px var(--mono); color: var(--ink-2); margin-top: 6px; }
+/* the support row: four compact stats */
+/* The stats grid used to inherit the hero's full height and STRETCH its rows
+   into it: on a wide window each card became a tall box that was two-thirds
+   hole, and the full-width bands (entry, biggest loss) read as empty slabs.
+   Rows now take their natural height and the leftover space stays at the
+   bottom, invisible, instead of being distributed as padding nobody asked
+   for. The column cap keeps cards from gaining absurd widths on ultrawide. */
+/* NUMBERS ONLY. Narrative blocks used to live in here and span every column;
+   a spanning child leaves no EMPTY track for auto-fit to collapse, so four
+   tiles on a wide screen filled four of five tracks and the fifth stood open.
+   They moved to .bc__band below, and this grid packs and stretches cleanly. */
+.bc__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; align-content: stretch;
+  /* ONLY THIS COLUMN STRETCHES. The row keeps align-items:start so the hero is
+     never pulled taller than what it has to say (the void that started this),
+     while the tiles fill whatever height the hero sets — so the two columns
+     end level and the band under the tiles closes. Whichever is taller wins;
+     neither is ever padded with emptiness. */
+  align-self: stretch;
+  /* grow to fill the row, never shrink below the content: the tiles used to
+     stop at their own height and leave a band under them wherever the hero
+     beside them was taller — the second hole the reader circled */
+  grid-auto-rows: minmax(min-content, 1fr); }
+/* the prose under the numbers — full width, its own rhythm */
+/* the band is a THIRD item in the row's two-column grid, so it must say so —
+   without this it dropped into the left column and the funnel came out the
+   width of the hero it had just been freed from */
+.bc__band { grid-column: 1 / -1; display: flex; flex-direction: column;
+  gap: 10px; margin-top: 4px; }
+/* the two columns of a front are independent heights, so the shorter one ends
+   where its content ends — but the ROW keeps them tied at the top and the
+   band below runs the full width, which is what makes the block read as one */
+.bc__side { display: flex; flex-direction: column; min-width: 0; }
+/* The 3-column cap at 1500px was mine and it manufactured holes: four brand
+   cards became 3+1 with two empty slots. The max-width above already stops
+   ultrawide bloat, so auto-fit is free to pack the row. */
+.bc__stat { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
+  border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+.bc__stat--load { min-height: 110px; }
+.bc__stat-l { font: 600 10px var(--mono); letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--ink-3); }
+.bc__stat-row { display: flex; align-items: baseline; gap: 10px; }
+.bc__stat-v { font-size: 26px; line-height: 1.1; color: var(--ink-hi); }
+.bc__stat-t { font: 700 11px var(--mono); }
+.bc__stat-cap { font: 400 11px var(--sans, var(--mono)); color: var(--ink-2);
+  line-height: 1.45; }
+.bc__stat-bar { display: block; height: 3px; border-radius: 999px; margin-top: 2px;
+  background: color-mix(in srgb, var(--ink-hi) 7%, transparent); overflow: hidden; }
+.bc__stat-bar i { display: block; height: 100%; border-radius: 999px;
+  background: color-mix(in srgb, var(--fh) 75%, var(--ink-hi)); min-width: 2px; }
+/* the footer anchors the card's base: what it was, and the way deeper */
+.bc__stat-ft { display: flex; align-items: center; gap: 8px; margin-top: auto;
+  padding-top: 8px; }
+.bc__stat-prev { font: 500 10px var(--mono); color: var(--ink-3); }
+.bc__stat-mv { margin-left: auto; font: 600 10px var(--mono); color: var(--ink-2);
+  cursor: pointer; background: color-mix(in srgb, var(--ink-hi) 5%, transparent); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.bc__stat-mv:hover { border-color: var(--fh); color: var(--ink); }
+@media (max-width: 720px) { .bc__row { grid-template-columns: 1fr; } }
+/* forecast strip — visibly a projection, not a measurement */
+.bc__fc { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  padding: 10px 16px; border-radius: 12px; border: 1px dashed var(--border-2);
+  background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
+.bc__fc-l { font: 700 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__fc-item { font: 500 13px var(--mono); color: var(--ink-2); }
+.bc__fc-item b { color: var(--ink-hi); font-size: 15px; }
+.bc__fc-item em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 11px; }
+.bc__fc-wait { font: 400 12px var(--mono); color: var(--ink-3); }
+/* what failure costs */
+.bc__cost { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 16px 18px; border-radius: 14px; background: var(--panel-2);
+  border: 1px solid var(--border); }
+.bc__cost-k { display: flex; flex-direction: column; gap: 2px; }
+.bc__cost-k b { font-size: 30px; line-height: 1; color: var(--good); }
+.bc__cost-k--bad b { color: var(--bad); }
+.bc__cost-k span { font: 600 10px var(--mono); text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--ink-3); max-width: 160px; }
+.bc__cost-vs { font: 700 12px var(--mono); color: var(--ink-3); font-style: normal; }
+.bc__cost-verdict { margin-left: auto; text-align: right; font: 500 15px var(--mono);
+  color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
+.bc__cost-verdict b { font-size: 22px; color: var(--bad); }
+.bc__cost-verdict em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
+/* defining the conversion journey — a declared mode, not a hidden button.
+   The entry point lives in the flow header and states what it is for; while
+   it is on, the bar below says what the app is waiting for and what will be
+   stored, and colour marks the whole thing as an editing state. */
+.flow-def { margin-left: 0; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--good) 70%, var(--border));
+  background: color-mix(in srgb, var(--good) 16%, transparent);
+  border-radius: 8px; padding: 7px 14px;
+  font: 700 10px var(--mono); letter-spacing: 0.08em; color: var(--good); }
+.flow-def:hover { background: color-mix(in srgb, var(--good) 26%, transparent);
+  color: var(--ink-hi); }
+/* the two steps of the process, lit as you move through them */
+.flow-def-step { font: 700 9px var(--mono); letter-spacing: 0.1em; padding: 3px 8px;
+  border-radius: 999px; border: 1px solid var(--border-2); color: var(--ink-3); }
+.flow-def-step--now { border-color: var(--good); color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent); }
+.flow-def--on { border-style: solid; color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--border));
+  background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.flow-def-bar { border-left: 3px solid var(--good) !important;
+  background: color-mix(in srgb, var(--good) 8%, transparent) !important;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.flow-def-bar__l { font: 700 9px var(--mono); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--good); }
+.flow-def-bar__h { font: 400 11px var(--mono); color: var(--ink-2); }
+.flow-def-bar__h b { color: var(--ink-hi); }
+.flow-def-bar__h--no { color: var(--warn); }
+.flow-sel__no { flex-basis: 100%; font: 400 11px var(--mono); color: var(--warn);
+  line-height: 1.45; }
+.flow-def-list { flex-basis: 100%; margin-top: 4px; }
+.flow-def-list .cdefs { margin: 0; }
+.flow-sel__b:disabled { opacity: 0.45; cursor: not-allowed; }
+.bc__scoped-none { flex-basis: 100%; font: 400 11px var(--mono); color: var(--warn);
+  line-height: 1.5; }
+/* what changed — the deltas the board already had both windows for */
+.bc__chg { margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  display: flex; flex-direction: column; gap: 7px; }
+.bc__chg-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__chg-rows { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.bc__chg-r { display: inline-flex; align-items: baseline; gap: 6px;
+  font: 400 11px var(--mono); color: var(--ink-2); }
+.bc__chg-r i { font-style: normal; color: var(--good); font-size: 10px; }
+.bc__chg-r b.num { font-size: 15px; color: var(--good); font-variant-numeric: tabular-nums; }
+.bc__chg-r em { font-style: normal; color: var(--ink-3); font-size: 10px; }
+.bc__chg-r--bad i, .bc__chg-r--bad b.num { color: var(--bad); }
+/* where they come in decides how far they go — the two ends of a journey,
+   crossed: best entry against worst, with the spread named */
+.bc__entry { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--good) 34%, var(--border));
+  background: color-mix(in srgb, var(--good) 7%, transparent); }
+.bc__entry-l { font: 700 9px var(--mono); letter-spacing: .11em; text-transform: uppercase;
+  color: var(--good); }
+.bc__entry-r { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.bc__entry-w { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bc__entry-w b.num { font: 700 12px var(--mono); color: var(--good);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__entry-w em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3); }
+.bc__entry-w--bad b.num { color: var(--bad); }
+.bc__entry-x { font: 700 10px var(--mono); font-style: normal; color: var(--ink-2);
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-2); white-space: nowrap; }
+.bc__entry-ft { font: 400 11px var(--mono); color: var(--ink-3); line-height: 1.5; }
+/* the funnel as rows — each row a sentence with its own bar; the loss between
+   rows is written where it happens, with the screen responsible named */
+.bc__fun { display: flex; flex-direction: column; gap: 3px; 
+  padding: 12px 14px; border-radius: 12px; background: var(--panel-2);
+  border: 1px solid var(--border); }
+/* the label column can breathe now that the block owns the page width */
+.bc__fun-r { display: grid; grid-template-columns: minmax(0, 15rem) 1fr auto auto;
+  align-items: center; gap: 9px; }
+/* the rung NAMES a screen now, so clipping it to "completed at /car…" throws
+   away the one word the row exists to say — it wraps instead */
+/* full width now, so the rung's name gets a column that fits it and the bar
+   gets the room it was never going to have inside a 340px hero */
+.bc__fun-l { font: 500 11px var(--mono); color: var(--ink-2);
+  overflow-wrap: anywhere; line-height: 1.35; }
+.bc__fun-t { height: 13px; border-radius: 3px; display: flex; overflow: hidden;
+  background: color-mix(in srgb, var(--ink-hi) 5%, transparent); }
+/* WHO CONTINUED — the accent, because carrying on is the flow itself */
+.bc__fun-b { display: block; height: 100%; flex: none;
+  border-radius: 3px 0 0 3px;
+  background: color-mix(in srgb, var(--accent) 62%, var(--panel-2)); }
+/* WHO LEFT AT THIS STEP — sitting where they stopped, so the eye lands on
+   the loss instead of hunting for it in the gap between rows */
+.bc__fun-x { display: block; height: 100%; flex: none; border-radius: 0 3px 3px 0;
+  background: color-mix(in srgb, var(--warn) 55%, var(--panel-2)); }
+.bc__fun-x--worst { background: color-mix(in srgb, var(--bad) 65%, var(--panel-2)); }
+/* the goal reached: the one bar that is entirely good news */
+.bc__fun-b--goal { border-radius: 3px;
+  background: color-mix(in srgb, var(--good) 78%, var(--panel-2)); }
+.bc__fun-r b.num { font: 700 12px var(--mono); color: var(--ink-hi);
+  font-variant-numeric: tabular-nums; }
+.bc__fun-r em.num { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  min-width: 2.8rem; text-align: right; }
+.bc__fun-d { font: 400 10px var(--mono); color: var(--ink-3); padding: 1px 0 1px 7.9rem; }
+.bc__fun-d--worst { color: var(--warn); font-weight: 700; }
+.bc__fun-d b { color: var(--warn); }
+/* the busiest sequences — the pages in the order people walk them. As a grid
+   cell it fills the void beside the short cards instead of stretching the
+   hero into the tallest column on the page. */
+.bc__seqs { margin-top: 14px; display: flex; flex-direction: column; gap: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 11px; }
+.bc__seqs--cell { grid-column: 1 / -1; margin-top: 0; border-top: none; padding: 12px 14px;
+  border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+.bc__seqs-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__seqs-r { display: flex; align-items: baseline; gap: 8px; font: 400 11px var(--mono);
+  color: var(--ink-2); }
+.bc__seqs-r b.num { flex: none; min-width: 2.6rem; text-align: right;
+  font: 700 11px var(--mono); color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+/* A PATH IS A LIST, NOT A WORD. This read as one unbroken wall —
+   "/→/about-orange.jsf→/privacy-orange.jsf→/legal-orange.jsf" — because the
+   segments were only 3px apart, the arrows carried no air, and
+   `overflow-wrap: anywhere` let a line break INSIDE a screen name, splitting
+   "/privacy-orange.jsf" across two rows. Contrast was never the problem (the
+   text measures 12:1); the spacing was.
+
+   So the segments become items: each one unbreakable, wrapped as a flex row
+   so a long path breaks BETWEEN screens, with the arrows given room and the
+   names a touch more weight than the punctuation between them. */
+.bc__seqs-p { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 2px 5px; line-height: 1.55; }
+.bc__seqs-p > span { white-space: nowrap; font-weight: 500;
+  /* a very long single screen name is still allowed to break — but only when
+     it alone cannot fit, which is the one case where breaking helps */
+  overflow-wrap: anywhere; }
+.bc__seqs-p i { font-style: normal; color: var(--ink-3); padding: 0 2px;
+  /* the arrow is punctuation: present, never competing with the names */
+  font-size: 0.92em; }
+.bc__seqs-r em { flex: none; font: 700 10px var(--mono); font-style: normal;
+  color: var(--good); white-space: nowrap; }
+/* the completed route is the one the reader is looking for — it gets the
+   brightest ink and the others sit a step behind it, which is a hierarchy
+   rather than a fog */
+.bc__seqs-r--done .bc__seqs-p { color: var(--ink-hi); }
+.bc__seqs-r:not(.bc__seqs-r--done) .bc__seqs-p { color: var(--ink); }
+/* the accent at 10px on a raised panel measured 3.5:1 — the hue is the
+   platform's, the WEIGHT of it is ours: mixed toward the page's brightest
+   ink it stays recognisably the accent and becomes readable */
+.bc__seqs-go { align-self: flex-start; background: none; border: none; cursor: pointer;
+  padding: 2px 0; font: 700 10px var(--mono);
+  color: color-mix(in srgb, var(--accent) 45%, var(--ink-hi)); }
+.bc__seqs-go:hover { text-decoration: underline; }
+/* the biggest single loss, sized in the board's own unit */
+.bc__loss { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 10px; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--border));
+  background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.bc__loss-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--warn); }
+.bc__loss b.num { font: 700 12px var(--mono); color: var(--ink-hi); }
+.bc__loss-v { flex-basis: 100%; font: 400 11px var(--mono); color: var(--ink-2); line-height: 1.5; }
+.bc__loss-v b { color: var(--warn); }
+/* what stands out as slow — ranked by deviation, not by traffic */
+.bc__out { display: flex; flex-direction: column; gap: 7px; }
+.bc__out-r { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px;
+  align-items: baseline; padding: 8px 11px; border-radius: 9px;
+  border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 55%, transparent); }
+.bc__out-n { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__out-r b { font: 700 15px var(--mono); color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+.bc__out-x { font: 700 10px var(--mono); font-style: normal; color: var(--warn); white-space: nowrap; }
+.bc__out-x--bad { color: var(--bad); }
+.bc__out-r em { grid-column: 1 / -1; font: 400 10px var(--mono); font-style: normal;
+  color: var(--ink-3); }
+.bc__out-bar { grid-column: 1 / -1; height: 5px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink-hi) 7%, transparent); }
+.bc__out-bar i { display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--warn) 55%, transparent), var(--bad)); }
+.bc__out-ft { display: block; margin-top: 9px; font: 400 11px var(--mono);
+  color: var(--ink-3); line-height: 1.5; }
+/* the stop verdict — the join between where sessions end and how those screens
+   perform, stated as a conclusion rather than left for the reader to infer */
+.rinfo__stopv { margin: 9px 0 2px; padding: 9px 12px; border-radius: 9px;
+  font: 400 12px var(--mono); line-height: 1.55; color: var(--ink-2);
+  border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border));
+  background: color-mix(in srgb, var(--good) 8%, transparent); }
+.rinfo__stopv b { color: var(--good); font-weight: 700; }
+.rinfo__stopv--tech { border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.rinfo__stopv--tech b { color: var(--warn); }
+/* traffic as one instrument: volume, the failing share against it, the rate */
+.trf { margin: 8px 0 2px; display: flex; flex-direction: column; gap: 7px; }
+.trf__top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.trf__top b { font: 700 26px var(--mono); color: var(--ink-hi); line-height: 1;
+  font-variant-numeric: tabular-nums; }
+.trf__top span { font: 400 10px var(--mono); color: var(--ink-3); letter-spacing: .06em; }
+.trf__top em { margin-left: auto; font: 700 11px var(--mono); font-style: normal; }
+.trf__bar { position: relative; height: 7px; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--panel); }
+.trf__ok { position: absolute; inset: 0;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--good) 55%, transparent),
+    color-mix(in srgb, var(--good) 22%, transparent)); }
+.trf__no { position: absolute; right: 0; top: 0; bottom: 0; }
+/* the latency ladder — three percentiles on one logarithmic rail, so the tail
+   reads as distance instead of as three tidy numbers */
+.lad { margin: 10px 0 4px; display: flex; flex-direction: column; gap: 9px; }
+.lad__rail { position: relative; height: 8px; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--ink-hi) 6%, transparent),
+    color-mix(in srgb, var(--ink-hi) 12%, transparent));
+  border: 1px solid var(--border); }
+.lad__fill { position: absolute; top: -1px; bottom: -1px; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--t-cyan) 45%, transparent),
+    color-mix(in srgb, var(--bad) 55%, transparent)); }
+.lad__tick { position: absolute; top: -4px; width: 2px; height: 16px; border-radius: 1px;
+  box-shadow: 0 0 6px currentColor; }
+.lad__legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px;
+  font: 400 10px var(--mono); color: var(--ink-3); }
+.lad__legend span { display: inline-flex; align-items: center; gap: 5px; }
+.lad__legend i { width: 7px; height: 7px; border-radius: 2px; }
+.lad__legend b { color: var(--ink-hi); font-size: 11px; }
+.lad__tail { flex-basis: 100%; font-style: normal; color: var(--warn); }
+.lad__tail--bad { color: var(--bad); }
+/* the defined conversion journeys — one list, mounted on the board and on
+   the poster. Rows are filters where filtering means something (the board)
+   and plain statements where it does not (the poster). */
+.cdefs { display: flex; flex-direction: column; gap: 6px; margin: -6px 0 12px;
+  padding: 9px 12px; border-radius: 9px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 45%, transparent); }
+.cdefs__l { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; gap: 8px; align-items: baseline; }
+.cdefs__l em { font-style: normal; letter-spacing: 0.04em; color: var(--ink-2); }
+.cdefs__none { font: 400 11px var(--mono); color: var(--warn); }
+.cdefs__l--btn { background: none; border: none; cursor: pointer; padding: 0;
+  text-align: left; }
+.cdefs__l--btn i { font-style: normal; color: var(--ink-3); }
+.cdefs__l--btn:hover em, .cdefs__l--btn:hover i { color: var(--ink-hi); }
+.cdefs__hint { font: 400 10px var(--mono); color: var(--ink-3); margin-left: auto; }
+.cdefs__no { flex: none; width: 18px; text-align: right; font: 700 10px var(--mono);
+  color: var(--ink-3); }
+.cdefs__rows { display: flex; flex-direction: column; gap: 3px; }
+.cdefs__r { display: flex; align-items: center; gap: 6px; border-radius: 8px;
+  padding: 3px 4px 3px 0; }
+.cdefs__r--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cdefs__p { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 5px; background: none; border: none; text-align: left; cursor: pointer;
+  padding: 4px 8px; border-radius: 8px; font: 500 10px var(--mono); color: var(--ink-2); }
+.cdefs__p:disabled { cursor: default; }
+.cdefs__p:not(:disabled):hover { background: color-mix(in srgb, var(--ink-hi) 8%, transparent); }
+.cdefs__p i { font-style: normal; color: var(--ink-3); }
+.cdefs__goal { color: var(--good); font-weight: 700; }
+.cdefs__a { background: none; border: 1px solid var(--border-2); border-radius: 999px;
+  cursor: pointer; padding: 3px 9px; font: 700 9px var(--mono); color: var(--ink-3); }
+.cdefs__a:hover { color: var(--ink-hi); border-color: var(--accent); }
+.cdefs__a--x:hover { color: var(--bad); border-color: var(--bad); }
+.cdefs__ft { display: flex; gap: 10px; }
+.cdefs__add { background: none; border: none; cursor: pointer; padding: 2px 0;
+  font: 700 10px var(--mono); color: var(--accent); }
+/* the START of the process, weighted like the action it is */
+.cdefs__start { cursor: pointer; padding: 8px 14px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--good) 70%, var(--border));
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  font: 700 10px var(--mono); letter-spacing: 0.06em; color: var(--good); }
+.cdefs__start:hover { background: color-mix(in srgb, var(--good) 30%, transparent);
+  color: var(--ink-hi); }
+.cdefs__add:hover { text-decoration: underline; }
+/* on the poster it is a statement, not a control surface */
+.cdefs--ro { margin: 8px 0 0; background: none; border-color: var(--border-2); }
+.cdefs--ro .cdefs__p { padding-left: 0; }
+/* the saved journeys, offered back as filters on the board. Authored one at
+   a time on Journeys; combined many at a time here. */
+.bc__jf { display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: -6px 0 12px; padding: 7px 12px; border-radius: 9px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 45%, transparent); }
+.bc__jf-l { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-3); margin-right: 4px; }
+.bc__jf-c { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.bc__jf-c button { background: none; border: none; cursor: pointer; padding: 4px 4px 4px 10px;
+  font: 500 10px var(--mono); color: var(--ink-2); }
+.bc__jf-c i { cursor: pointer; font-style: normal; padding: 4px 8px 4px 2px;
+  font-size: 9px; color: var(--ink-3); }
+.bc__jf-c i:hover { color: var(--bad); }
+.bc__jf-c--on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.bc__jf-c--on button { color: var(--ink-hi); font-weight: 700; }
+.bc__jf-clear { background: none; border: none; cursor: pointer; padding: 4px 6px;
+  font: 700 9px var(--mono); color: var(--accent); }
+/* where they stopped — the last screen of each session, with what happened
+   there. Amber marks a screen that is both over-represented in this cohort and
+   carrying errors: the place to look first. */
+.rinfo__stop { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__stop-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; }
+.rinfo__stop-rows { display: grid; gap: 2px; }
+.rinfo__stop-r { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto;
+  align-items: baseline; gap: 10px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.rinfo__stop-r:first-of-type { border-top: none; }
+.rinfo__stop-v { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__stop-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
+.rinfo__stop-x { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3); white-space: nowrap; }
+.rinfo__stop-x--odd { color: var(--warn); font-weight: 700; }
+.rinfo__stop-e { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  white-space: nowrap; text-align: right; }
+.rinfo__stop-e--bad { color: var(--bad); font-weight: 700; }
+.rinfo__stop-ft { display: block; margin-top: 8px; font: 400 10px var(--mono); color: var(--ink-3); }
+/* where they are — the route walked from a map. Same anatomy as the stops
+   block, but a NEUTRAL Dynatrace container (the reader vetoed the blue
+   tint): plain border, token surface, colour only where it means something —
+   the verdict line turns red only when a country concentrates the failures. */
+.rinfo__geo { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__geo-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.rinfo__geo-v { margin: 0 0 8px; font: 400 12px var(--mono); color: var(--ink-2); }
+.rinfo__geo-v b { color: var(--ink-hi); font-weight: 700; }
+.rinfo__geo-v--bad { color: var(--bad); }
+.rinfo__geo-v--bad b { color: var(--bad); }
+.rinfo__geo-rows { display: grid; gap: 2px; }
+.rinfo__geo-r { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto;
+  align-items: baseline; gap: 10px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.rinfo__geo-r:first-of-type { border-top: none; }
+.rinfo__geo-c { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__geo-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
+.rinfo__geo-x { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3); white-space: nowrap; }
+.rinfo__geo-x--odd { color: var(--ink-2); font-weight: 700; }
+.rinfo__geo-e { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  white-space: nowrap; text-align: right; }
+.rinfo__geo-e--bad { color: var(--bad); font-weight: 700; }
+
+/* what stands out — the poster's insight layer, above the evidence. Ranked
+   findings across every characteristic at once; the bars below became the
+   proof you open rather than the wall you scan. */
+.rinfo__so { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__so-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  color: var(--ink-3); margin-bottom: 8px; }
+.rinfo__so-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2px 18px; }
+.rinfo__so-r { display: grid; grid-template-columns: auto auto auto 1fr;
+  align-items: baseline; gap: 8px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.rinfo__so-r b { font: 700 12px var(--mono); color: var(--ink-hi);
+  max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__so-d { font: 400 9px var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+.rinfo__so-r i { font: 700 10px var(--mono); font-style: normal; white-space: nowrap; }
+.rinfo__so-r--up i { color: var(--t-cyan); }
+.rinfo__so-r--dn i { color: var(--warn); }
+.rinfo__so-r em { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  text-align: right; white-space: nowrap; }
+.rinfo__so-r em u { text-decoration: none; color: var(--ink-3); }
+.rinfo__so-v { grid-column: 1 / -1; font: 400 10px var(--mono); color: var(--ink-2);
+  padding: 1px 0 2px; line-height: 1.45; }
+.rinfo__so-v u { text-decoration: none; color: var(--ink-3); }
+.rinfo__so-e { grid-column: 1 / -1; font: 400 10px var(--mono); color: var(--ink-3);
+  padding-bottom: 2px; line-height: 1.45; }
+.rinfo__so-e--bad { color: var(--bad); }
+.rinfo__so-none { font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+.rinfo__so-none b { color: var(--ink-hi); }
+/* the characteristics that match everyone, folded away but never deleted */
+.rinfo__fold { grid-column: 1 / -1; background: none; cursor: pointer;
+  border: 1px dashed var(--border-2); border-radius: 10px; padding: 9px 12px;
+  font: 400 11px var(--mono); color: var(--ink-3); }
+.rinfo__fold:hover { color: var(--ink); border-color: var(--accent); }
+/* what this board calls a conversion — stated above the number it governs.
+   Quiet by default (a taught definition is settled fact); the fallback wears
+   the amber of an assumption, because it is one. */
+.bc__rule { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+  margin: -2px 0 12px; padding: 7px 12px; border-radius: 9px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.bc__rule--taught { border-color: color-mix(in srgb, var(--good) 32%, var(--border)); }
+.bc__rule-k { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-3); }
+.bc__rule-v { font: 400 11px var(--mono); color: var(--ink-2); }
+.bc__rule-v b { color: var(--ink-hi); font-weight: 700; }
+.bc__rule-v i { font-style: normal; color: var(--ink-3); }
+.bc__rule-v em { font-style: normal; color: var(--ink-3); }
+.bc__rule-src { font: 700 9px var(--mono); letter-spacing: 0.06em; color: var(--good);
+  margin-left: auto; white-space: nowrap; }
+.bc__rule-src--guess { color: var(--warn); }
+.bc__rule-go { background: none; border: none; padding: 0; cursor: pointer;
+  font: 700 10px var(--mono); color: var(--accent); white-space: nowrap; }
+.bc__rule-go:hover { text-decoration: underline; }
+/* what the route is worth — the poster's business strip. Neutral Dynatrace
+   container (the tinted section frames were vetoed with the blue poster):
+   the numbers carry the meaning, the frame carries nothing. */
+.rinfo__worth { border: 1px solid var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent);
+  border-radius: 12px; padding: 12px 16px; }
+.rinfo__worth-l { display: block; font: 700 10px var(--mono); letter-spacing: 0.08em;
+  color: var(--ink-3); margin-bottom: 8px; }
+.rinfo__worth-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px; }
+.rinfo__kpi--worth { border: none; background: none; padding: 0; }
+.rinfo__vit { border-color: var(--border);
+  background: var(--dt-colors-background-container-neutral-default, transparent); }
+.rinfo__vit .rinfo__worth-l { color: var(--ink-3); }
+/* where conversion lives — and dies. Two columns, one verdict each: the
+   segments that beat the route's own conversion and the ones that lose to it.
+   Colour is the verdict, never identity — the same rule the rest obeys. */
+.rinfo__seg { border-color: color-mix(in srgb, var(--t-azure) 40%, var(--border));
+  background: color-mix(in srgb, var(--t-azure) 7%, transparent); }
+.rinfo__seg .rinfo__worth-l { color: var(--t-azure); }
+.rinfo__seg-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px; }
+.rinfo__seg-c { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.rinfo__seg-c h4 { margin: 0 0 6px; font: 700 9px var(--mono); letter-spacing: 0.12em;
+  text-transform: uppercase; }
+.rinfo__seg-c--up h4 { color: var(--good); }
+.rinfo__seg-c--dn h4 { color: var(--bad); }
+.rinfo__seg-r { display: grid; grid-template-columns: 1fr auto auto auto;
+  align-items: baseline; gap: 8px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.rinfo__seg-r:first-of-type { border-top: none; }
+.rinfo__seg-b { font: 700 12px var(--mono); color: var(--ink-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rinfo__seg-b em { font-style: normal; font-weight: 400; font-size: 9px;
+  color: var(--ink-3); margin-left: 6px; letter-spacing: 0.06em; }
+.rinfo__seg-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
+.rinfo__seg-l--up, .rinfo__seg-l--dn { font: 700 10px var(--mono); font-style: normal;
+  white-space: nowrap; }
+.rinfo__seg-l--up { color: var(--good); }
+.rinfo__seg-l--dn { color: var(--bad); }
+.rinfo__seg-n { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
+  white-space: nowrap; }
+.rinfo__seg-none { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+.rinfo__seg-ft { display: block; margin-top: 8px; font: 400 10px var(--mono);
+  color: var(--ink-3); }
+/* "no page telemetry", unpacked */
+.ntel { width: min(660px, 92vw); max-height: 86vh; overflow-y: auto; margin: auto;
+  background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px;
+  padding: 22px 26px; display: flex; flex-direction: column; gap: 16px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.55); }
+.rest__teach { margin-left: 10px; padding: 1px 8px; font-size: 9px; }
+.ntel__pages h3 { margin: 0 0 8px; font: 700 10px var(--mono); letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3); }
+/* the technical reading of the same anatomy — chain and journeys */
+.tech { margin-top: 14px; }
+.tech__body { display: flex; flex-direction: column; gap: 12px; }
+.tech__bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden;
+  background: var(--panel); }
+.tech__bar i { display: block; min-width: 2px; }
+.tech__leg { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline;
+  font: 500 11px var(--mono); color: var(--ink-2); }
+.tech__leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 5px; }
+.tech__leg b { color: var(--ink); }
+.tech__cov { margin-left: auto; font: 600 10px var(--mono); color: var(--ink-3);
+  border: 1px dashed var(--border-2); border-radius: 999px; padding: 1px 8px; }
+.tech__vitals { display: flex; gap: 10px; flex-wrap: wrap; }
+.tech__v { display: flex; flex-direction: column; gap: 1px; padding: 8px 14px;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--vt, var(--border-2)); min-width: 96px; }
+.tech__v b { font-size: 18px; line-height: 1.1; color: var(--ink-hi); }
+.tech__v span { font: 700 9px var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-2); }
+.tech__v em { font: 400 9px var(--mono); color: var(--ink-3); font-style: normal; }
+.tech__novitals { display: flex; flex-direction: column; gap: 8px; }
+.tech__nv-l { font: 500 11px var(--mono); color: var(--ink-3); }
+.tech__errs { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border);
+  padding-top: 10px; }
+.tech__e { font: 500 11px var(--mono); color: var(--ink-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 10px; }
+.tech__e b { color: var(--ink-hi); margin-right: 4px; }
+.tech__e em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 10px; }
+/* where the difficulty lives */
+.bc__diff { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px;
+  padding: 16px 18px; border-radius: 14px; background: var(--panel-2);
+  border: 1px solid var(--border); }
+.bc__diff-hero { display: flex; flex-direction: column; gap: 4px; }
+.bc__diff-hero b { font-size: 44px; line-height: 1; color: var(--ink-hi);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--ink-hi) 18%, transparent); }
+.bc__diff-hl { font: 600 11px var(--mono); text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--ink-3); max-width: 220px; }
+.bc__diff-body { display: flex; flex-direction: column; gap: 10px; }
+.bc__diff-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden;
+  background: var(--panel); }
+.bc__diff-bar i { display: block; min-width: 2px; }
+.bc__diff-leg { display: flex; gap: 16px; flex-wrap: wrap; font: 500 11px var(--mono);
+  color: var(--ink-2); }
+.bc__diff-cov { font: 600 10px var(--mono); color: var(--ink-3);
+  border: 1px dashed var(--border-2); border-radius: 999px; padding: 1px 8px; }
+.bc__diff-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 5px; }
+.bc__diff-errs { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.bc__diff-el { font: 600 10px var(--mono); text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--ink-3); }
+.bc__diff-money { font: 400 12px var(--sans, var(--mono)); color: var(--ink-2);
+  margin-top: 8px; max-width: 240px; line-height: 1.5; }
+.bc__diff-e { font: 500 11px var(--mono); color: var(--ink-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+.bc__diff-e b { color: var(--ink-hi); margin-right: 4px; }
+.bc__diff-e--in { border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+  background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.bc__diff-verdict { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  font: 400 12px var(--mono); color: var(--ink-2); border-top: 1px solid var(--border);
+  padding-top: 10px; }
+.bc__diff-verdict b { color: var(--ink); }
+.bc__diff-dv { margin-left: auto; font: 600 11px var(--mono); color: var(--ink-2);
+  background: color-mix(in srgb, var(--ink-hi) 5%, transparent); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.bc__diff-dv:hover { border-color: var(--fh); color: var(--ink); }
+@media (max-width: 720px) { .bc__diff { grid-template-columns: 1fr; } }
+/* segments */
+.bc__segs { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.bc__seg { padding: 12px 16px; border-radius: 12px; background: var(--panel-2);
+  border: 1px solid var(--border); }
+.bc__seg-h { margin: 0 0 8px; font: 700 10px var(--mono); letter-spacing: 0.06em;
+  text-transform: uppercase; }
+.bc__seg-h--good { color: var(--good); } .bc__seg-h--bad { color: var(--bad); }
+.bc__seg-h--warn { color: var(--warn); }
+.bc__seg-r { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px;
+  align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border); }
+.bc__seg-r:first-of-type { border-top: none; }
+.bc__seg-b { font: 600 12px var(--mono); color: var(--ink); }
+.bc__seg-b em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; margin-left: 6px; }
+.bc__seg-r b { font-size: 15px; color: var(--ink-hi); }
+.bc__seg-lift { font: 700 11px var(--mono); }
+.bc__seg-n { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
 .rp__f { border-left: 2px solid var(--sv); }
 .rp__meta { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
 .rp__sev { font: 700 12px var(--mono); color: var(--sv); text-transform: uppercase;
            letter-spacing: 0.08em; }
 .rp__area { font: 500 12px var(--sans); color: var(--hue, var(--ink-3)); }
-.rp__title { font: 600 16px var(--sans); color: var(--ink); margin: 0 0 6px; line-height: 1.3; }
+.rp__title { font: 600 15px var(--sans); color: var(--ink); margin: 0 0 6px; line-height: 1.3; }
 .rp__body { font: 400 13px var(--sans); color: var(--ink-2); line-height: 1.55; margin: 0 0 10px;
             max-width: 88ch; }
 .rp__ev { font: 400 12px var(--mono); color: var(--ink-3); line-height: 1.5;
@@ -394,7 +1343,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
     flex-direction: column; align-items: center; text-align: center; gap: 3px;
     text-decoration: none; position: relative; min-width: 0; }
 .path__origin em, .path__step em { font-style: normal; }
-.path__dot, .path__node { display: grid; place-items: center; width: 38px; height: 38px;
+.path__dot, .path__node { display: grid; place-items: center; width: 40px; height: 40px;
     border-radius: 50%; font-size: 15px; font-style: normal; line-height: 1;
     border: 2px solid var(--c, var(--accent)); color: var(--c, var(--accent));
     background: var(--panel); transition: background 120ms, box-shadow 120ms; }
@@ -423,7 +1372,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
               overflow-wrap: anywhere; }
 
 /* the problem count carried by the origin, like the badge on a Davis node */
-.path__badge { position: absolute; top: -3px; right: 26px; min-width: 17px; height: 17px;
+.path__badge { position: absolute; top: -3px; right: 26px; min-width: 18px; height: 18px;
     display: grid; place-items: center; padding: 0 4px; border-radius: 999px;
     font: 700 10px var(--mono); color: var(--bg); background: var(--bad); }
 
@@ -437,7 +1386,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
                                      border-color: var(--accent); }
 .dl__t { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
          font: 600 12px var(--sans); color: var(--accent); }
-.dl__t i { font-style: normal; font-size: 12px; opacity: 0.7; }
+.dl__t i { font-style: normal; font-size: 12px; color: var(--ink-3); }
 .dl__w { font: 400 12px var(--mono); color: var(--ink-3); text-align: right;
          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -448,6 +1397,30 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .lrow:hover { background: color-mix(in srgb, var(--tone) 10%, var(--panel-2)); }
 .lrow__n { font: 600 12px var(--sans); overflow-wrap: anywhere; }
 .lrow__v { font: 700 12px var(--mono); color: var(--tone); align-self: center; }
+/* element drill-down: the verdict + the apps, before any table */
+.elsum { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  border-radius: 12px; border: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent); margin-bottom: 14px; }
+.elsum__v { font: 600 13px var(--sans); display: flex; flex-direction: column; gap: 2px; }
+.elsum__v--bad { color: var(--bad); }
+.elsum__v--warn { color: var(--warn); }
+.elsum__v em { font: 400 10px var(--mono); color: var(--ink-3); font-style: normal; }
+.lrow--fold { width: 100%; text-align: center; font: 600 11px var(--mono);
+  color: var(--ink-3); cursor: pointer; border: 1px dashed var(--border-2);
+  background: none; padding: 8px; border-radius: 8px; margin-top: 6px; }
+.lrow--fold:hover { color: var(--ink); border-color: var(--accent); }
+.dd__calm { font: 400 12px var(--sans); color: var(--ink-2); line-height: 1.5;
+  margin: 0 0 10px; }
+.lrow--imp { border-left: 2px solid var(--tone);
+  background: color-mix(in srgb, var(--tone) 7%, var(--panel-2)); }
+.lrow__tag { font: 700 9px var(--mono); font-style: normal; letter-spacing: 0.04em;
+  text-transform: uppercase; border-radius: 999px; padding: 1px 7px; margin-left: 7px;
+  vertical-align: 1px; white-space: nowrap; }
+.lrow__tag--p { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+  background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.lrow__tag--a { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.lrow__impn { color: var(--bad); font-weight: 700; }
 .lrow__m { grid-column: 1 / -1; font: 400 12px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
 
 /* element card inside a pillar */
@@ -471,7 +1444,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .dd { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .dd__k { border: 1px solid var(--border); border-bottom-width: 2px; padding: 9px 11px; }
 .dd__kl { font: 600 12px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
-.dd__kv { font: 800 20px var(--mono); letter-spacing: -0.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.dd__kv { font: 800 22px var(--mono); letter-spacing: -0.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .dd__h { font: 600 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2);
          margin: 16px 0 8px; display: flex; gap: 8px; align-items: baseline; }
 .dd__h em { font-style: normal; color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; }
@@ -517,20 +1490,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
                  background: var(--panel); padding: 1px 5px; }
 
 /* fix-first ranking, under the flow */
-.prio { border-top: 1px solid var(--border); padding: 9px 14px 11px; flex: none;
-        max-height: 168px; overflow-y: auto; }
-.prio__t { font: 700 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
-           color: var(--ink-3); margin-bottom: 6px; }
-.prio__r { display: grid; grid-template-columns: auto auto 1fr; gap: 4px 10px;
-           align-items: baseline; padding: 5px 0 5px 9px; border-left: 2px solid var(--h);
-           margin-bottom: 4px; }
-.prio__n { font: 700 11px var(--mono); color: var(--h); }
-.prio__w { font: 600 12px var(--mono); color: var(--ink); }
-.prio__d { font: 400 12px var(--sans); color: var(--ink-2); }
-.prio__c { grid-column: 2 / -1; font: 400 11px var(--mono); color: var(--ink-3);
-           word-break: break-all; }
-.prio__a { font-style: normal; color: var(--ink-3); margin-right: 8px;
-           font: 500 11px var(--sans); }
 
 /* marks a node that is only classic because no new-platform app is installed */
 .path__gen { font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
@@ -546,7 +1505,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* A filter this strong has to announce itself: every number on screen changes
    meaning when the app is pinned to one session. */
-.banner--info { border-color: var(--t-cyan); color: var(--ink-1); }
+.banner--info { border-color: var(--t-cyan); color: var(--ink); }
 .banner--info .num { color: var(--t-cyan); }
 
 /* ── The stack: the chain as an isometric pile, user on top, iron below. ──
@@ -556,7 +1515,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .stack3d { display: flex; flex-direction: column; gap: 0; padding: 30px 26px 60px;
          width: max-content; min-width: 100%; }
 .shelf { display: flex; align-items: center; margin-bottom: -6px; }
-.shelf__card { width: 264px; flex: none; display: flex; align-items: center; gap: 10px;
+.shelf__card { width: 252px; flex: none; display: flex; align-items: center; gap: 10px;
                border: 1px solid var(--border-2); border-radius: 10px; padding: 10px 12px;
                background: color-mix(in srgb, var(--accent) 6%, var(--panel));
                cursor: pointer; position: relative; z-index: 4;
@@ -628,7 +1587,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    layer's hue, sides carved darker. Signals add glow on top of identity. ── */
 .slab { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%);
         overflow: visible; }
-.slab__t { fill: var(--top); stroke: color-mix(in srgb, #ffffff 35%, var(--top));
+.slab__t { fill: var(--top); stroke: color-mix(in srgb, var(--ink-hi) 35%, var(--top));
            stroke-width: 1; }
 .slab__l { fill: color-mix(in srgb, var(--top) 52%, #060812); }
 .slab__r { fill: color-mix(in srgb, var(--top) 30%, #060812); }
@@ -642,18 +1601,29 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 }
 /* the reference puts the big ordinal on the slab, and nothing else */
 .plate__no { position: absolute; left: 34%; top: 32%; z-index: 3; pointer-events: none;
-             font: 700 26px var(--mono); color: #ffffff; letter-spacing: 0.06em;
+             font: 700 26px var(--mono); color: var(--ink-hi); letter-spacing: 0.06em;
              text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55); }
 
 /* ── The chain as a flat node graph, the app's one visual language: circles,
    thin flows, labels beneath — the Davis resolution-path idiom at full size.
    Neutral by default; colour appears exactly where a signal does. ── */
-.graph { user-select: none; display: flex; gap: 22px; padding: 22px 30px 46px; width: max-content;
-         min-width: 100%; align-items: stretch; }
+/* gaps and type scale with --gs: a sparse chain earns room, a dense one
+   keeps today's compactness untouched (--gs = 1) */
+/* CENTRED IN ITS OWN BOX, which is what makes the stage's fit() land straight.
+   `min-width: 100%` keeps the band full-width when the chain is narrow, so the
+   BOX is often wider than the columns inside it — and fit() centres the box,
+   not the content: it solves x = (stageW - boxW·z)/2, which with boxW ≈ stageW
+   and z < 1 shifts everything right and leaves half the stage empty. Measured
+   on a customer tenant whose Transport layer holds 35 domains: the column ran
+   ~1,150px tall, z fell well under 1 to fit that height, and the whole chain
+   sat in the right-hand half behind 900px of nothing. Centring the columns
+   inside the box makes the two centres coincide at every zoom. */
+.graph { user-select: none; display: flex; gap: calc(22px * var(--gs, 1)); padding: 22px 30px 46px; width: max-content;
+         min-width: 100%; align-items: stretch; justify-content: center; }
 /* Each layer stands on its own band: a quiet vertical panel that groups the
    column. Identity stays neutral; a Davis signal tints the whole band, so a
    sick LAYER is findable from across the room, not only a sick node. */
-.gcol { display: flex; flex-direction: column; min-width: 150px;
+.gcol { display: flex; flex-direction: column; min-width: 0;
         padding: 12px 12px 18px; border-radius: 14px;
         background: linear-gradient(180deg, var(--panel-2), transparent 65%);
         border: 1px solid var(--border); }
@@ -671,23 +1641,52 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
             color: var(--ink-3); }
 .gcol__hd { border-bottom: 1px solid var(--border-2);
              padding-bottom: 7px; margin-bottom: 4px; }
-.gcol__hd b { font: 700 15px var(--mono); letter-spacing: 0.2em;
+.gcol__hd b { font: 700 calc(15px * var(--gs, 1)) var(--mono); letter-spacing: 0.2em;
               text-transform: uppercase; color: var(--ink); }
 .gcol__hd:hover b, .gcol__hd--on b { color: var(--accent); }
 .gcol--warn .gcol__hd { border-bottom-color: color-mix(in srgb, var(--warn) 55%, transparent); }
 .gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad) 60%, transparent); }
-.gcol__name { text-align: center; font: 500 10px var(--sans); color: var(--ink-2);
+/* the reader asked for legible column captions — up from 10px ink-2 the
+   layer names were furniture, not labels */
+.gcol__name { text-align: center; font: 600 12px var(--sans); color: var(--ink);
               margin-top: 2px; }
 .gcol__hd:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .gcol__ic { display: inline-flex; color: var(--ink-2); }
 .gcol__n { font: 700 12px var(--mono); color: var(--ink-2); }
-.gcol__sub { text-align: center; font: 500 10px var(--mono); letter-spacing: 0.08em;
-             text-transform: uppercase; color: var(--ink-3); margin: 1px 0 10px; }
+/* The column captions carry the layer's number, and the number leads: "841
+   traces", "394.3k requests". They used to run at a fixed size in a column
+   that compresses, so on a narrower window the caption spilled past its own
+   card and the LEADING DIGITS were the part that left the screen — the only
+   part worth reading. Now the caption shrinks with the column and, past the
+   point where shrinking would make it illegible, truncates from the TAIL:
+   the count survives, the word gives way. */
+.gcol__sub { text-align: center; letter-spacing: 0.06em;
+             font: 600 clamp(10px, 0.85vw, 12px) var(--mono);
+             text-transform: uppercase; color: var(--ink-2); margin: 1px 0 10px;
+             max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
 .gcol__nodes { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly;
-               align-items: center; gap: 12px; min-height: 540px; }
+               align-items: center; gap: 12px;
+               /* height from the densest column: ~96px per node, floor for
+                  one-node apps, the old 540px only as a lower bound when the
+                  estate is genuinely busy */
+               min-height: clamp(240px, calc(var(--chain-rows, 5) * 96px + 60px), 620px);
+               /* A LAYER GROWS SIDEWAYS, NOT DOWNWARD. min-height set a floor
+                  and nothing set a ceiling, so twelve cards at ~96px built a
+                  1,150px tower — measured on a tenant whose Transport layer
+                  carries 35 third-party domains. One tall column drags the
+                  whole chain down with it: the stage has to zoom out to fit
+                  the height, which shrinks every OTHER layer to nothing.
+                  Wrapping turns the overflow into a second sub-column, so a
+                  dense layer costs width, which the stage has, instead of
+                  height, which it does not. Edges are measured from the live
+                  DOM per node, so they follow the cards wherever they land. */
+               flex-wrap: wrap;
+               max-height: clamp(240px, calc(var(--chain-rows, 5) * 96px + 60px), 620px);
+               align-content: space-evenly; column-gap: 20px; }
 
 .gnode { display: flex; flex-direction: column; align-items: center; gap: 5px;
-         cursor: pointer; background: none; border: none; max-width: 150px;
+         cursor: pointer; background: none; border: none; max-width: calc(150px * var(--gs, 1));
          position: relative; z-index: 4; }
 .gnode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gnode__c { display: flex; align-items: center; justify-content: center;
@@ -721,19 +1720,21 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* A line may route wherever it likes; it may never cross TEXT. The label sits
    above the edge layer on an opaque plate, so the rule holds by construction —
    no routing algorithm required to keep it. */
-.gnode__nm { font: 600 11px var(--mono); color: var(--ink); text-align: center;
+.gnode__nm { font: 600 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink); text-align: center;
              max-width: 148px; overflow: hidden; text-overflow: ellipsis;
              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
              background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-.gnode__v { font: 500 11px var(--mono); color: var(--ink-3); text-align: center;
+.gnode__v { font: 500 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink-3); text-align: center;
              background: var(--bg); padding: 0 5px; border-radius: 4px; }
 .gnode__fc { font-style: normal; color: var(--warn); }
 .gnode--more .gnode__nm { color: var(--ink-3); }
 
 @media (prefers-reduced-motion: reduce) { .gnode__c--bad { animation: none; } }
 
-.dcf-svg text { font: 600 10px var(--mono); fill: var(--ink-2); text-anchor: middle;
-                paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+/* edge labels ride the glowing flow lines, so they need weight and a thick
+   ground-halo to stay legible — the reader asked twice for bigger type here */
+.dcf-svg text { font: 700 12px var(--mono); fill: var(--ink-hi); text-anchor: middle;
+                paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 
 /* ── The entrance. Bands sweep left to right, the circuit draws itself, and
    the signal pops LAST — the sequence ends the eye on what matters. ── */
@@ -802,6 +1803,9 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
             margin-right: 9px; vertical-align: 1px; flex: none; }
 
 /* ─── pulse: the landing page — one application, mission-control ─── */
+/* NOT pinned. Pinning this line was tried and it floated OVER the cards —
+   a third sticky layer is one too many. It scrolls with the content; the
+   pinned TitleBar's shadowed seam is what makes the pass-under read clean. */
 .pl-estate { display: flex; align-items: center; justify-content: space-between;
              font: 500 12px var(--mono); color: var(--ink-2); padding: 2px 2px 0; }
 .pl-link { background: none; border: none; cursor: pointer; color: var(--ink-3);
@@ -843,13 +1847,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* a block: the classic purple card, redrawn as a lit module */
 .tk-block { position: relative; overflow: hidden; display: flex;
   flex-direction: column; justify-content: flex-start; background:
-    linear-gradient(165deg, color-mix(in srgb, var(--c) 52%, #12122b),
-      color-mix(in srgb, var(--c) 24%, #12122b) 55%,
-      color-mix(in srgb, var(--c) 38%, #12122b));
+    linear-gradient(165deg, color-mix(in srgb, var(--c) 52%, var(--tint)),
+      color-mix(in srgb, var(--c) 24%, var(--tint)) 55%,
+      color-mix(in srgb, var(--c) 38%, var(--tint)));
   border: 1px solid color-mix(in srgb, var(--c) 65%, transparent);
   border-radius: 12px; padding: 14px 16px;
   box-shadow: 0 0 26px color-mix(in srgb, var(--c) 28%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent); }
+    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 14%, transparent); }
 .tk-block::before, .tk-block::after { content: ""; position: absolute; width: 14px; height: 14px;
   border: 1.5px solid color-mix(in srgb, var(--c) 70%, transparent); }
 .tk-block::before { top: -1px; left: -1px; border-right: none; border-bottom: none;
@@ -857,39 +1861,43 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-block::after { bottom: -1px; right: -1px; border-left: none; border-top: none;
   border-radius: 0 0 10px 0; }
 .tk-block__wm { position: absolute; right: -12px; bottom: -14px; width: 92px; height: 92px;
-  color: #fff; opacity: 0.09; pointer-events: none; }
+  color: var(--ink-hi); opacity: 0.09; pointer-events: none; }
 .tk-block__wm svg { width: 92px; height: 92px; }
 .tk-block__hd { position: relative; display: flex; align-items: center; gap: 8px; font: 700 10px var(--mono);
-  color: rgba(255, 255, 255, 0.85); text-transform: uppercase; letter-spacing: 0.12em;
-  margin-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  color: color-mix(in srgb, var(--ink-hi) 85%, transparent); text-transform: uppercase; letter-spacing: 0.12em;
+  margin-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--ink-hi) 22%, transparent);
   padding-bottom: 7px; }
-.tk-block__ic { display: inline-flex; width: 16px; height: 16px; color: #fff; }
+.tk-block__ic { display: inline-flex; width: 16px; height: 16px; color: var(--ink-hi); }
 .tk-block__ic svg { width: 16px; height: 16px;
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6)); }
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ink-hi) 60%, transparent)); }
 .tk-row2 { position: relative; display: flex; gap: 22px; flex-wrap: wrap;
   margin-bottom: 6px; }
 .tk-stat { display: flex; flex-direction: column; }
-.tk-stat b { font-size: 24px; color: #fff; line-height: 1.15;
-  text-shadow: 0 0 12px rgba(255, 255, 255, 0.25); }
-.tk-stat span { font: 500 10px var(--mono); color: rgba(255, 255, 255, 0.66); }
+.tk-stat b { font-size: 22px; color: var(--ink-hi); line-height: 1.15;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--ink-hi) 25%, transparent); }
+.tk-stat span { font: 500 10px var(--mono); color: color-mix(in srgb, var(--ink-hi) 66%, transparent); }
 .tk-chartrow { position: relative; margin-top: auto; display: flex; align-items: center; gap: 10px;
-  font: 600 11px var(--mono); color: rgba(255, 255, 255, 0.85); }
+  font: 600 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 85%, transparent); }
 .cc-bars { display: flex; align-items: flex-end; gap: 2px; height: 22px;
   flex: 1; min-width: 60px; overflow: hidden; }
 .cc-bars i { display: block; width: 3px; flex: none; border-radius: 1px; }
-.tk-note { font: 500 11px var(--mono); color: rgba(255, 255, 255, 0.8); padding-top: 4px;
-  display: flex; align-items: center; gap: 6px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
+/* WRAPS, NEVER CUTS. One forced line with an ellipsis turned "all from this
+   application's own code or APIs" into "all from this app…" — a caption cut
+   before its verb, in a column that was simply narrower than the sentence.
+   Flex is kept so the icon variant still aligns; it wraps now instead. */
+.tk-note { font: 500 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 80%, transparent); padding-top: 4px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px;
+  white-space: normal; line-height: 1.4; }
 .tk-note svg { width: 13px; height: 13px; flex: none; }
-.tk-note--bad { color: #fff; background: color-mix(in srgb, var(--bad) 45%, transparent);
+.tk-note--bad { color: var(--ink-hi); background: color-mix(in srgb, var(--bad) 45%, transparent);
   border-radius: 6px; padding: 3px 8px; margin-top: 6px; }
 
 /* the phone core, where the classic drew its people */
 .tk-core { display: flex; flex-direction: column; gap: 12px; align-items: stretch;
   justify-content: center; }
 .tk-core__b { position: relative; background:
-    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--t) 26%, #12122b),
-      #12122b 80%);
+    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--t) 26%, var(--tint)),
+      var(--tint) 80%);
   border: 1.5px solid color-mix(in srgb, var(--t) 60%, transparent);
   border-radius: 18px; padding: 16px 16px 14px; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -899,28 +1907,32 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   box-shadow: 0 0 40px color-mix(in srgb, var(--t) 55%, transparent); }
 @keyframes tkbreathe {
   0%,100% { box-shadow: 0 0 20px color-mix(in srgb, var(--t) 25%, transparent); }
-  50% { box-shadow: 0 0 34px color-mix(in srgb, var(--t) 45%, transparent); } }
-.tk-core__ic { color: #fff; width: 32px; height: 32px; }
-.tk-core__ic svg { width: 32px; height: 32px;
-  filter: drop-shadow(0 0 9px rgba(255, 255, 255, 0.55)); }
-.tk-core__pct { font-size: 40px; color: #fff; line-height: 1;
-  text-shadow: 0 0 16px rgba(255, 255, 255, 0.35); }
-.tk-core__cap { font: 700 9px var(--mono); color: rgba(255, 255, 255, 0.7);
+  50% { box-shadow: 0 0 30px color-mix(in srgb, var(--t) 45%, transparent); } }
+.tk-core__ic { color: var(--ink-hi); width: 30px; height: 30px; }
+.tk-core__ic svg { width: 30px; height: 30px;
+  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--ink-hi) 55%, transparent)); }
+.tk-core__pct--word, .cc .tk-core__pct--word { font-size: 30px; letter-spacing: 0.02em;
+  text-transform: uppercase; }
+.tk-core__pct { font-size: 40px; color: var(--ink-hi); line-height: 1;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--ink-hi) 35%, transparent); }
+.tk-core__cap { font: 700 9px var(--mono); color: color-mix(in srgb, var(--ink-hi) 70%, transparent);
   text-transform: uppercase; letter-spacing: 0.12em; }
-.tk-core__nm { font: 700 16px var(--sans); color: #fff; margin-top: 6px;
+.tk-core__words { display: block; font: 400 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 75%, transparent);
+  max-width: 320px; margin: 6px auto 0; line-height: 1.5; }
+.tk-core__nm { font: 700 15px var(--sans); color: var(--ink-hi); margin-top: 6px;
   text-align: center; }
-.tk-core__go { font: 600 10px var(--mono); color: rgba(255, 255, 255, 0.6); margin-top: 2px; }
-.tk-core__b:hover .tk-core__go, .tk-core__b:focus-visible .tk-core__go { color: #fff; }
+.tk-core__go { font: 600 10px var(--mono); color: color-mix(in srgb, var(--ink-hi) 60%, transparent); margin-top: 2px; }
+.tk-core__b:hover .tk-core__go, .tk-core__b:focus-visible .tk-core__go { color: var(--ink-hi); }
 .tk-fc { display: flex; align-items: center; justify-content: center; gap: 7px;
-  font: 600 11px var(--mono); color: #fff;
-  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 45%, #12122b),
-    color-mix(in srgb, var(--accent) 22%, #12122b));
+  font: 600 11px var(--mono); color: var(--ink-hi);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 45%, var(--tint)),
+    color-mix(in srgb, var(--accent) 22%, var(--tint)));
   border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 999px; padding: 6px 14px; }
 .tk-fc svg { width: 13px; height: 13px; }
 .tk-fc--warn { background: linear-gradient(165deg,
-    color-mix(in srgb, var(--warn) 50%, #12122b),
-    color-mix(in srgb, var(--warn) 24%, #12122b));
+    color-mix(in srgb, var(--warn) 50%, var(--tint)),
+    color-mix(in srgb, var(--warn) 24%, var(--tint)));
   border-color: color-mix(in srgb, var(--warn) 70%, transparent); }
 
 .tk-foot { display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
@@ -937,28 +1949,28 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* the browser window holding the trend */
 .tk-browser { background:
-    linear-gradient(180deg, color-mix(in srgb, var(--t) 26%, #12122b),
-      color-mix(in srgb, var(--t) 10%, #12122b) 60%);
+    linear-gradient(180deg, color-mix(in srgb, var(--t) 26%, var(--tint)),
+      color-mix(in srgb, var(--t) 10%, var(--tint)) 60%);
   border: 1.5px solid color-mix(in srgb, var(--t) 70%, transparent); border-radius: 12px;
   box-shadow: 0 0 30px color-mix(in srgb, var(--t) 32%, transparent);
   overflow: hidden; min-width: 0; }
 .tk-browser__bar { display: flex; gap: 5px; padding: 9px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08); }
+  border-bottom: 1px solid color-mix(in srgb, var(--ink-hi) 18%, transparent);
+  background: color-mix(in srgb, var(--ink-hi) 8%, transparent); }
 .tk-browser__bar i { width: 8px; height: 8px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.4); }
+  background: color-mix(in srgb, var(--ink-hi) 40%, transparent); }
 .tk-browser__hd { display: flex; align-items: baseline; gap: 14px; width: 100%;
   background: none; border: none; cursor: pointer; text-align: left;
   padding: 12px 14px 4px; outline: none; }
-.tk-browser__nm { font: 700 15px var(--sans); color: #fff; overflow: hidden;
+.tk-browser__nm { font: 700 15px var(--sans); color: var(--ink-hi); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
-.tk-browser__hd b { font-size: 14px; }
+.tk-browser__hd b { font-size: 15px; }
 .tk-browser__hd .tk-core__go { margin-left: auto; }
 .tk-browser__hd:hover .tk-core__go, .tk-browser__hd:focus-visible .tk-core__go {
   color: var(--ink); }
 .tk-trend { padding: 4px 14px 6px; }
 .tk-browser__ft { display: flex; gap: 22px; flex-wrap: wrap; padding: 10px 14px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.18); }
+  border-top: 1px solid color-mix(in srgb, var(--ink-hi) 18%, transparent); }
 
 @media (prefers-reduced-motion: reduce) {
   .tk-core__b { animation: none; }
@@ -966,12 +1978,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* the classic card's title row */
 .tk-hd { display: flex; align-items: center; gap: 12px; }
-.tk-hd__ic { display: inline-flex; width: 34px; height: 34px; color: var(--t, var(--ink-2));
+.tk-hd__ic { display: inline-flex; width: 30px; height: 30px; color: var(--t, var(--ink-2));
   border: 1.5px solid color-mix(in srgb, var(--t, var(--border-2)) 55%, var(--border-2));
   border-radius: 9px; align-items: center; justify-content: center;
   box-shadow: 0 0 12px color-mix(in srgb, var(--t, transparent) 30%, transparent); }
 .tk-hd__ic svg { width: 20px; height: 20px; }
-.tk-hd__t h2 { font: 700 19px var(--sans); color: var(--ink); margin: 0; }
+.tk-hd__t h2 { font: 700 18px var(--sans); color: var(--ink); margin: 0; }
 .tk-hd__t span { font: 500 11px var(--mono); color: var(--ink-3); }
 .tk-hd__a { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 .tk-btn { background: none; cursor: pointer; color: var(--ink-2);
@@ -990,7 +2002,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    services above, classic topology (the mainframe's home) and data stores
    below. Identification was the ask; the label does it without a colour. */
 .gdiv { width: 100%; display: flex; align-items: center; gap: 8px;
-  margin: 2px 0 -6px; font: 600 8px var(--mono); letter-spacing: 0.14em;
+  margin: 2px 0 -6px; font: 600 9px var(--mono); letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-3); white-space: nowrap;
   position: relative; z-index: 3; }
 .gdiv::before, .gdiv::after { content: ""; flex: 1; height: 1px;
@@ -999,6 +2011,63 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    and were running straight through the lettering */
 .gdiv b { font-weight: 600; background: var(--panel-2); border-radius: 4px;
   padding: 1px 7px; }
+
+/* ── the Backend block: the summarised half of the chain ──
+   One column standing for Serve→Cloud, each row a subject and the platform
+   app that manages it. It is a DESTINATION LIST, not a graph — that is the
+   point of the pivot. */
+.gcol--bsum { justify-content: flex-start;
+  /* the graph is width: max-content, so this column grew to its longest
+     child — one Spring service's aching name stretched the Backend across
+     the screen. The cap is what makes every ellipsis below actually clip. */
+  max-width: calc(320px * var(--gs, 1)); }
+/* above the mesh: the reader's screenshot had the trace line running OVER
+   the rows' lettering — the block is a landing, not a road */
+.bsum { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 14px;
+  align-items: stretch; position: relative; z-index: 4; min-width: 0; }
+.bsum__row { min-width: 0; }
+.bsum__c { width: 30px; height: 30px; margin: 6px auto 10px; }
+/* Each row wears the ENTITY layout the rest of the chain speaks: the circled
+   icon, the tone on its ring, the anomaly count on its shoulder — the same
+   grammar as a gnode, laid horizontally. Clicking opens the layer's entity
+   list, where each entity carries its own routes (Problems and Smartscape
+   among them). */
+.bsum__row { display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "ic l v" "ic s go";
+  column-gap: 10px; row-gap: 1px; align-items: center;
+  padding: 7px 9px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  text-decoration: none; cursor: pointer; }
+.bsum__row:hover, .bsum__row:focus-visible { outline: none;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent); }
+.bsum__row--bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
+.bsum__row--warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.bsum__ic { grid-area: ic; width: 28px; height: 28px; position: relative; }
+.bsum__sig { position: absolute; top: -6px; right: -8px; }
+.bsum__pb { font: 700 10px var(--mono); color: var(--bad); }
+.bsum__l { grid-area: l; font: 600 calc(10px * var(--gs, 1)) var(--mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-2); }
+.bsum__v { grid-area: v; font: 700 calc(15px * var(--gs, 1)) var(--mono); color: var(--ink);
+  text-align: right; }
+.bsum__s { grid-area: s; font: 400 9px var(--mono); color: var(--ink-3);
+  font-style: normal; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+  /* a grid track grows to min-content, so one unbroken Spring service name
+     stretched the whole Backend column across the screen — min-width: 0 is
+     what lets the ellipsis actually clip */
+  min-width: 0; max-width: 100%; }
+/* the aching entity, named in the harm's own colour */
+.bsum__s--hurt { color: var(--bad); font-weight: 600; }
+.bsum__go { grid-area: go; font: 600 9px var(--mono); color: var(--accent);
+  font-style: normal; text-align: right; text-decoration: none; }
+.bsum__go:hover { text-decoration: underline; }
+/* the spotlight treats the block as one component */
+.graph--hl .bsum--dim { opacity: 0.22; filter: saturate(0.3); }
+.graph--hl .bsum--spot .bsum__c {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--warn) 45%, transparent);
+  animation: hlspot 1.6s ease-in-out infinite; }
 
 /* the badge a signalled card wears: its own anomaly count, always on.
    Amber and numeric, so seven signals on two grouped cards still add up to
@@ -1039,7 +2108,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   animation: hlspot 1.6s ease-in-out infinite; }
 @keyframes hlspot {
   50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn) 30%, transparent),
-    0 0 34px color-mix(in srgb, var(--warn) 65%, transparent); } }
+    0 0 30px color-mix(in srgb, var(--warn) 65%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
   .graph--hl .gnode--spot .gnode__c { animation: none; } }
 .tk-btn--warn:hover, .tk-btn--warn:focus-visible { color: var(--warn); border-color: var(--warn); }
@@ -1048,7 +2117,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   box-shadow: 0 0 14px color-mix(in srgb, var(--bad) 30%, transparent); }
 /* tighter modules so the three columns hold at narrow widths, like the card */
 @media (max-width: 860px) {
-  .tk-stat b { font-size: 16px; }
+  .tk-stat b { font-size: 15px; }
   .tk-block { padding: 10px 10px; }
   .tk-core__pct { font-size: 26px; }
   .tk-core__nm { font-size: 13px; }
@@ -1058,16 +2127,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the drawn device at the centre of the mobile card */
 .tk-phone { width: 128px; height: auto;
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--t) 45%, transparent)); }
-.tk-phone__body { fill: #0d0d22; stroke: color-mix(in srgb, var(--t) 80%, #ffffff);
+.tk-phone__body { fill: #0d0d22; stroke: color-mix(in srgb, var(--t) 80%, var(--ink-hi));
   stroke-width: 2.5; }
-.tk-phone__notch { fill: color-mix(in srgb, var(--t) 45%, #12122b); }
+.tk-phone__notch { fill: color-mix(in srgb, var(--t) 45%, var(--tint)); }
 .tk-phone__scr { stroke: color-mix(in srgb, var(--t) 40%, transparent); stroke-width: 1; }
-.tk-phone__pct { font: 700 30px var(--mono); fill: #fff; text-anchor: middle;
-  text-shadow: 0 0 14px rgba(255, 255, 255, 0.4); }
-.tk-phone__cap { font: 700 8px var(--mono); fill: rgba(255, 255, 255, 0.75);
+.tk-phone__pct { font: 700 30px var(--mono); fill: var(--ink-hi); text-anchor: middle;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 40%, transparent); }
+.tk-phone__cap { font: 700 9px var(--mono); fill: color-mix(in srgb, var(--ink-hi) 75%, transparent);
   text-anchor: middle; letter-spacing: 0.14em; }
-.tk-phone__bar { fill: rgba(255, 255, 255, 0.85); }
-.tk-phone__home { fill: none; stroke: rgba(255, 255, 255, 0.5); stroke-width: 1.5; }
+.tk-phone__bar { fill: color-mix(in srgb, var(--ink-hi) 85%, transparent); }
+.tk-phone__home { fill: none; stroke: color-mix(in srgb, var(--ink-hi) 50%, transparent); stroke-width: 1.5; }
 
 /* ─── pulse: the living river ─── */
 .rv-stage { position: relative; background:
@@ -1085,42 +2154,42 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--bad) 55%, transparent)); }
 
 /* the water itself */
-.rv-drops--ok .rv-drop { fill: color-mix(in srgb, var(--good) 80%, #ffffff);
+.rv-drops--ok .rv-drop { fill: color-mix(in srgb, var(--good) 80%, var(--ink-hi));
   filter: drop-shadow(0 0 4px var(--good)); }
-.rv-drops--hit .rv-drop { fill: color-mix(in srgb, var(--bad) 78%, #ffffff);
+.rv-drops--hit .rv-drop { fill: color-mix(in srgb, var(--bad) 78%, var(--ink-hi));
   filter: drop-shadow(0 0 5px var(--bad)); }
 
 .rv-src__c { fill: color-mix(in srgb, var(--info) 14%, var(--panel));
   stroke: color-mix(in srgb, var(--info) 55%, transparent); stroke-width: 1.5;
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--info) 35%, transparent)); }
 .rv-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; fill: var(--ink-3); }
-.rv-val { font-size: 16px; font-weight: 700; fill: var(--ink); }
+.rv-val { font-size: 15px; font-weight: 700; fill: var(--ink); }
 
 .rv-gate { cursor: pointer; outline: none; }
 .rv-gate__halo { fill: none; stroke: color-mix(in srgb, var(--t) 40%, transparent);
   stroke-width: 1.5; stroke-dasharray: 4 7; animation: rvspin 14s linear infinite;
   transform-origin: 600px 235px; }
 @keyframes rvspin { to { transform: rotate(360deg); } }
-.rv-gate__c { fill: color-mix(in srgb, var(--t) 22%, #12122b);
+.rv-gate__c { fill: color-mix(in srgb, var(--t) 22%, var(--tint));
   stroke: color-mix(in srgb, var(--t) 80%, transparent); stroke-width: 2;
   filter: drop-shadow(0 0 22px color-mix(in srgb, var(--t) 45%, transparent));
   animation: rvbreathe 4s ease-in-out infinite; }
 @keyframes rvbreathe {
   0%,100% { filter: drop-shadow(0 0 16px color-mix(in srgb, var(--t) 35%, transparent)); }
   50% { filter: drop-shadow(0 0 30px color-mix(in srgb, var(--t) 60%, transparent)); } }
-.rv-gate__pct { font-size: 30px; font-weight: 700; fill: #fff; }
-.rv-gate__cap { font-size: 8.5px; font-weight: 700; letter-spacing: 0.14em;
-  fill: rgba(255, 255, 255, 0.7); }
-.rv-name { font-size: 19px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
+.rv-gate__pct { font-size: 30px; font-weight: 700; fill: var(--ink-hi); }
+.rv-gate__cap { font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
+  fill: color-mix(in srgb, var(--ink-hi) 70%, transparent); }
+.rv-name { font-size: 18px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
 .rv-go { font-size: 11px; fill: var(--ink-3); }
 .rv-gate:hover .rv-go, .rv-gate:focus-visible .rv-go { fill: var(--ink); }
 
-.rv-out__c { fill: color-mix(in srgb, var(--c, var(--good)) 20%, #12122b);
+.rv-out__c { fill: color-mix(in srgb, var(--c, var(--good)) 20%, var(--tint));
   stroke-width: 2; }
 .rv-out--ok .rv-out__c { stroke: var(--good); ---c: var(--good);
   filter: drop-shadow(0 0 14px color-mix(in srgb, var(--good) 40%, transparent)); }
 .rv-out--hit .rv-out__c { stroke: var(--bad);
-  fill: color-mix(in srgb, var(--bad) 22%, #12122b);
+  fill: color-mix(in srgb, var(--bad) 22%, var(--tint));
   filter: drop-shadow(0 0 14px color-mix(in srgb, var(--bad) 45%, transparent)); }
 .rv-out--live .rv-out__c { animation: rvalarm 2.2s ease-in-out infinite; }
 @keyframes rvalarm {
@@ -1134,7 +2203,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 12px 20px; }
 .rv-kpi { display: flex; flex-direction: column; }
-.rv-kpi b { font-size: 24px; color: var(--ink); line-height: 1.15; }
+.rv-kpi b { font-size: 22px; color: var(--ink); line-height: 1.15; }
 .rv-kpi span { font: 500 10px var(--mono); color: var(--ink-3); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1149,11 +2218,11 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 @keyframes pparr { to { stroke-dashoffset: -36; } }
 
 .pp-top { display: flex; align-items: center; gap: 10px; align-self: center;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, #101024), #101024);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, var(--tint-2)), var(--tint-2));
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 12px; padding: 8px 14px; z-index: 1;
   box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 22%, transparent); }
-.pp-top__ic { display: inline-flex; width: 22px; height: 22px; color: #fff; }
+.pp-top__ic { display: inline-flex; width: 22px; height: 22px; color: var(--ink-hi); }
 .pp-top__ic svg { width: 22px; height: 22px; }
 .pp-top__t { font: 600 13px var(--sans); color: var(--ink); }
 .pp-top__chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1170,23 +2239,23 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   margin-bottom: 8px; }
 .pp-stages { display: grid; grid-template-columns: 1fr 20px 1.2fr 20px 1fr;
   gap: 0; align-items: stretch; }
-.pp-stage { background: linear-gradient(180deg, #101024, #0d0d1e);
+.pp-stage { background: linear-gradient(180deg, var(--tint-2), #0d0d1e);
   border: 1px solid var(--border-2); border-radius: 10px; padding: 9px 10px 10px;
   display: flex; flex-direction: column; gap: 0; }
 .pp-stage h3 { font: 700 13px var(--sans); color: var(--ink); margin: 0 0 2px;
   text-align: center; }
-.pp-stage p { font: 500 9.5px var(--mono); color: var(--ink-3); margin: 0 0 8px;
+.pp-stage p { font: 500 10px var(--mono); color: var(--ink-3); margin: 0 0 8px;
   text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; }
 .pp-chips { display: flex; gap: 6px 10px; justify-content: center; flex-wrap: wrap;
   margin-top: auto; }
 .pp-chip { display: flex; flex-direction: column; align-items: center; gap: 1px;
   min-width: 52px; }
-.pp-chip i { display: inline-flex; width: 17px; height: 17px;
+.pp-chip i { display: inline-flex; width: 18px; height: 18px;
   color: var(--c, var(--ink-2)); }
-.pp-chip i svg { width: 17px; height: 17px;
+.pp-chip i svg { width: 18px; height: 18px;
   filter: drop-shadow(0 0 5px color-mix(in srgb, var(--c, var(--info)) 45%, transparent)); }
-.pp-chip b { font-size: 14px; color: var(--c, var(--ink)); }
+.pp-chip b { font-size: 15px; color: var(--c, var(--ink)); }
 .pp-chip span { font: 500 9px var(--mono); color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.08em; }
 .pp-step { align-self: center; font-size: 18px; color: var(--info); text-align: center;
@@ -1198,40 +2267,40 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   margin-top: 10px; }
 .pp-fb__bar { flex: 1; min-width: 280px; }
 .pp-fb__bar { position: relative; display: flex; align-items: center; gap: 10px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--info) 45%, #101024),
-    color-mix(in srgb, var(--info) 12%, #101024));
-  border-radius: 8px; padding: 6px 12px; font: 600 11px var(--mono); color: #fff;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--info) 45%, var(--tint-2)),
+    color-mix(in srgb, var(--info) 12%, var(--tint-2)));
+  border-radius: 8px; padding: 6px 12px; font: 600 11px var(--mono); color: var(--ink-hi);
   overflow: hidden; }
 .pp-fb__bar::after { content: ""; position: absolute; inset: 0;
   background: repeating-linear-gradient(90deg, transparent 0 26px,
-    rgba(255, 255, 255, 0.10) 26px 34px);
+    color-mix(in srgb, var(--ink-hi) 10%, transparent) 26px 30px);
   animation: ppflow 1.4s linear infinite; }
-@keyframes ppflow { to { transform: translateX(-34px); } }
+@keyframes ppflow { to { transform: translateX(-30px); } }
 .pp-fb__arr { font-size: 18px; }
-.pp-outcome { font: 600 10.5px var(--mono); color: var(--ink-2);
+.pp-outcome { font: 600 11px var(--mono); color: var(--ink-2);
   border: 1px solid color-mix(in srgb, var(--good) 45%, var(--border-2));
   border-radius: 8px; padding: 6px 10px;
   background: color-mix(in srgb, var(--good) 8%, transparent); }
 
 .pp-cx { display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 4px; cursor: pointer; outline: none;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--t) 22%, #101024), #101024);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--t) 22%, var(--tint-2)), var(--tint-2));
   border: 1.5px solid color-mix(in srgb, var(--t) 65%, transparent);
   border-radius: 14px; padding: 12px 12px;
   box-shadow: 0 0 24px color-mix(in srgb, var(--t) 28%, transparent);
   animation: tkbreathe 4s ease-in-out infinite; }
-.pp-cx__ic { display: inline-flex; width: 26px; height: 26px; color: #fff; }
+.pp-cx__ic { display: inline-flex; width: 26px; height: 26px; color: var(--ink-hi); }
 .pp-cx__ic svg { width: 26px; height: 26px;
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.5)); }
-.pp-cx__pct { font-size: 32px; color: #fff; line-height: 1.1;
-  text-shadow: 0 0 16px rgba(255, 255, 255, 0.3); }
-.pp-cx__cap { font: 700 9px var(--mono); color: rgba(255, 255, 255, 0.7);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--ink-hi) 50%, transparent)); }
+.pp-cx__pct { font-size: 30px; color: var(--ink-hi); line-height: 1.1;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--ink-hi) 30%, transparent); }
+.pp-cx__cap { font: 700 9px var(--mono); color: color-mix(in srgb, var(--ink-hi) 70%, transparent);
   text-transform: uppercase; letter-spacing: 0.12em; }
 .pp-cx__nums { display: flex; gap: 10px; font: 600 11px var(--mono); margin-top: 6px; }
 .pp-cx__ok { font-style: normal; color: var(--good); }
 .pp-cx__hit { font-style: normal; color: var(--bad); }
-.pp-cx__go { font: 500 10px var(--mono); color: rgba(255, 255, 255, 0.55); margin-top: 5px; }
-.pp-cx:hover .pp-cx__go, .pp-cx:focus-visible .pp-cx__go { color: #fff; }
+.pp-cx__go { font: 500 10px var(--mono); color: color-mix(in srgb, var(--ink-hi) 55%, transparent); margin-top: 5px; }
+.pp-cx:hover .pp-cx__go, .pp-cx:focus-visible .pp-cx__go { color: var(--ink-hi); }
 
 @media (prefers-reduced-motion: reduce) {
   .pp-arr, .pp-step, .pp-fb__bar::after, .pp-cx { animation: none; }
@@ -1250,7 +2319,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .mc-e__base { fill: none; stroke: var(--c); stroke-linecap: round;
   stroke-linejoin: round; opacity: 0.85;
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--c) 55%, transparent)); }
-.mc-e__pulse { fill: none; stroke: #fff; stroke-linecap: round; opacity: 0.9;
+.mc-e__pulse { fill: none; stroke: var(--ink-hi); stroke-linecap: round; opacity: 0.9;
   stroke-dasharray: 16 220; animation: mcpulse 2.4s linear infinite; }
 @keyframes mcpulse { to { stroke-dashoffset: -236; } }
 /* the label wears a paint halo: a line may pass anywhere, never over text */
@@ -1259,7 +2328,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* nodes: the chain's circles */
 .mc-n { cursor: pointer; outline: none; }
-.mc-n__c { fill: color-mix(in srgb, var(--c) 16%, #101024);
+.mc-n__c { fill: color-mix(in srgb, var(--c) 16%, var(--tint-2));
   stroke: color-mix(in srgb, var(--c) 70%, transparent); stroke-width: 2;
   filter: drop-shadow(0 0 14px color-mix(in srgb, var(--c) 35%, transparent)); }
 .mc-n:hover .mc-n__c, .mc-n:focus-visible .mc-n__c {
@@ -1269,21 +2338,21 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   0%,100% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--bad) 35%, transparent)); }
   50% { filter: drop-shadow(0 0 26px color-mix(in srgb, var(--bad) 75%, transparent)); } }
 .mc-n__fo { pointer-events: none; }
-.mc-n__ic { width: 30px; height: 30px; color: #fff; display: flex;
+.mc-n__ic { width: 30px; height: 30px; color: var(--ink-hi); display: flex;
   align-items: center; justify-content: center; }
 .mc-n__ic svg { width: 30px; height: 30px;
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.45)); }
-.mc-n__nm { font-size: 14px; font-weight: 700; fill: var(--ink);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ink-hi) 45%, transparent)); }
+.mc-n__nm { font-size: 15px; font-weight: 700; fill: var(--ink);
   font-family: var(--sans); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
-.mc-n__v { font-size: 17px; font-weight: 700; fill: var(--ink);
+.mc-n__v { font-size: 18px; font-weight: 700; fill: var(--ink);
   paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 .mc-n--warn .mc-n__v { fill: var(--warn); }
 .mc-n--bad .mc-n__v { fill: var(--bad); }
 .mc-n--good .mc-n__v { fill: var(--good); }
-.mc-n__mt { font-size: 10.5px; font-weight: 500; fill: var(--ink-3);
+.mc-n__mt { font-size: 11px; font-weight: 500; fill: var(--ink-3);
   paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 
-.mc-cap { text-align: center; font: 500 10.5px var(--mono); color: var(--ink-3);
+.mc-cap { text-align: center; font: 500 11px var(--mono); color: var(--ink-3);
   padding: 0 14px 12px; }
 @media (prefers-reduced-motion: reduce) {
   .mc-e__pulse, .mc-n--bad .mc-n__c { animation: none; }
@@ -1319,17 +2388,17 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   border: 1px solid color-mix(in srgb, var(--t) 55%, var(--border));
   border-radius: 14px; padding: 20px 26px; position: relative; overflow: hidden;
   box-shadow: 0 0 30px color-mix(in srgb, var(--t) 24%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 8%, transparent); }
 /* a scanline sweeps the hero — the panel is live, not printed */
 .bb-hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(105deg, transparent 42%,
-    rgba(255, 255, 255, 0.05) 50%, transparent 58%);
+    color-mix(in srgb, var(--ink-hi) 5%, transparent) 50%, transparent 58%);
   animation: bbscan 5.5s linear infinite; }
 @keyframes bbscan { from { transform: translateX(-70%); } to { transform: translateX(70%); } }
 .bb-verdict { display: flex; flex-direction: column; align-items: flex-start;
   background: none; border: none; cursor: pointer; outline: none; padding: 0; }
 .bb-verdict b { font-size: 88px; line-height: 0.95; color: var(--t);
-  text-shadow: 0 0 34px color-mix(in srgb, var(--t) 60%, transparent),
+  text-shadow: 0 0 30px color-mix(in srgb, var(--t) 60%, transparent),
     0 0 8px color-mix(in srgb, var(--t) 80%, transparent);
   animation: bbbreathe 4s ease-in-out infinite; }
 @keyframes bbbreathe {
@@ -1344,21 +2413,21 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bb-flow { display: flex; align-items: center; gap: 20px; margin-left: auto;
   flex-wrap: wrap; }
 /* the flow's wires: lit traces with a packet running them */
-.bb-wire { position: relative; width: 64px; height: 3px; border-radius: 2px;
+.bb-wire { position: relative; width: 52px; height: 3px; border-radius: 2px;
   background: color-mix(in srgb, var(--good) 35%, transparent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--good) 30%, transparent); }
 .bb-wire::after { content: ""; position: absolute; top: -2px; width: 14px; height: 7px;
-  border-radius: 4px; background: #fff;
-  box-shadow: 0 0 10px var(--good), 0 0 4px #fff;
+  border-radius: 4px; background: var(--ink-hi);
+  box-shadow: 0 0 10px var(--good), 0 0 4px var(--ink-hi);
   animation: bbpk 1.8s linear infinite; }
 .bb-wire--bad { background: color-mix(in srgb, var(--bad) 40%, transparent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--bad) 35%, transparent); }
-.bb-wire--bad::after { box-shadow: 0 0 10px var(--bad), 0 0 4px #fff;
+.bb-wire--bad::after { box-shadow: 0 0 10px var(--bad), 0 0 4px var(--ink-hi);
   animation-delay: 0.9s; }
 @keyframes bbpk { from { left: -8px; } to { left: 100%; } }
 .bb-big { display: flex; flex-direction: column; min-width: 0; }
 .bb-big b { font-size: 40px; line-height: 1.05; color: var(--ink);
-  text-shadow: 0 0 14px rgba(255, 255, 255, 0.18); }
+  text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 18%, transparent); }
 .bb-big span { font: 600 10px var(--mono); color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.1em; margin-top: 3px; }
 
@@ -1366,7 +2435,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 .bb-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .bb-sec { position: relative; overflow: hidden;
-  background: linear-gradient(180deg, #101024, #0c0c1c);
+  background: linear-gradient(180deg, var(--tint-2), #0c0c1c);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column;
   gap: 15px; box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 10%, transparent); }
@@ -1390,10 +2459,10 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
     color-mix(in srgb, var(--accent) 75%, transparent), transparent 70%);
   animation: bbline 3.2s ease-in-out infinite; }
 @keyframes bbline { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
-.bb-sec .bb-big b { font-size: 31px; }
+.bb-sec .bb-big b { font-size: 30px; }
 
 @media (max-width: 860px) { .bb-cols { grid-template-columns: 1fr; }
-  .bb-verdict b { font-size: 64px; } .bb-big b { font-size: 30px; } }
+  .bb-verdict b { font-size: 52px; } .bb-big b { font-size: 30px; } }
 @media (prefers-reduced-motion: reduce) {
   .bb-hero::after, .bb-verdict b, .bb-wire::after, .bb-sec h3::after { animation: none; }
 }
@@ -1408,14 +2477,14 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .cc-mod { animation: ccbreath var(--breath, 6s) ease-in-out infinite; }
 @keyframes ccbreath {
   0%, 100% { box-shadow: 0 0 14px color-mix(in srgb, var(--c) 18%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10); }
+    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 10%, transparent); }
   50% { box-shadow: 0 0 30px color-mix(in srgb, var(--c) 42%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14); } }
+    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 14%, transparent); } }
 /* an anomaly makes its module knock, not just glow */
-.cc-mod--pulse .tk-block__hd { color: #fff; }
+.cc-mod--pulse .tk-block__hd { color: var(--ink-hi); }
 .cc-mod--pulse .tk-block__ic svg { animation: ccknock 1.7s ease-in-out infinite; }
 @keyframes ccknock {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.5)); }
+  0%, 100% { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ink-hi) 50%, transparent)); }
   50% { filter: drop-shadow(0 0 12px var(--c)); transform: scale(1.18); } }
 /* bars grow in, one after another — the card arrives measuring */
 .cc-bar { transform-origin: bottom;
@@ -1478,8 +2547,15 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   animation-delay: 0.25s; }
 @keyframes ccbeat { 0%, 100% { r: 3; opacity: 0.75; } 50% { r: 5; opacity: 1; } }
 /* the card states what its movement means — motion is data, and says so */
+/* the card language, folded away: a key you open, not a wall you scroll past */
 .cc-motion { grid-column: 1 / -1; text-align: center; margin-top: 10px;
   font: 500 10px var(--mono); color: var(--ink-3); letter-spacing: 0.02em; }
+.cc-motion > summary { cursor: pointer; list-style: none; display: inline-block;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  color: var(--ink-3); }
+.cc-motion > summary::-webkit-details-marker { display: none; }
+.cc-motion > summary:hover { color: var(--ink-2); border-color: var(--border-2); }
+.cc-motion > span { display: block; margin-top: 8px; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .cc-bar--live, .rp-ecg__beat { animation: none; }
 }
@@ -1511,7 +2587,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .cc-mod--pick::after { border-color: color-mix(in srgb, var(--c) 70%, transparent); }
 .cc-mod--pick:hover, .cc-mod--pick:focus-visible { outline: none;
   border-color: color-mix(in srgb, var(--c) 95%, transparent); }
-.cc-mod--pick:hover .tk-block__hd, .cc-mod--pick:focus-visible .tk-block__hd { color: #fff; }
+.cc-mod--pick:hover .tk-block__hd, .cc-mod--pick:focus-visible .tk-block__hd { color: var(--ink-hi); }
 /* ─── the open box: lifted, not merely lit ───────────────────────────────
  * A glow alone was too quiet to answer "which card do the numbers below
  * belong to?" — with four cards lit the same way, the reader had to guess.
@@ -1524,13 +2600,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   transform: translateY(-3px) scale(1.025);
   border-color: color-mix(in srgb, var(--c) 100%, transparent) !important;
   box-shadow:
-    0 14px 34px -8px rgba(0, 0, 0, 0.55),
+    0 14px 30px -8px rgba(0, 0, 0, 0.55),
     0 0 0 1px color-mix(in srgb, var(--c) 70%, transparent),
-    0 0 34px color-mix(in srgb, var(--c) 42%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+    0 0 30px color-mix(in srgb, var(--c) 42%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 22%, transparent) !important;
 }
-.cc-mod--on::before, .cc-mod--on::after { border-color: #fff; }
-.cc-mod--on .tk-block__hd { color: #fff; border-bottom-color: rgba(255,255,255,0.42); }
+.cc-mod--on::before, .cc-mod--on::after { border-color: var(--ink-hi); }
+.cc-mod--on .tk-block__hd { color: var(--ink-hi); border-bottom-color: color-mix(in srgb, var(--ink-hi) 42%, transparent); }
 /* the unopened boxes step back, so "forward" has something to be forward OF */
 .cc:has(.cc-mod--on) .cc-mod--pick:not(.cc-mod--on) { opacity: 0.72; }
 
@@ -1556,7 +2632,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .mch__x { background: none; border: none; color: var(--ink-3); cursor: pointer;
   font-size: 13px; padding: 0 2px; }
 .mch__x:hover, .mch__x:focus-visible { color: var(--ink); outline: none; }
-.mch__svg { width: 100%; height: 132px; display: block; }
+.mch__svg { width: 100%; height: 130px; display: block; }
 .mch__line { fill: none; stroke: var(--m); stroke-width: 1.9;
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--m) 55%, transparent)); }
 .mch__line--fc { stroke-dasharray: 5 4; opacity: 0.9; }
@@ -1583,7 +2659,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    bar on narrow rows and shouted over the list. Outline only, sized to its
    own text, never grown by the flex row it sits in. */
 .svcf__fatal { display: inline-block; vertical-align: middle;
-  font: 700 8px var(--mono); letter-spacing: 0.07em; line-height: 1.5;
+  font: 700 9px var(--mono); letter-spacing: 0.07em; line-height: 1.5;
   color: var(--bad); background: none;
   border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
   border-radius: 3px; padding: 0 5px; margin-right: 6px; }
@@ -1607,7 +2683,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    800: modules ended up mostly air, and the viewport's lower half stayed
    empty. Everything below scales the CARD, not the numbers' meaning — the
    same content, sized to the screen it is on. */
-@media (min-width: 1280px) {
+/* The wide layout enlarges everything — a 52px core, 30px figures, 116px
+   watermarks — and those sizes were tuned on a desktop display. At 1280 they
+   also caught 13" and 15" notebooks, where the same cards no longer fit the
+   viewport height and the lower one was clipped. Notebooks now keep the
+   compact layout; the enlargement waits for a screen that can hold it. */
+@media (min-width: 1600px) {
   /* the boxes grow into the vertical room instead of leaving it blank */
   .cc .tk-col { grid-template-rows: auto auto; gap: 16px; align-content: center; }
   .cc .tk-block { padding: 16px 22px; }
@@ -1633,18 +2714,19 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   /* the numbers keep pace with the box */
   .cc .tk-stat b { font-size: 30px; }
   .cc .tk-stat span { font-size: 11px; }
-  .cc .tk-row2 { gap: 34px; }
+  .cc .tk-row2 { gap: 30px; }
   .cc .tk-chartrow { font-size: 12px; gap: 16px; }
   .cc .cc-bars { height: 30px; gap: 3px; }
   .cc .cc-bars i { width: 4px; }
   /* the core in proportion to its neighbours */
   .cc .tk-core__pct { font-size: 52px; }
-  .cc .tk-core__nm { font-size: 19px; }
+  .cc .tk-core__pct--word { font-size: 40px; }
+  .cc .tk-core__nm { font-size: 18px; }
   .cc .tk-core__ic, .cc .tk-core__ic svg { width: 40px; height: 40px; }
   .cc .tk-core__b { padding: 26px 20px 20px; }
   .cc .tk-fc { font-size: 12px; padding: 9px 16px; }
   /* the drill-downs fill the width too */
-  .mch__svg { height: clamp(132px, 22vh, 260px); }
+  .mch__svg { height: clamp(130px, 22vh, 260px); }
   .svcf__row { padding: 10px 0; font-size: 13px; }
 }
 /* very wide: hold the columns to a readable measure, centred, so a 2560px
@@ -1655,14 +2737,14 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* ─── chart hover: the value under the pointer, as the native apps do ─── */
 .mch__plot { position: relative; }
-.mch__guide { stroke: rgba(255, 255, 255, 0.45); stroke-width: 1;
+.mch__guide { stroke: color-mix(in srgb, var(--ink-hi) 45%, transparent); stroke-width: 1;
   stroke-dasharray: 3 3; pointer-events: none; }
-.mch__hit { fill: #fff; stroke: var(--m); stroke-width: 2;
+.mch__hit { fill: var(--ink-hi); stroke: var(--m); stroke-width: 2;
   filter: drop-shadow(0 0 6px var(--m)); pointer-events: none; }
 .mch__tip { position: absolute; top: 6px; pointer-events: none; z-index: 3;
   background: color-mix(in srgb, #0b0b1a 92%, transparent);
   border: 1px solid var(--border-2); border-left: 3px solid var(--m);
-  border-radius: 8px; padding: 7px 11px; min-width: 132px;
+  border-radius: 8px; padding: 7px 11px; min-width: 130px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   display: flex; flex-direction: column; gap: 3px; }
 .mch__tip-t { font: 600 10px var(--mono); color: var(--ink-3);
@@ -1685,7 +2767,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    filled — the one distinction a reader needs between a count that happened
    and a count that is projected. */
 .cc-bar--fc { background: transparent !important;
-  border: 1px solid color-mix(in srgb, var(--fcc, #fff) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fcc, var(--ink-hi)) 55%, transparent);
   border-bottom: none; opacity: 0.75; }
 
 /* A breakdown row that opens something. Only rows with a verified destination
@@ -1756,9 +2838,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
     minmax(150px, 1fr) minmax(20px, 40px)
     minmax(320px, clamp(340px, 24vw, 560px)) minmax(20px, 40px)
     minmax(150px, 1fr); }
-  /* the footnotes read as one line rather than a paragraph */
-  .cc .tk-apdex, .cc .tk-note { white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; }
+  /* THE FOOTNOTES WRAP RATHER THAN VANISH. Forcing one line with an ellipsis
+     turned "all from this application's own code or APIs" into "all from this
+     app…" — a caption cut before its verb. Two lines is the budget; past that
+     the text is too long for a footnote and belongs in a tooltip, which is
+     where the Apdex scale went. */
+  .cc .tk-apdex, .cc .tk-note { white-space: normal; line-height: 1.4; }
 }
 
 /* The bars in the header, beside the title. They belong to the card's subject
@@ -1772,7 +2857,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    standing where the series stops. */
 .tk-block__sparkv { flex: none; font: 600 9px var(--mono); font-style: normal;
   line-height: 1.25; text-align: right; text-transform: none;
-  letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.9); }
+  letter-spacing: 0.02em; color: color-mix(in srgb, var(--ink-hi) 90%, transparent); }
 
 /* the drill-down cells are anchors now, so they must not wear link chrome */
 .svcf__cell--go, a.svcf__nm, a.svcf__tr, a.svcf__f { text-decoration: none;
@@ -1814,9 +2899,416 @@ a.svcf__row { text-decoration: none; color: inherit; }
 .strato-surface:has(.strato-select-menulist) { width: max-content; max-width: 34rem; }
 .strato-select-menulist {
   background: var(--dt-colors-background-surface-default, #1b1b2c);
-  border: 1px solid var(--dt-colors-border-neutral-default, rgba(255,255,255,0.12));
+  border: 1px solid var(--dt-colors-border-neutral-default, color-mix(in srgb, var(--ink-hi) 12%, transparent));
   border-radius: 8px;
   box-shadow: 0 12px 30px -6px rgba(0, 0, 0, 0.6);
+  /* AND IT CARRIES ITS OWN CEILING, for the same reason it carries its own
+     background. Strato caps the POPPER's height from the viewport (its own
+     modifier computes `maxHeightBase - reference height - 20`), which worked
+     while the popper was the painted box. Moving the chrome onto the list to
+     fix the width left the visible panel on the one element nothing bounds —
+     so on a tenant with a dozen applications the menu ran off the bottom of
+     the screen. The list is now bounded and scrolls inside itself, and the
+     scroll stops at its own edge instead of carrying on into the page. */
+  max-height: min(52vh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 /* and the trigger itself, so the CHOSEN name is readable before opening */
 .ctl [class*="strato-select"] { min-width: 15rem; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STRATO ALIGNMENT LAYER — extracted from the Strato design-system docs.
+   One place, appended last so it wins the cascade, deletable as one block.
+
+   The authoritative values (design/design-tokens):
+     Radius   surface 12px · container 9px · field 6px · pill 9999px
+     Type     text base: DynatraceFlow/Roboto · code: Roboto Mono 12px/1.333
+     Colors   already bound to --dt-colors-* in both theme blocks above.
+
+   What this layer does NOT touch: the canvas/SVG drawings (sankey, chain
+   ribbons, ladders) — Strato has no equivalent primitives, so they keep the
+   app's own hand. Mono stays for DATA (numbers, paths, captions), as the
+   platform's own code face; CONTROLS move to the text face, which is what
+   Strato buttons and inputs use. */
+:root {
+  --r-surface:   var(--dt-borders-radius-surface-default, 12px);
+  --r-container: var(--dt-borders-radius-container-default, 9px);
+  --r-field:     var(--dt-borders-radius-field-default, 6px);
+}
+
+/* ── Surfaces & containers: one radius vocabulary ─────────────────────── */
+.panel, .dcf-shell, .flow-shell, .ntel, .rinfo,
+.app-card, .tk-core { border-radius: var(--r-surface); }
+.bc__hero, .bc__stat, .kpi, .gcol, .bc__seqs--cell,
+.bc__out-r, .bc__entry, .bc__loss, .bc__chg, .bc__scoped, .bc__fc,
+.rinfo__worth, .rinfo__so, .rinfo__stop, .tech,
+.bc__rule, .bc__jf { border-radius: var(--r-container); }
+
+/* ── Controls: Strato fields — text face, field radius, one focus ring ── */
+.flow-sel__b, .seg button, .zoomctl button, .bc__scoped-x,
+.hlbar, .drawer__x, .tab, .bc__jf-clear, .cdefs__a, .cdefs__start,
+.bc__out-x-btn, .flow-def, .rest__teach {
+  font-family: var(--sans);
+  border-radius: var(--r-field);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.bc__ticket input, .bc__cov input, .bc__ticket select {
+  font-family: var(--sans);
+  border-radius: var(--r-field);
+}
+.flow-sel__b:focus-visible, .seg button:focus-visible,
+.zoomctl button:focus-visible, .tab:focus-visible,
+.bc__ticket input:focus-visible, .bc__cov input:focus-visible,
+.drawer__x:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* ── Code face at the platform's own metric: 12px / 1.333 ─────────────── */
+.bc__seqs-p, .cdefs__p, .dt td { font-size: 12px; line-height: 1.333; }
+
+
+/* ── The top chrome stays put ─────────────────────────────────────────────
+   The platform AppHeader and the page TitleBar scrolled away with the
+   content, so on a long board the tabs and the timeframe selector — the two
+   controls a reader needs MOST while deep in a page — were gone. Both are
+   pinned; the content scrolls beneath. The header keeps the page ground so
+   nothing bleeds through it, and the z-index sits above the diagrams' own
+   stacking contexts. */
+/* The TitleBar is NOT pinned. Measured: the platform reserves a ~45px slot
+   for PageLayout.Header while the TitleBar renders 57px — it has always
+   overflowed the slot by ~12px, invisibly, because it was transparent.
+   Pinning it added an opaque ground and z-index, which turned that silent
+   overflow into "eaten text" over the first content line. The platform tabs
+   above (the actual top menu) stay pinned by the rule below; the title
+   scrolls with the page, as the platform designed it to. */
+/* WHY THE MENUS DISAPPEARED AT ALL — measured 2026-08-25: the shell wraps
+   [header 30px, app column 100vh] in a plain div, so the page is 100vh+32
+   tall and the WINDOW scrolls exactly one menu-height before the app's own
+   scroller (main) even starts. No sticky needed: fit the pair to the
+   viewport and the window has nothing to scroll — tabs, TitleBar and the
+   selectors stay put, main scrolls beneath them, and nothing floats over
+   content (the two earlier sticky attempts both did). NOTE: :has() cannot
+   nest, which is how the first draft of this rule failed silently. */
+div:has(> header):has(main) {
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden;
+}
+div:has(> header):has(main) > div {
+  flex: 1; min-height: 0; height: auto !important;
+}
+
+
+/* access and health by location — share of traffic as the bar, the judgement
+   as the tone, against the application's own error share */
+.geo__rows { display: flex; flex-direction: column; gap: 5px; }
+/* the traffic light's rulebook: one quiet line, dots matching the map */
+.geo__rule {
+  margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; line-height: 1.6;
+  color: var(--ink-3); letter-spacing: .02em;
+}
+.geo__rule i {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin: 0 3px 0 6px; vertical-align: baseline;
+}
+.geo__rule i:first-child { margin-left: 0; }
+.geo__r { display: grid; grid-template-columns: auto 2.1rem minmax(0, 6.5rem) 1fr auto minmax(5.6rem, auto) 3.4rem;
+  align-items: center; gap: 8px; }
+.geo__lat { font: 500 10px var(--mono); font-style: normal; text-align: right;
+  color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.geo__lat--good { color: var(--good); }
+.geo__lat--warn { color: var(--warn); }
+.geo__lat--bad { color: var(--bad); font-weight: 700; }
+.geo__nm { font: 400 11px var(--sans); color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.geo__cc { font: 700 12px var(--mono); color: var(--ink-hi); letter-spacing: .06em; }
+.geo__t { height: 9px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink-hi) 6%, transparent); }
+.geo__b { display: block; height: 100%; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.geo__n { font: 700 11px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.geo__h { font: 500 10px var(--mono); font-style: normal; text-align: right; white-space: nowrap; }
+.geo__h--good { color: var(--good); }
+.geo__h--warn { color: var(--warn); }
+.geo__h--bad { color: var(--bad); font-weight: 700; }
+
+/* map + legend, side by side like the platform's own geo tiles; the list IS
+   the legend — same colours, same judgement, ranked by volume */
+.geo__wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(19rem, 24rem);
+  gap: 16px; align-items: start; }
+@media (max-width: 900px) { .geo__wrap { grid-template-columns: 1fr; } }
+.geo__map > div { border-radius: var(--r-container); overflow: hidden; }
+.geo__dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+/* the geo drill — one country opened, its screens, and the platform hand-off */
+.geo__r { background: none; border: none; text-align: left; cursor: pointer;
+  border-radius: 7px; padding: 3px 6px; }
+.geo__r:hover { background: color-mix(in srgb, var(--ink-hi) 6%, transparent); }
+.geo__r--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.geo__drill { border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 9px; }
+.geo__drill-hd { display: flex; align-items: baseline; gap: 10px; }
+.geo__drill-hd b { font: 700 15px var(--mono); color: var(--ink-hi); letter-spacing: .08em; }
+.geo__drill-hd span { font: 400 11px var(--mono); color: var(--ink-3); }
+.geo__drill-x { margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--ink-3); font-size: 12px; }
+.geo__drill-x:hover { color: var(--ink-hi); }
+.geo__drill-rows { display: flex; flex-direction: column; gap: 4px; }
+.geo__dr { display: grid; grid-template-columns: minmax(0, 18rem) 1fr auto minmax(5rem, auto);
+  align-items: center; gap: 10px; }
+.geo__dr-v { font: 500 11px var(--mono); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.geo__dr b.num { font: 700 11px var(--mono); font-variant-numeric: tabular-nums; }
+.geo__drill-none { font: 400 11px var(--mono); color: var(--ink-3); }
+.geo__drill-go { align-self: flex-start; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: var(--r-field, 6px); padding: 7px 14px;
+  font: 700 11px var(--sans); color: var(--accent); }
+.geo__drill-go:hover { background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--ink-hi); }
+/* the target picker — siblings of the layer as chips, aching first: the
+   reader chooses WHO to investigate right where the routes live */
+.tpick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 2px 0 10px; }
+.tpick__l { font: 700 9px var(--mono); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-3); margin-right: 2px; }
+.tpick__c { display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 9999px; cursor: pointer;
+  border: 1px solid var(--border); background: none;
+  font: 500 11px var(--mono); color: var(--ink-2); }
+.tpick__c i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
+.tpick__c--warn i { background: var(--warn); }
+.tpick__c--bad i { background: var(--bad); }
+.tpick__c--bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+  color: var(--ink); }
+.tpick__c--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.tpick__c--on { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink-hi); }
+.tpick__c b { font: 700 10px var(--mono); color: var(--bad); }
+.tpick__c:hover { border-color: var(--accent); color: var(--ink-hi); }
+.tpick__more { font: 400 10px var(--mono); color: var(--ink-3); }
+
+/* a poster scan that failed — a sentence and a retry, never a silent
+   empty poster wearing a stale header */
+.rinfo--err { position: fixed; inset: 0; margin: auto; width: min(420px, 90vw);
+  height: max-content; padding: 22px; display: flex; flex-direction: column;
+  gap: 14px; align-items: flex-start; z-index: 60;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--ink); font: 500 13px var(--sans); }
+.rinfo--err > div { display: flex; gap: 10px; align-items: center; }
+
+/* a tier that found nothing shows a dash, in ink — not a verdict colour,
+   because "nothing measured" is not a health judgement */
+.bsum__v--none { color: var(--ink-3); }
+
+/* the export button, SAID in words — a bare "⬇" reused the close-button
+   shape, rendered as tofu in some fonts, and the reader could not find the
+   download at all. One shared style for the poster and the board. */
+/* the accent at 11px measured 3.9:1 on the bar — same treatment as the
+   other accent-coloured microtype: the hue stays, the weight rises */
+.export-btn { display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-field, 6px); cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font: 700 11px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 45%, var(--ink-hi)); white-space: nowrap; }
+.export-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--ink-hi); }
+.export-btn:disabled { opacity: .6; cursor: progress; }
+
+/* the drawer's ONE primary action — the technical route's first step worn as
+   a real button, standing where three persona walls used to open */
+.drill-primary { display: block; margin: 10px 0 2px; padding: 9px 14px;
+  border-radius: var(--r-field, 6px); text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font: 700 12px var(--sans); color: var(--accent); }
+.drill-primary:hover { background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--ink-hi); }
+/* the healthy verdict line — same anatomy as the aching one, green voice */
+.elsum__v--good { color: var(--good); }
+
+/* the second door: same shape, the error red — an <a>, so kill the underline */
+.geo__drill-go--err { text-decoration: none; display: inline-block; margin-left: 8px;
+  border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad); }
+.geo__drill-go--err:hover { background: color-mix(in srgb, var(--bad) 22%, transparent);
+  color: var(--ink-hi); }
+
+/* what sets the region apart — the drill's foot, laid out as it deserves:
+   the verdict is a callout, the characteristics are pill cards with their
+   lift worn as a badge, and the exit is a real button. Loose prose over
+   loose chips over a bare link was a findings section dressed as leftovers. */
+.geo__who { display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 11px; }
+.geo__who-g { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px 8px; }
+.geo__who-l { flex-basis: 100%; font: 700 9px var(--mono); letter-spacing: .11em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 1px; }
+.geo__who-l--bad { color: var(--bad); }
+.geo__who-r { display: inline-flex; align-items: center; gap: 7px;
+  font: 400 11px var(--mono); color: var(--ink-2);
+  border: 1px solid var(--border); border-radius: var(--r-field, 6px);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  padding: 5px 10px; }
+.geo__who-r b { color: var(--ink-hi); font-weight: 700; font-size: 12px; }
+.geo__who-r em { font-style: normal; font-size: 9px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .05em; }
+.geo__who-r i { font-style: normal; font: 700 10px var(--mono); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 999px; padding: 1px 8px; }
+.geo__who-x { color: var(--bad) !important;
+  background: color-mix(in srgb, var(--bad) 14%, transparent) !important; }
+.geo__who-g--bad .geo__who-r { border-color: color-mix(in srgb, var(--bad) 40%, var(--border));
+  background: color-mix(in srgb, var(--bad) 7%, transparent); }
+.geo__who-none { font: 400 12px var(--mono); color: var(--ink-2); line-height: 1.55;
+  border: 1px solid color-mix(in srgb, var(--good) 35%, var(--border));
+  background: color-mix(in srgb, var(--good) 7%, transparent);
+  border-radius: var(--r-container, 9px); padding: 9px 12px; }
+.geo__who-none b { color: var(--good); }
+
+/* the animated pins the DotLayer draws — shape is a ReactNode, so the map
+   itself can move: problem countries pulse a sonar ring, the busiest breathe */
+.geo__map { position: relative; }
+.geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.gpin { position: absolute; transform: translate(-50%, -50%);
+  border: none; cursor: pointer; pointer-events: auto;
+  border-radius: 50%; padding: 0; }
+.gpin--sel { outline: 2px solid var(--ink-hi); outline-offset: 2px; }
+.gpin__lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  margin-top: 3px; display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
+  font: 700 10px var(--sans); color: var(--ink-hi);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  padding: 1px 7px; border-radius: 999px; }
+.gpin__lbl em { font-style: normal; font: 700 10px var(--mono); color: var(--ink-2); }
+/* THEME TOKENS, not the canvas hexes — the HTML pins live in the page and
+   must follow the light theme like every other verdict on screen (only the
+   canvas DotLayer, which paints outside CSS, keeps GEO_COL's literals). */
+.gpin--good { background: color-mix(in srgb, var(--good) 75%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--good) 45%, transparent); }
+.gpin--warn { background: color-mix(in srgb, var(--warn) 82%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--warn) 50%, transparent); }
+.gpin--bad { background: color-mix(in srgb, var(--bad) 85%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--bad) 60%, transparent); }
+.gpin--bad::before, .gpin--bad::after { content: ""; position: absolute; inset: 0;
+  border-radius: 50%; border: 2px solid var(--bad); animation: gsonar 2.2s ease-out infinite; }
+.gpin--bad::after { animation-delay: 1.1s; }
+.gpin--warn::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--warn); animation: gsonar 3.2s ease-out infinite; }
+.gpin--busy { animation: gbreathe 3.4s ease-in-out infinite; }
+@keyframes gsonar {
+  0% { transform: scale(1); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes gbreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gpin--bad::before, .gpin--bad::after, .gpin--warn::before { animation: none; opacity: .5; }
+  .gpin--busy { animation: none; }
+}
+
+/* rows are <button>s now, and a bare button paints BLACK text — which on the
+   dark ground read as the unreadable numbers. Colour is set explicitly. */
+.geo__dr--btn { background: none; border: none; text-align: left; cursor: pointer;
+  border-radius: 6px; padding: 2px 6px; width: 100%; color: var(--ink-2); }
+.geo__dr--btn .num { color: var(--ink-hi); }
+.geo__dr--on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.geo__r { color: var(--ink-2); }
+.geo__r .num { color: var(--ink-hi); }
+.geo__dr--btn:hover { background: color-mix(in srgb, var(--ink-hi) 6%, transparent); }
+.geo__dr--btn:hover .geo__dr-v { color: var(--accent); }
+
+.geo__who-r--go { cursor: pointer; }
+.geo__who-r--go:hover { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THIN DATA, TWO PLATFORMS, AND NO APPLICATION AT ALL
+   Three states the product used to answer with either a confident-looking
+   wrong number or a blank page. Each one now says what it knows and what it
+   does not, in the same voice as the measured views.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* WHOSE FUNNEL THIS IS. One RUM application id can carry both an iOS and an
+   Android frontend; the rungs belong to the busier one and this names the
+   other, so the number is never read as the whole application. */
+.bc__fun-scope { font: 400 var(--fs-mini) var(--mono); color: var(--ink-3);
+  line-height: 1.5; padding: 0 0 6px; border-bottom: 1px dashed var(--border);
+  margin-bottom: 8px; }
+.bc__fun-scope b { color: var(--ink-2); font-weight: 600; }
+
+/* BELOW THE SAMPLE FLOOR there are no rungs at all — a statement, not a chart. */
+.bc__fun--thin { padding: 2px 0; }
+.bc__fun-none { font: 400 var(--fs-small) var(--mono); color: var(--ink-2);
+  line-height: 1.6; padding: 12px 14px; border-radius: 6px;
+  background: var(--panel); border-left: 3px solid var(--warn); }
+.bc__fun-none b.num { color: var(--ink-hi); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+
+/* THE LOOP IS THE FINDING. A route that goes round the same three screens
+   seven times says something a hundred arrows cannot. */
+.bc__seqs-rep { flex: none; font: 700 10px var(--mono); color: var(--warn);
+  padding: 0 3px; border-radius: 3px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.bc__seqs-more { flex: none; font: 400 10px var(--mono); font-style: normal;
+  color: var(--ink-3); }
+
+/* NO RUM APPLICATION — the OpenTelemetry-first case. */
+.norum { display: flex; flex-direction: column; gap: 18px; max-width: 62rem; }
+.norum__hd h2 { margin: 0 0 6px; font: 600 var(--fs-head) var(--sans);
+  color: var(--ink-hi); }
+.norum__hd p { margin: 0; font: 400 var(--fs-body) var(--sans); color: var(--ink-2);
+  line-height: 1.6; }
+.norum__probe { font: 400 var(--fs-small) var(--mono); color: var(--ink-3); }
+.norum__probe--bad { color: var(--bad); }
+.norum__facts { display: flex; flex-wrap: wrap; gap: 10px; }
+.norum__f { flex: 1 1 10rem; display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border-radius: 6px; background: var(--panel);
+  border-left: 3px solid var(--accent); }
+.norum__f--bad { border-left-color: var(--bad); }
+.norum__f b.num { font: 700 26px var(--mono); line-height: 1; color: var(--ink-hi);
+  font-variant-numeric: tabular-nums; }
+.norum__f span { font: 600 var(--fs-micro) var(--mono); text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink-3); }
+.norum__verdict p { margin: 0; font: 400 var(--fs-body) var(--sans);
+  color: var(--ink-2); line-height: 1.65; }
+.norum__verdict b { color: var(--ink-hi); }
+.norum__split { display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); align-items: start; }
+.norum__col { padding: 12px 14px; border-radius: 6px; background: var(--panel);
+  border-left: 3px solid var(--border); }
+.norum__col--no { border-left-color: var(--bad); }
+.norum__col--ok { border-left-color: var(--good); }
+.norum__col-l { display: block; font: 600 var(--fs-micro) var(--mono);
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3);
+  margin-bottom: 8px; }
+.norum__col ul { margin: 0; padding-left: 1.1rem; display: flex;
+  flex-direction: column; gap: 4px; }
+.norum__col li { font: 400 var(--fs-small) var(--sans); color: var(--ink-2);
+  line-height: 1.5; }
+.norum__col li b { color: var(--ink-hi); font-weight: 600; }
+.norum__col p { margin: 10px 0 0; font: 400 var(--fs-small) var(--sans);
+  color: var(--ink-3); line-height: 1.6; }
+
+/* A ROUTE THAT CHURNS is described, not drawn: 112 steps over 11 screens is a
+   sentence, and a hundred arrows saying the same thing is a wall. */
+.bc__seqs-churn { min-width: 0; font: 400 var(--fs-small) var(--mono);
+  color: var(--ink-2); line-height: 1.55; }
+.bc__seqs-churn b.num { color: var(--warn); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.bc__seqs-churn span { font-weight: 500; color: var(--ink-hi); }
+
+/* AN OFFER, NOT A CHARGE. The card that cannot answer for free says what the
+   deeper read would cost and hands the decision to a person. Sized like a
+   caption so it never competes with the measurements around it. */
+.gnode__act { margin-top: 4px; font: 600 10px var(--mono); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 5px; padding: 3px 7px; cursor: pointer; white-space: nowrap; }
+.gnode__act:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.gnode__act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -14,10 +14,10 @@
 // classic entity id, not by the Smartscape routing key.
 import { getIntentLink, sendIntent } from "@dynatrace-sdk/navigation";
 import { getEnvironmentUrl } from "@dynatrace-sdk/app-environment";
-import { type Timeframe } from "./dql";
+import { fmtN, type Timeframe } from "./dql";
 import {
   intentFor, K8S_NODE_BY_APP, SERVICE_RESPONSE_TIME,
-  SESSION_CLASSIC, SESSION_GEN3, SESSIONS_LIST, TRACES_LIST, type IntentRef,
+  SESSION_GEN3, SESSIONS_LIST, TRACES_LIST, type IntentRef,
 } from "./intents";
 import type { AppMap, Capability } from "../hooks/useApps";
 
@@ -99,6 +99,39 @@ const aLink = (
 
 
 
+/**
+ * EXPLAIN THIS PAGE — the whole screen handed to Assist, grounded.
+ *
+ * The chain's routes ask Assist about ONE element. A reader looking at the
+ * diagram or the board has a different question — "what is this telling me" —
+ * and answering it means giving Assist the page's own measured facts rather
+ * than letting it guess from a title. So the caller passes the numbers it is
+ * already showing, verbatim, and the instruction forbids inventing any other.
+ *
+ * Assist opens beside the page (see open()), so the reader keeps the screen
+ * the answer is about.
+ */
+export function explainStep(subject: string, facts: string): DeepLink {
+  return link(`Explain ${subject}`, "Assist reads what is on this page", {
+    prompt: (`Explain what this ${subject} is telling me, in plain business `
+      + "language. Say what stands out, what it means for customers, and what "
+      + "I should look at next.").slice(0, PROMPT_MAX),
+    execute: false,
+    contexts: [
+      { type: "supplementary", value: facts.slice(0, SUPP_MAX) },
+      { type: "instruction", value:
+        "Every number you cite must come from the facts below — never invent "
+        + "one, never estimate, and say plainly when something is not measured "
+        + "there. Lead with what the reader should care about, keep it to a "
+        + "few short bullets, and name the specific screens, routes or "
+        + "countries involved rather than giving generic advice." },
+      { type: "document-retrieval", value: "dynatrace" },
+      { type: "origin-app", value: "my.deliverychain.ux" },
+    ],
+  }, { keyProperties: ["prompt"], proves: "what this page measures, read back in words",
+       ...ASSIST });
+}
+
 type IntentPayload = Record<string, unknown>;
 
 /**
@@ -179,6 +212,49 @@ const filterChip = (label: string, value: string) =>
  * lands on the same view the app opens itself rather than on whichever one the
  * intent happens to default to.
  */
+/**
+ * THE COMPLETE OBSERVED FILTER VOCABULARY of Users & Sessions — every facet
+ * copied verbatim from a URL the reader produced by hand (2026-08-25):
+ *
+ *   Frontends = X · Frontends in (A, B) · Location = Japan
+ *   "Has Errors" = "With Errors" | "Without Errors"
+ *   "App Version" = 6 · "OS Name" = Linux · "Device Type" = Desktop
+ *   "User Type" = "Real Users" | Bots · "Error Type" = ANR
+ *   Browser = Chrome · "Has Replay" = "With Replay"
+ *   "Has Session Properties" = … · "Bounced Sessions" = Yes
+ *   "View Name" = "/…"                       (earlier observed URL)
+ *
+ * One chip per fact; a single unknown chip makes the platform reject the
+ * WHOLE segment (measured: Country = US silently killed every chip beside
+ * it) — which is why nothing here may be guessed, only copied.
+ */
+const chipV = (v: string) =>
+  /^[\w.:@/-]+$/.test(v) ? v : `"${v.replace(/["\\]/g, "")}"`;
+export const SESSION_CHIP = {
+  location: (enName: string) => `Location = ${chipV(enName)}`,
+  /** ERROR INSPECTOR only — not a Sessions facet; in the Sessions bar it
+   *  poisons the whole segment (measured from the reader's screenshot). */
+  view: (view: string) => `"View Name" = ${chipV(view)}`,
+  realUsers: () => `"User Type" = "Real Users"`,
+  bots: () => `"User Type" = Bots`,
+  withErrors: () => `"Has Errors" = "With Errors"`,
+  withoutErrors: () => `"Has Errors" = "Without Errors"`,
+  browser: (name: string) => `Browser = ${chipV(name)}`,
+  osName: (name: string) => `"OS Name" = ${chipV(name)}`,
+  deviceType: (t: string) => `"Device Type" = ${chipV(t)}`,
+  appVersion: (v: string) => `"App Version" = ${chipV(v)}`,
+  errorType: (t: string) => `"Error Type" = ${chipV(t)}`,
+  bounced: () => `"Bounced Sessions" = Yes`,
+  withReplay: () => `"Has Replay" = "With Replay"`,
+  // from the filter bar's own key-suggestion list (screenshot, 2026-08-25):
+  browserVersion: (v: string) => `"Browser Version" = ${chipV(v)}`,
+  osVersion: (v: string) => `"OS Version" = ${chipV(v)}`,
+  clientIsp: (v: string) => `"Client ISP" = ${chipV(v)}`,
+} as const;
+/** Compose chips into one segment — empty entries drop out. */
+export const chips = (...cs: Array<string | false | null | undefined>) =>
+  cs.filter(Boolean).join(" ");
+
 export const sessionsLink = (
   tf: Timeframe, appName: string, sessions: number,
   /**
@@ -197,7 +273,7 @@ export const sessionsLink = (
   segmentLabel?: string,
 ): DeepLink =>
   link(segmentLabel ?? "Analyze user sessions",
-    `Users & Sessions · ${sessions.toLocaleString()} sessions · ${tf.label}`,
+    `Users & Sessions · ${fmtN(sessions)} sessions · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
       "explorer.properties": {
@@ -225,12 +301,22 @@ export const sessionsLink = (
  * bare. Note the vocabulary shift: the chain's card says "Robots" (RUM's
  * user_type is "robot"), the bar says "Bots". This map absorbs it.
  *
- * Synthetic and real users are ABSENT deliberately: their facet values have
- * not been observed yet. Add them here from a url, never from a guess — those
- * segments open the frontend-wide list until then.
+ * Synthetic is ABSENT deliberately: its facet value has not been observed
+ * yet ("Real Users" WAS observed 2026-08-25 and feeds Browsers). Add entries
+ * here from a url, never from a guess — chip-less segments open the
+ * frontend-wide list with a label that admits it.
  */
 const SESSION_SEGMENT_CHIP: Record<string, [chip: string, label: string]> = {
   Robots: ['"User Type" = Bots', "See these bot sessions"],
+  /* observed 2026-08-25 in the reader's own filter-bar url (the same chip
+   * the geo hand-off carries): the Browsers card now opens PEOPLE, not the
+   * frontend-wide list with bots and monitors mixed in */
+  Browsers: ['"User Type" = "Real Users"', "See these real-user sessions"],
+  /* Mobile deliberately ABSENT: no mobile-device facet has been observed in
+   * the bar, and the "Real Users" chip opened desktop people while excluding
+   * the card's own mobile robots — a list that matched neither the count nor
+   * the subject. Until a real chip is read off a url, the Mobile card gets
+   * the frontend-wide door with a label that says so. */
 };
 
 /**
@@ -364,7 +450,7 @@ export const errorsExplorerHref = (
  * filter string at all.
  */
 export const errorsLink = (tf: Timeframe, appName: string, errors: number): DeepLink =>
-  link("Inspect errors", `Error Inspector · ${errors.toLocaleString()} errors · ${tf.label}`,
+  link("Inspect errors", `Error Inspector · ${fmtN(errors)} errors · ${tf.label}`,
     {}, { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
       proves: "every error of this application, ranked by users affected" });
 
@@ -373,7 +459,7 @@ export const errorsLink = (tf: Timeframe, appName: string, errors: number): Deep
  * with object values JSON-encoded. Verified by hand against this tenant for
  * the Error Inspector and the sessions explorer.
  */
-function intentUrl(appId: string, intentId: string, payload: IntentPayload): string {
+export function intentUrl(appId: string, intentId: string, payload: IntentPayload): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(payload)) {
     if (v === undefined || v === null) continue;
@@ -405,6 +491,19 @@ function safeLink(payload: IntentPayload, appId?: string, intentId?: string): st
   const useless = !viaSdk || /^https:\/\/(www\.)?dynatrace\.com\/?$/.test(viaSdk);
   if (!useless) return viaSdk;
   return appId && intentId ? intentUrl(appId, intentId, payload) : "#";
+}
+
+/**
+ * An app's own front door — `/ui/apps/<id>` — absolute so it survives the
+ * iframe. The backend summary hands whole subjects to the apps that manage
+ * them, and an app's home is the one url that needs no observed grammar.
+ */
+export function appHomeHref(appId: string): string {
+  const path = `/ui/apps/${appId}`;
+  try {
+    const base = getEnvironmentUrl();
+    return base ? new URL(path, base).toString() : path;
+  } catch { return path; }
 }
 
 let runtime: boolean | null = null;
@@ -487,6 +586,11 @@ export interface LinkContext {
   /** The scoped application's display name — what the Error Inspector's
    *  filter bar matches on. An origin card's own `name` is "Mobile". */
   scopedAppName?: string;
+  /** The name Users & Sessions filters by — frontend.name from the session
+   *  store, NOT the inventory name. Measured: "EasyTrade Live Debugger" the
+   *  entity vs "EasyTrade_Live_Debugger" the frontend; the wrong one is
+   *  accepted by the bar and matches nothing. */
+  scopedFrontend?: string;
   /**
    * The scoped application's own classic entity id, when RUM resolved one —
    * the id `dt.entity.application` hops actually need. `rumAppId` alone
@@ -511,6 +615,11 @@ export interface LinkContext {
   /** Errors measured on this element, so the route can offer the app that
    *  exists to explain them rather than only apps that summarise them. */
   errors?: number;
+  /** The classic PROCESS_GROUP_INSTANCE ids a service runs on — a VM
+   *  service's logs carry NO dt.entity.service (measured: 0 rows for
+   *  easyTravel Customer Frontend against 14,543 by its PGI), so the logs
+   *  hop needs the process arms or it opens empty while looking wired. */
+  logPgis?: string[];
   /** Sessions measured on this element — an origin card's own count, so the
    *  sessions hand-off is offered exactly when there is something to list. */
   sessions?: number;
@@ -610,6 +719,16 @@ export type NodeKind =
   | "origin" | "domain3p" | "domain1p" | "store"
   | "element";
 
+/** What each kind is CALLED where a reader can see it — the drawer header
+ *  used to say "Selected link · layer 05" about a database ("ainda confuso");
+ *  Assist reads the same words, so the two never disagree. */
+export const KIND_LABEL: Record<NodeKind, string> = {
+  service: "service", host: "host", pod: "pod", node: "node", process: "process",
+  webApp: "web application", mobileApp: "mobile application",
+  origin: "traffic segment", domain3p: "third-party domain",
+  domain1p: "first-party domain", store: "data store", element: "element",
+};
+
 export function kindOf(
   tier: number, e: { ids?: string[]; store?: string; domain?: string },
 ): NodeKind {
@@ -620,6 +739,13 @@ export function kindOf(
   const ids = e.ids ?? [];
   if (ids.some((i) => i.startsWith("MOBILE_APPLICATION-"))) return "mobileApp";
   if (ids.some((i) => /^(?:CUSTOM_)?APPLICATION-/.test(i))) return "webApp";
+  /* Smartscape's own id for a RUM application. Tenants that retired the
+   * classic model carry FRONTEND- and nothing else, and without this line a
+   * RUM application fell through to "element" — losing the entire app route,
+   * Error Inspector included, on an app whose verdict read "20% of real-user
+   * sessions hit by errors" (the reader caught it). The classic branches
+   * stay first: they distinguish mobile from web, which this id cannot. */
+  if (ids.some((i) => i.startsWith("FRONTEND-"))) return "webApp";
   if (ids.some((i) => i.startsWith("SERVICE-"))) return "service";
   if (ids.some((i) => i.startsWith("HOST-"))) return "host";
   if (ids.some((i) => i.startsWith("K8S_POD-"))) return "pod";
@@ -661,7 +787,7 @@ function domainTracesLink(address: string, apps: AppMap | undefined, tf: Timefra
  * when every step it needs can be keyed on something this element actually has.
  */
 export function investigationPaths(
-  { ids, name, tf, rumAppId, scopedAppName, scopedEntity, kind, errors, sessions,
+  { ids, name, tf, rumAppId, scopedAppName, scopedFrontend, scopedEntity, kind, errors, logPgis, sessions,
     crashes, dbEntity, problem, problems = 0,
     problemHints = [], domain, domainHasSpans = false, facts,
     assist = false, apps = {}, impacted, signals = 0, forecastRising = false }: LinkContext,
@@ -789,15 +915,7 @@ export function investigationPaths(
     && !forecastRising && !(impacted && impacted.hit > 0);
 
   const facts_ = (facts?.lines ?? []).join(" ");
-  // Assist's own words for what it is looking at — now read straight off
-  // `kind` instead of re-deriving a second, looser classification from the
-  // same ids a few lines above.
-  const KIND_WORD: Record<NodeKind, string> = {
-    service: "service", host: "host", pod: "pod", node: "node", process: "process",
-    webApp: "web application", mobileApp: "mobile application",
-    origin: "traffic segment", domain3p: "third-party domain",
-    domain1p: "first-party domain", store: "data store", element: "element",
-  };
+  const KIND_WORD = KIND_LABEL;
   /* Where this drill-down CAME FROM travels with the question.
    *
    * Measured failure, screenshotted: asked about the "Mobile" segment,
@@ -941,39 +1059,59 @@ export function investigationPaths(
         // the tracing step needs no lookup: the filter is built from the id the
         // node already carries, so it is always offered and always complete
         tListLink(svc!),
-        // Two keys, not one. Only 116k of 2.1M log lines here carry
-        // dt.entity.service — the rest are attributed to the container that
-        // wrote them, and the container name matches the service's short name
-        // (frontend, cartservice, checkoutservice…). Filtering on the entity id
-        // alone opens an empty screen for most services; this finds both.
+        // THREE keys, because log records are attributed three ways on this
+        // tenant. ~20% carry dt.entity.service (k8s-side); most k8s lines
+        // carry the CONTAINER, whose name matches the service's short name
+        // (frontend, cartservice…); and a VM service's lines carry only its
+        // PROCESS — measured: the easyTravel Customer Frontend drilldown
+        // returned 0 rows by service id over 7 DAYS while its PGI held
+        // 14,543 in 24h. The process arms come from the same runs_on scope
+        // the chain already resolved.
         qLink("Read what it logged", "The lines the code wrote while it was failing.",
           "newest first",
           `fetch logs | filter dt.entity.service == "${svc}"`
           + ` or k8s.container.name == "${shortName(name)}"`
+          + (logPgis ?? []).slice(0, 5)
+            .map((p) => ` or dt.entity.process_group_instance == "${p.replace(/["\\]/g, "")}"`)
+            .join("")
           + " | sort timestamp desc", "logs"),
       );
       break;
     case "pod": case "node": {
       const k = pod ?? node!;
-      if (appStart) tech.unshift(appStart);
-      tech.push(
+      // Healthy machinery leads with its OWN app — the reader opened a pod to
+      // see the pod. "Start where it surfaces" is an incident move: it leads
+      // only when users are actually feeling something.
+      if (appStart && !healthy) tech.unshift(appStart);
+      /* CLASSIC id or NO LINK. The Smartscape routing key resolves the
+       * intent, navigates, and lands on a 404 — which reads as working
+       * (documented above); falling back to it reintroduced that exact
+       * failure whenever the classic id was missing. */
+      const kClassic = pod ? podClassic : nodeClassic;
+      if (kClassic) tech.push(
         eLink(pod ? "Open the pod" : "Open the node",
           "Its workload, placement and resource pressure.",
-          // pods are addressed by their classic entity id, not the Smartscape
-          // routing key — that key matched no app at all
           pod ? "dt.entity.cloud_application_instance" : "dt.entity.kubernetes_node",
-          (pod ? podClassic : nodeClassic) ?? k, "kubernetes",
+          kClassic, "kubernetes",
           !pod ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined),
-        // pods and nodes are named, not keyed, in log records
-        qLink("Read what it logged", "The container output around the failure.",
-          "newest first",
-          `fetch logs | filter ${pod ? "k8s.pod.name" : "k8s.node.name"} == "${shortName(name)}"`
-          + " | sort timestamp desc", "logs"),
+        // pods and nodes are named, not keyed, in log records. SINGLE
+        // elements only: a GROUP card's `name` is its display label, and the
+        // audit caught `k8s.node.name == "Nodes running this app"` — a
+        // filter that matches nothing while looking wired. Group = more than
+        // one id of the RELEVANT prefix (a single pod card still carries its
+        // node's ids too, which sank a plain ids-length test).
+        ...(ids.filter((i) => i.startsWith(pod ? "K8S_POD-" : "K8S_NODE-")).length <= 1 ? [
+          qLink("Read what it logged", "The container output around the failure.",
+            "newest first",
+            `fetch logs | filter ${pod ? "k8s.pod.name" : "k8s.node.name"} == "${shortName(name)}"`
+            + " | sort timestamp desc", "logs"),
+        ] : []),
       );
+      if (appStart && healthy) tech.push(appStart);
       break;
     }
     case "host":
-      if (appStart) tech.push(appStart);
+      if (appStart && !healthy) tech.push(appStart);
       tech.push(
         eLink("Open the host", "The machine's processes, saturation and events.",
           "dt.entity.host", host!, "hosts"),
@@ -981,6 +1119,7 @@ export function investigationPaths(
           "newest first", `fetch logs | filter dt.entity.host == "${host}"`
           + " | sort timestamp desc", "logs"),
       );
+      if (appStart && healthy) tech.push(appStart);
       break;
     case "webApp": case "mobileApp":
       tech.push(
@@ -997,7 +1136,10 @@ export function investigationPaths(
        * ranking them by users affected. It leads the route when the element is
        * failing — the errors ARE the root cause evidence — and stays available
        * behind the overview when it is not. */
-      if (errors && errors > 0) {
+      // One inspector per route: when the mobile crash step is present it
+      // leads and SUBSUMES the generic errors step — the same app twice with
+      // different filters reads as a doubt, and the rule is that there is none.
+      if (errors && errors > 0 && !(kind === "mobileApp" && crashes && crashes > 0)) {
         const insp = errorsLink(tf, name, errors);
         /* The hints regex only saw Davis problems — an application with a
          * third of its sessions hit but no active problem still filed its
@@ -1013,16 +1155,17 @@ export function investigationPaths(
        * then the vitals. */
       if (kind === "mobileApp" && crashes && crashes > 0) {
         tech.unshift(link("Inspect the crashes",
-          `Error Inspector · ${crashes.toLocaleString()} crashes · ${tf.label}`, {},
+          `Error Inspector · ${fmtN(crashes)} crashes · ${tf.label}`, {},
           { app: "Error Inspector",
             href: errorsExplorerHref(tf, name, undefined, "Crash"),
             proves: "every crash, ranked by users affected" }));
       }
       break;
     case "process":
-      if (appStart) tech.push(appStart);
+      if (appStart && !healthy) tech.push(appStart);
       tech.push(eLink("Open the process", "The running process, its host and technology.",
         "dt.entity.process_group_instance", pgi!, "processes"));
+      if (appStart && healthy) tech.push(appStart);
       break;
     case "origin":
       /* Gen3-first, and an ENTITY app before a query app. The route used to
@@ -1046,10 +1189,34 @@ export function investigationPaths(
        * been observed in that bar. A wrong chip opens the explorer unfiltered
        * and reads as a working button — the exact failure the Error
        * Inspector hand-off had. Mobile chains get the Vitals hop below. */
-      if (sessions && sessions > 0 && scopedAppName
-          && !scopedEntity?.startsWith("MOBILE_APPLICATION-")) {
+      /* THE RESOLVED FRONTEND NAME ONLY. Falling back to the inventory name
+       * while useFrontendNames was still scanning re-created the documented
+       * failure ("EasyTrade Live Debugger" vs "EasyTrade_Live_Debugger" —
+       * empty list that reads as "no sessions"), so with no resolved name
+       * there is no link: a missing button is honest, a wrong filter lies.
+       * The entity gate also requires a KNOWN entity — undefined once passed
+       * the mobile test and offered a mobile app to the web-only bar. */
+      if (sessions && sessions > 0 && scopedFrontend && scopedEntity
+          && !scopedEntity.startsWith("MOBILE_APPLICATION-")) {
         const seg = SESSION_SEGMENT_CHIP[name];
-        tech.push(sessionsLink(tf, scopedAppName, sessions, seg?.[0], seg?.[1]));
+        tech.push(sessionsLink(tf, scopedFrontend, sessions,
+          seg?.[0], seg?.[1]));
+      }
+      // The Synthetic segment's own app: its traffic IS monitors, and the
+      // registry declares the exact intent for "which monitors watch this
+      // application" — view_monitor_list_filtered_by_entity_ids, required
+      // prop dt.synthetic.monitored_entity_ids (array). Fed the scoped
+      // application's entity, it lists precisely the monitors generating
+      // this segment, not the whole estate.
+      /* No entity, no door: the fallback opened the Synthetic app HOME —
+       * the whole estate's monitors wearing a scoped label. */
+      if (name === "Synthetic" && scopedEntity) {
+        tech.push(link("Open the monitors", "Synthetic · monitors of this application",
+          withTf(tf, { "dt.synthetic.monitored_entity_ids": [scopedEntity] }),
+          { keyProperties: ["dt.synthetic.monitored_entity_ids"],
+            app: "Synthetic", appId: "dynatrace.synthetic",
+            intentId: "view_monitor_list_filtered_by_entity_ids",
+            proves: "the monitors watching this application — their runs, results and failures" }));
       }
       /* The mobile segment has an entity where the others have none: the
        * scoped mobile application itself. Experience Vitals declares
@@ -1066,7 +1233,13 @@ export function investigationPaths(
        * Precedent: the failure rows' drill-down already falls back to the
        * app-wide Explorer the same way (rowDrilldown, kind "errors"). */
       if (errors && errors > 0 && scopedAppName) {
-        tech.push(errorsLink(tf, scopedAppName, errors));
+        // The reader's rule: the most appropriate app leads, always. A
+        // segment whose sessions are being hit is an ERRORS story — the
+        // inspector goes first and the sessions list becomes the follow-up;
+        // a healthy segment keeps the sessions view in front.
+        const insp = errorsLink(tf, scopedAppName, errors);
+        if (impacted && impacted.hit > 0) tech.unshift(insp);
+        else tech.push(insp);
       }
       break;
     case "domain3p": case "domain1p":
@@ -1081,7 +1254,14 @@ export function investigationPaths(
        * A valkey has no DB_* node and simply keeps the traces hop alone. */
       if (dbEntity) {
         const isInstance = dbEntity.type.startsWith("DB_INSTANCE_");
-        tech.push(link("Open the database", dbEntity.name,
+        /* the IDENTITY, not just the SID: an Oracle instance is named "DB1"
+         * while the store card names the RDS host, and the reader looked at
+         * the opened page and asked whether it was even the right database.
+         * When the entity's name does not carry the address, the node says
+         * which address it answers. */
+        const dbMeta = domain && !dbEntity.name.includes(domain)
+          ? `${dbEntity.name} — answers ${domain}` : dbEntity.name;
+        tech.push(link("Open the database", dbMeta,
           withTf(tf, {
             [isInstance ? "dt.smartscape.db_instance_id"
               : "dt.smartscape.db_database_id"]: dbEntity.id,
@@ -1108,8 +1288,35 @@ export function investigationPaths(
       void unhandled;
     }
   }
+  /* Smartscape, per entity — read off this tenant's registry: the Gen3 app
+   * dynatrace.smartscape declares view_topology_in_context requiring exactly
+   * one property, `id`, and our ids ARE smartscape ids. This is the deep
+   * link the backend summary hands its subjects to: the full relation map
+   * is Smartscape's job now, so every entity-backed route ends with the door
+   * into it. */
+  /* A process's SMARTSCAPE id is PROCESS-<hex>; its classic id is
+   * PROCESS_GROUP_INSTANCE-<same hex> (measured, they share the suffix).
+   * The hop used to send the classic form and the topology answered
+   * "Nodes 0 · no data" — the reader's screenshot. Prefer the Smartscape
+   * form; derive it from the classic one when only that travelled. */
+  const ssProc = ids.find((i) => /^PROCESS-/.test(i))
+    ?? (pgi ? pgi.replace("PROCESS_GROUP_INSTANCE-", "PROCESS-") : undefined);
+  const ssId = svc ?? pod ?? node ?? host ?? ssProc;
+  if (ssId && (kind === "service" || kind === "pod" || kind === "node"
+      || kind === "host" || kind === "process")) {
+    tech.push(link("See its relations", name, { id: ssId },
+      { keyProperties: ["id"], appId: "dynatrace.smartscape",
+        intentId: "view_topology_in_context", app: "Smartscape",
+        proves: "the full topology around this entity — the map this chain no longer draws" }));
+  }
   const prob = pLink();
-  if (prob) tech.push(prob);
+  // The reader's rule again: when Davis already holds the computed root
+  // cause, no other app is "most appropriate" — the problem leads the route.
+  if (prob) tech.unshift(prob);
+  /* "See its baselines" REMOVED (audit). The destination was the Anomaly
+   * Detection app HOME — no scoping to the element, no timeframe — wearing
+   * a per-element label ("N anomalies under watch"). An unfiltered door is
+   * not a drilldown. Restore only with an OBSERVED per-entity url/intent. */
   if (assist) {
     tech.push(healthy
       ? aLink("Ask Assist", "where is the easy win",
@@ -1154,25 +1361,30 @@ export function investigationPaths(
           "dt.entity.service", svc!, "services", SERVICE_RESPONSE_TIME));
       }
       break;
-    case "pod": case "node":
-      tac.push(eLink("What shares this node",
+    case "pod": case "node": {
+      // classic id or no link — the Smartscape key 404s (see above)
+      const shareId = node ? nodeClassic : podClassic;
+      if (shareId) tac.push(eLink("What shares this node",
         "The workloads a node-level event would take down together.",
         node ? "dt.entity.kubernetes_node" : "dt.entity.cloud_application_instance",
-        (node ? nodeClassic ?? node : podClassic ?? pod)!, "kubernetes",
+        shareId, "kubernetes",
         node ? K8S_NODE_BY_APP[apps.kubernetes?.appId ?? ""] : undefined));
       break;
+    }
     case "host":
-      // Topology is the question here, and only the classic Smartscape app
-      // answers it for a host — the Gen3 one declares nothing for `dt.entity.host`
-      // (its actions are about problems). So this names that app directly rather
-      // than resolving Gen3-first and landing on a view that cannot answer.
+      // Topology is the question. The Gen3 Smartscape declares nothing for
+      // `dt.entity.host`, but it DOES answer view_topology_in_context for a
+      // bare Smartscape `id` — the exact hop the technical route already
+      // uses for this host. The rule (the reader's): never propose a Gen2
+      // app where the Gen3 one covers the question — so the classic
+      // view-host hand-off is gone.
       tac.push(link("What this host carries",
         "The processes a host-level event would take down.",
-        withTf(tf, { "dt.entity.host": host }),
-        { keyProperties: ["dt.entity.host"],
+        { id: host },
+        { keyProperties: ["id"],
           proves: "The topology around this machine, as Smartscape maps it.",
-          app: "Smartscape Classic",
-          appId: "dynatrace.classic.smartscape", intentId: "view-host" }));
+          app: "Smartscape",
+          appId: "dynatrace.smartscape", intentId: "view_topology_in_context" }));
       break;
     case "origin": case "domain3p": case "domain1p": case "store":
       // The same evidence the technical route offers, asked as a different
@@ -1221,77 +1433,42 @@ export function investigationPaths(
   }
 
   /* ── executive: the reading, not the data ── */
+  /* THE BUSINESS ROUTE IS ASSIST, ALONE — the reader's design. Entity
+   * hand-offs (sessions apps, classic replay) belong to the technical
+   * personas; the business reader gets one node that answers in their
+   * language, with an advanced brief built from everything this element's
+   * context carries. The classic session link died with this — the Gen3
+   * sessions app coexists, and the rule is never to propose a Gen2 app
+   * where a Gen3 one covers it. */
   const exec: DeepLink[] = [];
-  /*
-   * Offered for the element's own application entity when IT is the app
-   * (webApp/mobileApp), and for the SCOPED application when the element is a
-   * segment or an address belonging to it (origin/domain3p/domain1p) — a
-   * Consume-layer Mobile card used to have no way to reach this step at all,
-   * because `rumAppId` was only ever threaded through for the application
-   * card itself. Left off service/host/pod/store: an owner clicking a
-   * database wants database evidence, not the whole app's session count.
-   *
-   * `scopedEntity` — resolved by the caller from the real entity, not
-   * guessed — takes priority over the hex fallback appEntityOf() still keeps
-   * for callers that have only ever had a rumAppId to work with. The hex trick
-   * holds for web only (a mobile RUM id is a UUID, not the entity's suffix),
-   * which is exactly why the real entity is worth passing when it is known.
-   */
-  const wantsAppSessions = kind === "webApp" || kind === "mobileApp"
-    || kind === "origin" || kind === "domain3p" || kind === "domain1p";
-  const appEntity = wantsAppSessions
-    ? appEntityOf(app ?? scopedEntity, rumAppId) : undefined;
-  if (appEntity) {
-    exec.push(eLink("Sessions and conversion",
-      "The real-user picture the RUM app already maintains.",
-      "dt.entity.application", appEntity,
-      appEntity.startsWith("MOBILE_APPLICATION-") ? "mobile" : "rum"));
-  }
-  /*
-   * The impact as ONE user lived it — the worst-hit session, opened in the
-   * apps dedicated to single sessions, both generations. Two steps by request,
-   * not gen3-with-classic-fallback: the Gen3 app reads the session's events
-   * from Grail, the classic one holds the session timeline and the replay, and
-   * they answer differently enough to both earn a card. Payloads are exactly
-   * what each intent declares — see SESSION_GEN3 / SESSION_CLASSIC.
-   */
-  const sess = impacted?.ex;
-  if (sess) {
-    exec.push(link("Open an impacted session", `${sess.errs} errors · one user`,
-      { "dt.rum.session.id": sess.sid, "start_time": sess.start },
-      { keyProperties: ["dt.rum.session.id"],
-        proves: "The impact as one user lived it — the worst-hit session, event by event.",
-        app: "Users & Sessions",
-        appId: SESSION_GEN3.appId, intentId: SESSION_GEN3.intentId }));
-    if (sess.inst) {
-      exec.push(link("The same session, classic", "timeline & replay",
-        { "dt.rum.session.id": sess.sid, "dt.rum.instance.id": sess.inst,
-          "start_time": sess.start },
-        { keyProperties: ["dt.rum.session.id"],
-          proves: "The classic session timeline, with the replay when one was captured.",
-          app: "Session Segmentation (Classic)",
-          appId: SESSION_CLASSIC.appId, intentId: SESSION_CLASSIC.intentId }));
-    }
-  }
   if (assist) {
     exec.push(
       healthy
-        ? aLink("Ask Assist", "where improvement pays most",
-            "Turns healthy numbers into the investment worth making.",
-            `${subject[0].toUpperCase()}${subject.slice(1)} is healthy right now. ` +
-            "Which improvement to it would users notice most, and what makes it " +
-            "worth doing before anything else?",
-            scope, undefined)
-        // One Assist per route, not two. "what does this cost us" and "what
-        // should we do first" were adjacent nodes asking the same person the
-        // same thing twice; merged into the question an owner actually has.
-        : aLink("Ask Assist", "what this costs and what to do first",
-            "Turns the measured numbers into the consequence an owner acts on, "
-            + "and the first move worth making.",
-            `What is the business impact of the current state of ${subject}, which ` +
-            "of these numbers should worry me most, and what would you fix first?",
+        ? aLink("Ask Assist", "where investment pays most",
+            "A three-line owner's brief: the best improvement, its expected gain, and what to watch.",
+            `Brief me as the business owner of ${subject}. It is healthy right now. ` +
+            "1) Which single improvement would customers notice most — speed, " +
+            "conversion or coverage — and which measured number says so? " +
+            "2) What gain should we expect if we make it, in sessions or conversions? " +
+            "3) What early signal would change this verdict and deserve a re-check?",
+            scope,
+            "Answer as a three-line executive brief, one line per question, the number " +
+            "first in each line, no jargon — name views, errors and segments in plain " +
+            "words. Close with one word: invest, schedule, or hold." + GROUNDED)
+        : aLink("Ask Assist", "the business brief",
+            "A five-line owner's brief: what broke, what it costs, the fix, and the risk of waiting.",
+            `Brief me as the business owner of ${subject}. ` +
+            "1) What is broken, said in customer terms? " +
+            "2) How many customers or sessions is it costing in this window, and is that " +
+            "rising or falling? " +
+            "3) Which single fix recovers the most sessions, and whose work is it? " +
+            "4) What is the risk of doing nothing for one day? " +
+            "5) When should I look at this again?",
             scope + " Consider effort, blast radius and how many sessions each option " +
-            "would recover."),
+            "would recover.",
+            "Answer as a five-line executive brief, one numbered line per question, the " +
+            "number first in each line, no jargon — name views, errors and segments in " +
+            "plain words. Close with one sentence: fix now, schedule, or monitor." + GROUNDED),
     );
   }
   if (exec.length) {
@@ -1303,17 +1480,6 @@ export function investigationPaths(
   }
 
   return out;
-}
-
-/** The app that owns an entity type, for the node label. */
-function appNameFor(field: string): string {
-  const map: Record<string, string> = {
-    "dt.entity.service": "Services",
-    "dt.entity.host": "Infrastructure",
-    "dt.entity.application": "Web application",
-    "dt.entity.process_group_instance": "Processes",
-  };
-  return map[field] ?? "Entity app";
 }
 
 /**
@@ -1407,7 +1573,6 @@ export function rowDrilldown(
             appId: "dynatrace.services", intentId: SERVICE_RESPONSE_TIME.intentId,
             app: "Services", proves: "how this service spends the time it takes" });
   }
-  if (!appEntity) return null;
   /* Percentiles are a performance question, so they open the performance app.
    *
    * A VIEW lands scoped to itself. Experience Vitals declares a second intent,
@@ -1419,7 +1584,11 @@ export function rowDrilldown(
    * A DOMAIN has no such property in any intent, so it opens the application's
    * vitals and the label says so rather than implying a filter that is not
    * there. */
+  /* appEntity gates ONLY the branch that puts it in the payload — the old
+   * top-of-function gate also killed the Error Inspector branches below,
+   * which need the display NAME and never the entity. */
   if (lens === "time" && kind === "views") {
+    if (!appEntity) return null;
     return link("Where the time goes", `${row.name} · frontend performance`,
       withTf(tf, {
         frontend: appEntity,
