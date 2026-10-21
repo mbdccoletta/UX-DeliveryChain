@@ -91,7 +91,7 @@ export async function forecast(expression: string, horizon = 12): Promise<Foreca
  * ONE rule for every forecast this app draws over RUM.
  *
  * A forecast needs history, and on Grail history is money: the scan is LINEAR
- * in the window, measured at about 1.4 GB per hour for this tenant's busiest
+ * in the window, measured at about 1.4 GB per hour for a live estate's busiest
  * application. The old rule asked for three times the visible window with no
  * ceiling, so a thirty-day view quietly asked the analyzer for NINETY DAYS —
  * past the platform's 500 GB scan limit, which is why a wide window felt slow

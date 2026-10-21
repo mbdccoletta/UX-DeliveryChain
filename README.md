@@ -8,8 +8,8 @@ App ID: `my.deliverychain.ux`.
 ## Run on the dev server
 
 Point the checkout at your own environment first. `app.config.json` ships a
-placeholder on purpose — the tenant you use is a local fact, not a committed
-one:
+placeholder on purpose — the environment you point at is a local fact, not a
+committed one:
 
 ```bash
 cp .env.example .env      # then edit DT_APP_ENVIRONMENT_URL
@@ -24,8 +24,8 @@ in `app.config.json`, so a one-off environment needs no edit at all:
 npm start -- --environment-url https://<your-environment>.apps.dynatrace.com
 ```
 
-`dt-app dev` opens the SSO URL on first run — you need to authenticate with a
-tenant account. After that the app serves on `http://localhost:3000` (or the
+`dt-app dev` opens the SSO URL on first run — you need to authenticate against
+the environment. After that the app serves on `http://localhost:3000` (or the
 port passed with `-p`).
 
 Deploy: `npm run deploy` (same precedence rules).
@@ -36,15 +36,19 @@ Deploy: `npm run deploy` (same precedence rules).
 
 | Tab | What it shows | Where the data comes from |
 |---|---|---|
-| **1 · Flow** | Session Sankey: application → furthest stage reached → outcome. Ribbon width is the session count, so wherever a ribbon narrows is where the business loses users. | `user.events` (sessions per app) + per-session path mining |
-| **2 · Delivery** | Seven layers (user → network → application → edge → services → runtime → infrastructure) with an animated mesh, one distinct icon per layer and, on every link, statistics + Davis problems + custom alerts + extensions. | `smartscapeEdges "calls"` and `"runs_on"`, `smartscapeNodes`, `user.events`, `dt.davis.problems`, `dt.davis.events` |
-| **3 · Journey** | Measured views → requests → services → runtime, with the mesh and per-node detail. | `user.events` (view_summary and request) + Smartscape |
-| **4 · Health** | Environment rollup, application table, active problems and volume per event provider. | `user.events`, `dt.davis.problems`, `dt.davis.events` |
+| **Overview** | One application's health as its users met it: Apdex, sessions, errors and crashes, the forecast, and where in the world they connect from — down to state and city. | `user.events`, `geo.*`, `dt.davis.problems` |
+| **Journeys** | Session Sankey: application → furthest stage reached → outcome. Where a ribbon narrows is where the business loses people. | `user.events` (sessions per app) + per-session path mining |
+| **Delivery Chain** | Seven layers — user, network, application, edge, services, runtime, infrastructure — each with its statistics, Davis problems, custom alerts and extension events. | `smartscapeEdges "calls"` and `"runs_on"`, `smartscapeNodes`, `user.events`, `dt.davis.problems`, `dt.davis.events` |
+| **Business Control** | What the experience is worth: conversion, what failure costs, the funnel rung by rung, and the busiest routes. | the mined journeys, plus `user.events` |
+
+Every page carries an **Intelligence** section — questions written against what
+that page can prove, answered inline by Dynatrace Intelligence, grounded in the
+figures on screen and instructed to invent none.
 
 ## Queries
 
 All of them live in [`ui/app/utils/dql.ts`](ui/app/utils/dql.ts) and were
-validated against the tenant before becoming code. The main ones:
+validated against a live estate before becoming code. The main ones:
 
 - **Applications**: `user.events` aggregated by `dt.rum.application.id`
 - **Journey sequences**: `collectArray` of views per session, with URLs
@@ -133,14 +137,17 @@ write is the app's own per-user query cache.**
 ## Structure
 
 ```
-app.config.json                      manifest (id, scopes)
-ui/main.tsx                          bootstrap (AppRoot)
+app.config.json                      manifest (id, scopes, version)
+ui/main.tsx                          bootstrap (AppRoot, dtVisualRefreshEnabled)
 ui/app/App.tsx                       shell: tabs, timeframe, application picker
-ui/app/utils/dql.ts                  queries + formatting helpers
-ui/app/hooks/useChainData.ts         loads everything in parallel, failure tolerant
-ui/app/components/FlowSankey.tsx     session flow (canvas)
-ui/app/components/DeliveryChain.tsx  delivery chain + per-layer signals
-ui/app/components/JourneyMap.tsx     application journey
-ui/app/styles/theme.css              "operations terminal" theme
-pilots/prototype.html                navigable prototype the app grew from
+ui/app/utils/dql.ts                  every query, and what each one measured
+ui/app/utils/verdict.ts              the thresholds — one home, every screen
+ui/app/utils/links.ts                hand-offs to the platform's own apps
+ui/app/hooks/useChainData.ts         loads the estate in parallel, failure tolerant
+ui/app/components/Pulse.tsx          Overview, including the geo tile
+ui/app/components/FlowSankey.tsx     Journeys (canvas)
+ui/app/components/DeliveryChain.tsx  the seven layers and their signals
+ui/app/components/ReportView.tsx     Business Control
+ui/app/components/Intelligence.tsx   the per-page questions
+ui/app/styles/theme.css              tokens, then the app's own layer
 ```

@@ -12,11 +12,26 @@ import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
-import { FlowSankey } from "./components/FlowSankey";
-import { DeliveryChain } from "./components/DeliveryChain";
-import { Pulse } from "./components/Pulse";
+/* THE FOUR PAGES ARRIVE WHEN THEY ARE OPENED.
+ *
+ * They used to arrive together: one bundle, 4.0 MB, every route's code loaded
+ * before the first pixel. The map alone accounts for most of it — maplibre is
+ * the heaviest dependency here and it was being downloaded by readers who open
+ * Business Control and never see geography.
+ *
+ * Split per route, each page's code is fetched the first time someone asks for
+ * it and cached after. The platform's own guidance puts the ceiling at 1 MB
+ * for exactly this reason: an app is judged on the wait before it draws, and
+ * that wait was paying for three screens nobody had asked to see. */
+const FlowSankey = React.lazy(() =>
+  import("./components/FlowSankey").then((m) => ({ default: m.FlowSankey })));
+const DeliveryChain = React.lazy(() =>
+  import("./components/DeliveryChain").then((m) => ({ default: m.DeliveryChain })));
+const Pulse = React.lazy(() =>
+  import("./components/Pulse").then((m) => ({ default: m.Pulse })));
 import { NoRumState } from "./components/NoRumState";
-import { ReportView } from "./components/ReportView";
+const ReportView = React.lazy(() =>
+  import("./components/ReportView").then((m) => ({ default: m.ReportView })));
 import { intentsAvailable, open as openIntent, sessionsLink } from "./utils/links";
 import { useUrlState } from "./hooks/useUrlState";
 import { useUxOverview } from "./hooks/useUxOverview";
@@ -166,7 +181,7 @@ export function App() {
 
   /* THE PLATFORM'S OWN CLASSIFICATION FIRST. This used to infer the kind
    * from a MOBILE_APPLICATION- entity prefix, and defaulted to "Web" when the
-   * entity was absent — so on a Smartscape-only tenant, where dt.rum.application.entity comes
+   * entity was absent — so on a live estate, where dt.rum.application.entity comes
    * back null, a native Android app was listed under Web (the reader caught
    * it). Smartscape's FRONTEND node states frontend.type as a fact; the
    * prefix stays as the fallback for apps that have no such node. */
@@ -309,7 +324,7 @@ export function App() {
 
       {d.errors.length > 0 && (() => {
         /* A FAILURE SHOULD NAME ITS OWN CAUSE. The banner blamed the app
-           scopes for everything, and on a Playground tenant that was simply
+           scopes for everything, and on a Playground estate that was simply
            wrong: the classic `dt.entity.*` objects are RETIRED there
            (UNKNOWN_DATA_OBJECT), which is an environment fact no scope can
            fix. The two kinds are separated, and the raw DQL — three
@@ -324,7 +339,7 @@ export function App() {
               <>
                 <b>Not available on this environment ({retired.length}):</b>{" "}
                 {retired.map(label).slice(0, 4).join(" · ")} — these read the classic
-                entity model, which this tenant has retired. Everything Smartscape
+                entity model, which a live estate has retired. Everything Smartscape
                 and Grail can answer is on screen; only the classic fallbacks are
                 missing.{other.length > 0 ? " " : ""}
               </>
@@ -339,6 +354,9 @@ export function App() {
         );
       })()}
 
+      {/* The page's own code may still be arriving — same wording as the data
+          wait, because to a reader they are the same wait. */}
+      <React.Suspense fallback={<div className="loading"><i />opening this view…</div>}>
       {d.loading ? (
         <div className="loading"><i />querying Grail and Smartscape…</div>
       ) : !d.apps.length ? (
@@ -421,6 +439,7 @@ export function App() {
           )}
         </>
       )}
+      </React.Suspense>
       </div>
       </PageLayout.Content>
       </PageLayout>

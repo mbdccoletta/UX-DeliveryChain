@@ -1,14 +1,14 @@
 // Which contacted domains are actually served by instrumented code.
 //
 // The browser records a domain; the backend records spans. A domain we serve
-// has both — measured on this tenant, `server.address == "10.107.164.30"`
+// has both — measured on a live estate, `server.address == "10.107.164.30"`
 // matches 231,270 spans across 7 services — while a CDN, a font host or an
 // analytics beacon has no span behind it at all.
 //
 // That distinction is the whole point of this hook: it decides whether a
 // domain row can hand off to the Distributed Tracing explorer, or whether the
 // only honest destination is a query. `http.request.provider` would have been
-// the cheap way to tell, but it is null on every domain of this tenant, so the
+// the cheap way to tell, but it is null on every domain of a live estate, so the
 // question is answered by asking the spans directly.
 //
 // ONE scan for the whole panel, on the click that opens it, memoised per

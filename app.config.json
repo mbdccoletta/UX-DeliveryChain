@@ -2,8 +2,8 @@
   "environmentUrl": "https://your-environment.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
-    "version": "0.5.0",
-    "description": "Smartscape delivery chain crossed with RUM, Davis, alerts and extensions.",
+    "version": "0.9.0",
+    "description": "Every layer a user request crosses, and what each one costs them.",
     "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",
     "scopes": [

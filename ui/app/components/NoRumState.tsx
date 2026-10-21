@@ -2,7 +2,7 @@
 //
 // This app answers one question — what a user's journey crosses, and where the
 // business loses them — and that question needs a SESSION recorded on the
-// client. Dynatrace RUM provides it in `user.events`; a tenant whose primary
+// client. Dynatrace RUM provides it in `user.events`; a live estate whose primary
 // source is OpenTelemetry usually instruments the backend, and has no such
 // application at all.
 //
@@ -11,7 +11,7 @@
 // nothing. A blank page is the worst possible answer — it looks like a defect
 // in the app rather than a fact about the data.
 //
-// So this measures instead. It counts what the tenant DOES send and names it,
+// So this measures instead. It counts what a live estate DOES send and names it,
 // then says exactly which half of the product that supports and which half it
 // cannot, and why. The rule this product applies everywhere else — say "not
 // measurable" rather than dress noise as a finding — applied to itself.
@@ -48,7 +48,7 @@ export function NoRumState() {
 
   const otelLed = shape ? shape.otel > 0 && shape.otel >= shape.spans * 0.5 : false;
   /* The one number that decides whether a journey mine is even possible on this
-     tenant: a session id on a span. Without it there is nothing to group by. */
+     estate: a session id on a span. Without it there is nothing to group by. */
   const clientInstrumented = shape ? shape.sessionSpans > 0 : false;
 
   return (

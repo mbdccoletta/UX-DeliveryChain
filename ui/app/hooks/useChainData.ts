@@ -17,7 +17,7 @@ export interface AppRow {
   views: number;
   errors: number;
   /**
-   * The FATAL subset of `errors`, mobile only — measured on the reference tenant:
+   * The FATAL subset of `errors`, mobile only — measured on a live estate:
    * crashes are classifier "error" with error.type "crash" (289 events /
    * 288 sessions on Astroshop Android in 24h), and ANRs — the app frozen
    * until Android kills it — are error.type "anr" (247 more). Both are
@@ -227,7 +227,7 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
 
       const [
         rawApps, appNames, gen2Apps, origins, domains,
-        calls, runtime, topology, problems, providers, alerts, signals,
+        calls, runtime, topology, problems, davis, signals,
       ] = await Promise.all([
         safe<Record<string, unknown>>("applications", Q.qApps(tf, session), bag),
         safe<{ id: string; name: string; rumId?: string; kind?: string }>(
@@ -238,10 +238,10 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
         safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag),
         safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag),
         safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag),
-        safe<ProblemRow>("davis problems", Q.qProblems(), bag),
-        safe<Record<string, unknown>>("event providers", Q.qEventProviders(), bag),
-        safe<Record<string, unknown>>("custom alerts", Q.qCustomAlerts(), bag),
-        safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(), bag, 300),
+        safe<ProblemRow>("davis problems", Q.qProblems(tf), bag),
+        safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
+          Q.DAVIS_ROLLUP_CAP),
+        safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf), bag, 300),
       ]);
       if (cancelled) return;
 
@@ -270,7 +270,7 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
           }
         }
         /* THE ENTITY ID, RECOVERED. dt.rum.application.entity is null on
-         * a Smartscape-only tenant, and the chain needs that id for two things it silently
+         * a live estate, and the chain needs that id for two things it silently
          * lost without it: kindOf() reads the *_APPLICATION- prefix to know
          * it is looking at an application (without it a RUM app became a
          * generic "element" and its whole investigation route — Error
@@ -381,13 +381,38 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
         calls, runtime,
         topology: topology.map((r) => ({ type: String(r.type ?? ""), nodes: num(r.nodes) })),
         problems,
-        providers: providers.map((r) => ({
-          type: String(r.type ?? ""), provider: String(r.provider ?? ""), events: num(r.events),
-        })),
-        alerts: alerts.map((r) => ({
-          name: String(r.name ?? ""), provider: String(r.provider ?? ""),
-          status: String(r.status ?? ""), events: num(r.events),
-        })),
+        /* BOTH VIEWS FROM ONE SCAN. qDavisRollup returns the finer grain
+         * (type × provider × name × status); the provider view is those rows
+         * added up, and the alerts view is those rows filtered. Two reads of
+         * the same 24 hours of the same store cost 8.7 GiB each on a customer
+         * estate — this is the second one, not taken. */
+        providers: (() => {
+          const by = new Map<string, ProviderRow>();
+          for (const r of davis) {
+            const type = String(r.type ?? ""), provider = String(r.provider ?? "");
+            const k = `${type}\u0000${provider}`;
+            const hit = by.get(k);
+            if (hit) hit.events += num(r.events);
+            else by.set(k, { type, provider, events: num(r.events) });
+          }
+          return [...by.values()].sort((a, b) => b.events - a.events);
+        })(),
+        alerts: davis
+          .filter((r) => r.provider === "METRIC_EVENTS"
+            || r.provider === "EVENTS_REST_API_INGEST")
+          .map((r) => ({
+            name: String(r.name ?? ""), provider: String(r.provider ?? ""),
+            status: String(r.status ?? ""), events: num(r.events),
+          }))
+          .sort((a, b) => b.events - a.events),
+        /* AND IF THE SCAN WAS CUT, the two sums above are short. Spread last,
+         * because in an object literal the later key wins — placed earlier it
+         * would have been silently overwritten by the very values it exists to
+         * suppress, which is the same class of bug as the numbers it guards. */
+        ...(davis.length >= Q.DAVIS_ROLLUP_CAP
+          ? (bag.push("davis rollup: hit the row cap — provider and alert counts "
+              + "would be short, so they are withheld"), { providers: [], alerts: [] })
+          : {}),
         signals: signals.map((r) => ({
           name: String(r.name ?? ""), provider: String(r.provider ?? ""),
           status: String(r.status ?? ""), etype: String(r.etype ?? ""),

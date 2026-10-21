@@ -65,7 +65,11 @@ export async function exportImage(el: HTMLElement, filename: string): Promise<vo
       && (node.classList.contains("noexport") || node.classList.contains("drawer__x"))),
     // the app's ground, so a region with transparent padding does not export
     // as a checkerboard-looking hole in dark decks
-    backgroundColor: getComputedStyle(document.body).backgroundColor || "#0e1017",
+    /* The fallback is the platform's neutral black. It was #0e1017 — a
+     near-black BLUE, left from the navy theme — so an export taken when
+     getComputedStyle returns nothing would have carried the old ground
+     into a deck beside screens that no longer use it. */
+    backgroundColor: getComputedStyle(document.body).backgroundColor || "#16161d",
     // webfont CSS from the platform origin can refuse serialisation; skip it
     // and let the fallback stack render instead of throwing
     skipFonts: true,

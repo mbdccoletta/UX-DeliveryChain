@@ -23,9 +23,9 @@ export interface AppScope {
    *
    * Zero and "some but none matched a span" are different findings with
    * different actions, and the chain used to print one sentence for both.
-   * Measured on a customer tenant: of twenty applications, nine carried
+   * Measured on a live estate: of twenty applications, nine carried
    * thousands of requests and NOT ONE trace id, while others on the same
-   * tenant carried tens of thousands — so an empty backend there is a
+   * estate carried tens of thousands — so an empty backend there is a
    * per-application tracing-context gap, not a topology fact.
    */
   tracesSeen: number;
@@ -33,7 +33,7 @@ export interface AppScope {
    * Has the reader asked for the SPAN measurement on this application?
    *
    * Topology is free and answers most of the time; spans cost real money on a
-   * large estate (~32 GiB for ten minutes on a tenant carrying 169M spans in
+   * large estate (~32 GiB for ten minutes on a live estate carrying 169M spans in
    * two hours) and must never be spent by the act of opening a page.
    */
   measured: boolean;
@@ -69,7 +69,7 @@ export interface AppScope {
    * Loading and "we could not tell" are different facts and used to share one
    * flag: switching application reset the scope to unresolved, and the chain's
    * honest fallback for unresolved — show the whole environment — briefly
-   * painted every service in the tenant under the new application before the
+   * painted every service in a live estate under the new application before the
    * real scope arrived. A flash of the wrong answer is worse than a pause.
    */
   loading: boolean;
@@ -109,7 +109,7 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
          * and they do not cost the same. Smartscape topology is metadata: a
          * FRONTEND-to-SERVICE `calls` edge costs nothing to read. The RUM side
          * is small. SPANS are the biggest store in Grail, billed by the window,
-         * and on a customer tenant carrying 169M spans in two hours a single
+         * and on a live estate carrying 169M spans in two hours a single
          * ten-minute span read scans ~32 GiB — about $0.11 EVERY TIME a reader
          * opens an application. A diagnostic that bills per click is not a
          * diagnostic, it is a subscription.
@@ -193,7 +193,7 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
             // The NAME travels with the placement now. The runtime layer used
             // to be drawn from a pod-centric query and named from there, which
             // left it empty wherever services do not run on pods — measured on
-            // this tenant, that is everywhere: 2,412 runs_on edges point at a
+            // a live estate, that is everywhere: 2,412 runs_on edges point at a
             // HOST, 997 at a CONTAINER, 154 at a PROCESS, and not one at a
             // K8S_POD. The placements already knew; they just arrived nameless.
             out.placements = rt.map((r) => ({
