@@ -375,7 +375,7 @@ const tfParam = (tf: Timeframe): string | null => {
  * with the quoting mixed: the label "View Name" is quoted because it contains
  * a space, `Frontend` is not, and a value is quoted only when it needs to be.
  * That matters here because a view name is NOT unique — measured, `/` exists
- * in four of this tenant's applications — so the frontend has to travel with
+ * in four of a live estate's applications — so the frontend has to travel with
  * it or the drill-down widens without saying so.
  */
 export const errorsExplorerHref = (
@@ -456,7 +456,7 @@ export const errorsLink = (tf: Timeframe, appName: string, errors: number): Deep
 
 /**
  * The platform's own intent url: `/ui/apps/<app>/intent/<action>?<payload>`,
- * with object values JSON-encoded. Verified by hand against this tenant for
+ * with object values JSON-encoded. Verified by hand against a live estate for
  * the Error Inspector and the sessions explorer.
  */
 export function intentUrl(appId: string, intentId: string, payload: IntentPayload): string {
@@ -739,7 +739,7 @@ export function kindOf(
   const ids = e.ids ?? [];
   if (ids.some((i) => i.startsWith("MOBILE_APPLICATION-"))) return "mobileApp";
   if (ids.some((i) => /^(?:CUSTOM_)?APPLICATION-/.test(i))) return "webApp";
-  /* Smartscape's own id for a RUM application. Tenants that retired the
+  /* Smartscape's own id for a RUM application. Environments that retired the
    * classic model carry FRONTEND- and nothing else, and without this line a
    * RUM application fell through to "element" — losing the entire app route,
    * Error Inspector included, on an app whose verdict read "20% of real-user
@@ -932,7 +932,7 @@ export function investigationPaths(
         (scopedEntity ? `, entity ${scopedEntity}.` : ".") : "";
   /* The Grail address of this element's records — so Assist can go and
    * look instead of asking the reader to. Each clause was verified on the
-   * tenant before it became a hint (the same measurements the queries in
+   * estate before it became a hint (the same measurements the queries in
    * dql.ts are built on). */
   const ORIGIN_DEF: Record<string, string> = {
     Mobile: 'dt.rum.agent.type is "android", "ios" or "mobile"',
@@ -1060,7 +1060,7 @@ export function investigationPaths(
         // node already carries, so it is always offered and always complete
         tListLink(svc!),
         // THREE keys, because log records are attributed three ways on this
-        // tenant. ~20% carry dt.entity.service (k8s-side); most k8s lines
+        // estate. ~20% carry dt.entity.service (k8s-side); most k8s lines
         // carry the CONTAINER, whose name matches the service's short name
         // (frontend, cartservice…); and a VM service's lines carry only its
         // PROCESS — measured: the easyTravel Customer Frontend drilldown
@@ -1247,7 +1247,7 @@ export function investigationPaths(
       break;
     case "store":
       /* The platform's own Databases app leads, when the store resolves to
-       * one of its entities. App id and intent read off THIS tenant's
+       * one of its entities. App id and intent read off THIS estate's
        * registry (dynatrace.database.overview; view-instance-details /
        * view-database-details, each requiring exactly its smartscape id);
        * the id itself comes from the measured name bridge in useDbEntity.
@@ -1288,7 +1288,7 @@ export function investigationPaths(
       void unhandled;
     }
   }
-  /* Smartscape, per entity — read off this tenant's registry: the Gen3 app
+  /* Smartscape, per entity — read off a live estate's registry: the Gen3 app
    * dynatrace.smartscape declares view_topology_in_context requiring exactly
    * one property, `id`, and our ids ARE smartscape ids. This is the deep
    * link the backend summary hands its subjects to: the full relation map
@@ -1485,7 +1485,7 @@ export function investigationPaths(
 /**
  * The entity id a hand-off keys on, derived when the telemetry omits it.
  *
- * Measured on this tenant: two of four applications carry
+ * Measured on a live estate: two of four applications carry
  * `dt.rum.application.entity` on ZERO of their records — AI Chatbot on 0 of
  * 798 — so every drill-down keyed on it returned nothing and those rows simply
  * had no link. The id is recoverable because a WEB application's RUM id is its
@@ -1631,7 +1631,7 @@ export function rowDrilldown(
     return null;
   }
   if (kind === "views") {
-    // Measured on this tenant: /instruments, /login, /deposit, /home and
+    // Measured on a live estate: /instruments, /login, /deposit, /home and
     // /credit-card/order all record zero errors. Offering the error page for
     // them was offering an empty screen — the row said "all satisfied" and
     // the click disagreed. No errors, no destination.
@@ -1643,7 +1643,7 @@ export function rowDrilldown(
         proves: "what failed for users of this view" });
   }
   if (kind === "errors") {
-    /* Measured: two of this tenant's four applications record error.name on
+    /* Measured: two of a live estate's four applications record error.name on
      * ZERO of their errors — 1,996 and 39 of them — and the Error Explorer
      * lists errors BY name. The filter was right and the page was still
      * empty, because there was nothing named to list. A row this app had to

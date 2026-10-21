@@ -181,7 +181,7 @@ export function App() {
 
   /* THE PLATFORM'S OWN CLASSIFICATION FIRST. This used to infer the kind
    * from a MOBILE_APPLICATION- entity prefix, and defaulted to "Web" when the
-   * entity was absent — so on a Smartscape-only tenant, where dt.rum.application.entity comes
+   * entity was absent — so on a live estate, where dt.rum.application.entity comes
    * back null, a native Android app was listed under Web (the reader caught
    * it). Smartscape's FRONTEND node states frontend.type as a fact; the
    * prefix stays as the fallback for apps that have no such node. */
@@ -324,7 +324,7 @@ export function App() {
 
       {d.errors.length > 0 && (() => {
         /* A FAILURE SHOULD NAME ITS OWN CAUSE. The banner blamed the app
-           scopes for everything, and on a Playground tenant that was simply
+           scopes for everything, and on a Playground estate that was simply
            wrong: the classic `dt.entity.*` objects are RETIRED there
            (UNKNOWN_DATA_OBJECT), which is an environment fact no scope can
            fix. The two kinds are separated, and the raw DQL — three
@@ -339,7 +339,7 @@ export function App() {
               <>
                 <b>Not available on this environment ({retired.length}):</b>{" "}
                 {retired.map(label).slice(0, 4).join(" · ")} — these read the classic
-                entity model, which this tenant has retired. Everything Smartscape
+                entity model, which a live estate has retired. Everything Smartscape
                 and Grail can answer is on screen; only the classic fallbacks are
                 missing.{other.length > 0 ? " " : ""}
               </>

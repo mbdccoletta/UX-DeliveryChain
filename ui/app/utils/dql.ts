@@ -1,4 +1,4 @@
-// Data layer — every query here was validated against a live tenant
+// Data layer — every query here was validated against a live estate
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import { isScanLimit, noteScan, noteScanStart } from "./cost";
@@ -50,7 +50,7 @@ export function durStr(minutes: number): string {
  * verbatim so the control round-trips exactly what the user picked, and this
  * is the one place they become DQL: a rolling window stays rolling
  * (`now()-30m`), while a day boundary or a custom range resolves to an
- * absolute timestamp, which DQL accepts quoted (verified on the tenant).
+ * absolute timestamp, which DQL accepts quoted (verified on a live estate).
  */
 export function tfFrom(from: string, to: string): Timeframe {
   // Both grammars the control has been seen to emit: its own (`-24h`) and the
@@ -145,7 +145,7 @@ export async function runDql<T = Record<string, unknown>>(
    *
    * The platform reports some faults as notifications, not errors: the query
    * state comes back SUCCEEDED and the records come back empty. Measured on a
-   * live tenant — `in(trace.id, {"…"})` against a uid column answers
+   * live estate — `in(trace.id, {"…"})` against a uid column answers
    *   "Using `in`, needle and haystack have to be of same type.
    *    The needle was a uid, but should be a string."
    * with zero rows and no error. The chain drew that as "no trace reaches a
@@ -205,7 +205,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 /**
  * Names for every kind of RUM application, not just web.
  *
- * SMARTSCAPE, not the classic model: a Playground/dev tenant answers
+ * SMARTSCAPE, not the classic model: a Playground/dev estate answers
  * `fetch dt.entity.application` with UNKNOWN_DATA_OBJECT ("isn't a valid data
  * object") and every application on screen fell back to "Application 656efe54"
  * — the classic objects are being retired. One FRONTEND node type replaces all
@@ -219,7 +219,7 @@ export const qAppNames = () => `
 smartscapeNodes "FRONTEND"
 // frontend.type ("web" | "mobile") is the platform's OWN classification —
 // the picker used to infer it from a MOBILE_APPLICATION- id prefix and, when
-// dt.rum.application.entity came back null (measured on a Smartscape-only tenant), filed a
+// dt.rum.application.entity came back null (measured on a live estate), filed a
 // native Android app under "Web".
 | fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
     kind = frontend.type
@@ -235,7 +235,7 @@ smartscapeNodes "FRONTEND"
  * the reader's drilldown came back "No results found" with every chip applied.
  * Fixed 24h window on purpose — the mapping is a property of the app, not of
  * the timeframe, and user.sessions is a small store (134k rows/24h measured
- * on the reference tenant, 2026-08-25).
+ * on a live estate, 2026-08-25).
  */
 export const qFrontendNames = () => `
 fetch user.sessions, from: now()-24h
@@ -252,7 +252,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // Normalised before the aggregation, for the same reason the journeys are: the
 // limit is applied after grouping, so one uncollapsed id splits a real view
 // into hundreds of rows of one and pushes the real ones off the end. Measured
-// on this tenant: 1,042 raw names collapse to 9. A "limit 120" over 1,042
+// on a live estate: 1,042 raw names collapse to 9. A "limit 120" over 1,042
 // fragments was returning mostly noise.
 ${norm(VIEW_NAME, "v")}
 | summarize views = count(), sessions = countDistinct(dt.rum.session.id),
@@ -275,7 +275,7 @@ const VIEW_NAME = "coalesce(view.name, view.detected_name)";
  * more carrying BOTH a digit and a letter. That last one replaced an
  * upper-case-only rule that let Astroshop's lowercase SKUs through and drew
  * six bands of the same route ("/ → /product/*vchsjnup → /cart → …" once per
- * SKU). Measured on both tenants before shipping: every name it collapses is
+ * SKU). Measured on both estates before shipping: every name it collapses is
  * a product id, and "/checkout", "/api/v2/orders" and
  * "/orange-booking-finish.jsf" pass through untouched.
  */
@@ -310,7 +310,7 @@ const COLLAPSE_IDS = `
 export const qSequences = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // UNION of navigation and view_summary, because coverage inverts between
-// environments: on one tenant navigation covered 100% of sessions and
+// environments: on one estate navigation covered 100% of sessions and
 // view_summary 76%; on another, 72 sessions carried ONLY view_summary. Both
 // agents (browser and mobile) emit both — the union is faithful to each, and
 // the adjacent-duplicate collapse in mergeJourneys absorbs the overlap (a
@@ -324,7 +324,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 // the end.${COLLAPSE_IDS}
 | sort start_time asc
 // PLATFORM RIDES ALONG. One RUM application id can carry two platforms —
-// measured on a customer tenant, a single banking application reported both
+// measured on a live estate, a single banking application reported both
 // iOS view controllers and Android activities — and they do not share a
 // journey shape, so they cannot share one completion depth. dt.rum.agent.type
 // is the platform's own answer ("javascript" | "ios" | "android"); a session
@@ -382,7 +382,7 @@ ${COLLAPSE_IDS}
  * does the arithmetic (share, lift, delta) live in the browser, so a change
  * of dimension is one query and a change of measure is none.
  *
- * Dimensions on offer are the ones measured POPULATED on this tenant (24h,
+ * Dimensions on offer are the ones measured POPULATED on a live estate (24h,
  * two applications, session-level coverage): country 98–100%, OS, browser,
  * device type/manufacturer, screen width, app version, connection type, ISP,
  * user type, agent version, orientation, navigation type. Coverage is
@@ -439,7 +439,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * Every session CHARACTERISTIC the platform records, for the infographic.
  *
  * "All available" was measured, not assumed: the field inventory of
- * user.events was read off both a web and a mobile application on the reference tenant
+ * user.events was read off both a web and a mobile application on a live estate
  * and reduced to the categorical, session-describing fields — who the user
  * is, on what, from where. The rest of the schema (performance.*,
  * web_vitals.*, interaction.*, error.*) is measurement, not
@@ -569,7 +569,7 @@ export const qDifficulty = (tf: Timeframe, rumAppId?: string | null) => {
   // scoped like the board it feeds — the section describes one application
   const appFilter = rumAppId
     ? `\n  | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
-  // UNITS, measured on the tenant: ttfb.* come in MILLISECONDS (floats —
+  // UNITS, measured on a live estate: ttfb.* come in MILLISECONDS (floats —
   // truncating them to long zeroes sub-ms waits), web_vitals.* and duration
   // in NANOSECONDS. Everything is normalised to ns here.
   const slow = (label: string, from: string, to: string) => `
@@ -615,7 +615,7 @@ data record(appId = "", period = "", kind = "", bucket = "", views = 0, meas = 0
  * on a real page, its navigation just fell outside the window (window-edge
  * sessions and lone beacons); a few are request-only API traffic; some are
  * robots. Two legs: the composition, and the pages those stray beacons name
- * (per-session collectDistinct expanded back out — verified on the tenant).
+ * (per-session collectDistinct expanded back out — verified on a live estate).
  */
 export const qNoTelemetry = (tf: Timeframe, rumAppId: string) => {
   const app = rumAppId.replace(/["\\]/g, "");
@@ -648,7 +648,7 @@ data record(kind = "", bucket = "", sessions = 0, real = 0, robots = 0,
 
 /**
  * THE OUTCOME VOCABULARY — one list, measured against every application on
- * this tenant (audit 2026-08-16), shared by the DQL builders and the JS
+ * a live estate (audit 2026-08-16), shared by the DQL builders and the JS
  * regex so no two screens can disagree about what "converted" means.
  *
  * What the audit changed: "payment" is NOT completion — on the orange apps
@@ -718,7 +718,7 @@ export const qBizSeries = (
   /* THREE windows of history, not six. Measured both against the analyzer:
    * 12h and 6h of history for a 2h view both return OK / VALID with the same
    * eight forecast points — the extra six hours bought no quality and cost
-   * 17 GB per call on this tenant (two calls per board load). Merging the
+   * 17 GB per call on a live estate (two calls per board load). Merging the
    * two metrics into one call was tried and rejected: the analyzer forecasts
    * only the first series and silently drops the second. */
   const history = `now()-${span * 3}m`;
@@ -744,7 +744,7 @@ export const qBizSeries = (
  * Business Control's breakdown — ONE scan, not six.
  *
  * It used to be an append per dimension (five of them plus the error leg),
- * and measured on this tenant each leg paid its own 5.9 GB: 35.4 GB for one
+ * and measured on a live estate each leg paid its own 5.9 GB: 35.4 GB for one
  * board load, the single most expensive query in the app. Every leg read the
  * same rows to group them differently, so the whole thing collapses into one
  * per-session scan that carries the dimensions as columns; the browser does
@@ -809,7 +809,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
       waited = countIf(characteristics.classifier == "user_action"
         and toLong(duration) > ${APDEX_T_NS}),
       crash = countIf(error.type == "crash" or error.type == "anr"),
-      /* SCREENS, not view_summary EVENTS. Measured on this tenant: the median
+      /* SCREENS, not view_summary EVENTS. Measured on a live estate: the median
        * session emits ONE view_summary while its mined journey shows TWO
        * distinct screens, and 2,514 of 6,029 sessions (42%) emit none at all —
        * so the poster could say "median views 1.0" for a cohort the stage
@@ -850,7 +850,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * from one scan.
  */
 export const qBizKpis = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | null) => {
-  /* SCOPED BY DEFAULT. Measured: an unfiltered leg over this tenant's 2h of
+  /* SCOPED BY DEFAULT. Measured: an unfiltered leg over a live estate's 2h of
    * user.events scans 5.9 GB, the same leg filtered to one application 2.9 GB
    * (0.24 GB for a small one) — filters cut what projection cannot. The board
    * has shown ONE application since the estate view was removed, so the
@@ -957,7 +957,7 @@ export function normalizeView(name: string): string {
 /**
  * The view's display name, wherever the agent put it.
  *
- * Measured on the reference tenant, Astroshop Android, 2h: `view.detected_name` is null
+ * Measured on a live estate, Astroshop Android, 2h: `view.detected_name` is null
  * on ALL 332 mobile navigation events — the real names ("Home", "Product
  * detail", "Cart", "Checkout") live in `view.name` — while the few mobile
  * rows that DO carry detected_name carry the Activity class
@@ -1062,7 +1062,7 @@ export const qDomains = (tf: Timeframe) => {
   return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 /* Requests UNION failed calls. Request records carry only 200/201 on both
- * measured tenants (bwm: 445k requests, statuses {200, 0, null}) — every
+ * measured estates (bwm: 445k requests, statuses {200, 0, null}) — every
  * failed call is filed as an error with source "fetch", so counting
  * status >= 400 here was a structural 0 wearing "clean". The error rows ride
  * the same scan; on gru they carry url.domain (99%), on bwm they do not —
@@ -1091,7 +1091,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * "Users" is measured as sessions: this environment's RUM carries no user
  * identity — `dt.rum.browser.sid` is null on every event measured — so distinct
  * sessions is the honest count and the label must say sessions. The split by
- * real / robot / synthetic matters here because a demo tenant's impact is
+ * real / robot / synthetic matters here because a demo estate's impact is
  * mostly load generators, and 954 impacted robots is a different statement
  * from 954 impacted people.
  *
@@ -1137,7 +1137,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // Third party is claimed only when the data SAYS so; unattributed counts
     // as our own, so nothing hides behind a null.
     // http.request.provider and exception.file.provider are null on 100% of
-    // this tenant's events (measured); the only third-party attribution the
+    // a live estate's events (measured); the only third-party attribution the
     // data actually carries is the CSP blocked-uri provider — counted when it
     // names anyone but first_party. Unattributed still counts as our own.
     errsThird = countIf(characteristics.classifier == "error"
@@ -1186,7 +1186,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
   by: { appId }
 // APDEX, in its own leg at VIEW-INSTANCE grain, because Dynatrace's rule —
 // "user actions with reported errors are rated as Frustrated" — needs the
-// error linked to the action, and this tenant's error events carry no
+// error linked to the action, and a live estate's error events carry no
 // user_action.id. view.instance_id is the grain both sides share (verified:
 // 1,224 view instances hold both), so an errored view frustrates its own
 // actions. An error without a view instance frustrates nothing — the rule
@@ -1240,7 +1240,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     actions = countIf(characteristics.classifier == "user_action"),
     requests = countIf(characteristics.classifier == "request"),
     // failed CALLS, not status codes — request records carry only 200/201
-    // on both measured tenants; failures are filed as fetch-source errors
+    // on both measured estates; failures are filed as fetch-source errors
     reqfail = countIf(characteristics.classifier == "error"
       and error.source == "fetch"),
     exceptions = countIf(error.type == "exception"),
@@ -1309,7 +1309,7 @@ smartscapeNodes "*" | summarize nodes = count(), by: { type }
  *
  * These read 24 hours no matter what the reader had selected, which made the
  * chain describe a different period from every number beside it — and cost
- * accordingly: measured on a customer tenant, the Davis reads were 26 of the
+ * accordingly: measured on a live estate, the Davis reads were 26 of the
  * 31 GiB one Overview load scanned. The platform's own apps default to two
  * hours and follow the picker; so does this now.
  *
@@ -1326,7 +1326,7 @@ fetch dt.davis.problems, from: ${tf.from}, to: ${tf.to}
 // Davis marks re-raised problems as duplicates of an original. Every example
 // in the platform's own guidance drops them, and counting one incident twice
 // would overstate the blast radius a route is meant to size. Measured on this
-// tenant it currently changes nothing — 5 active problems, 5 distinct ids,
+// estate it currently changes nothing — 5 active problems, 5 distinct ids,
 // none flagged — so this is a guard against a case that has not happened yet.
 | filter not(dt.davis.is_duplicate)
 | fields eventId = event.id, display_id, name = event.name, category = event.category,
@@ -1350,14 +1350,14 @@ fetch dt.davis.problems, from: ${tf.from}, to: ${tf.to}
  * subquery, and the subquery could only be filtered by `isNotNull(service)` —
  * the left side's trace ids are not visible inside it, so it read the whole
  * window. On a large estate that hits the platform's own ceiling: measured on a
- * customer tenant, HTTP 400 `JOIN_RIGHT_TABLE_SIZE`, "the join command's
+ * customer estate, HTTP 400 `JOIN_RIGHT_TABLE_SIZE`, "the join command's
  * subquery read too much data", and the chain's service layer came back empty
  * with no visible reason. Asking for the ids first and filtering the spans BY
  * them removes the subquery entirely, so no join limit applies and the span
  * side is selective instead of exhaustive.
  */
 /**
- * WHAT THIS TENANT ACTUALLY SENDS, asked only when the application picker came
+ * WHAT THIS ENVIRONMENT ACTUALLY SENDS, asked only when the application picker came
  * back empty.
  *
  * Every journey this product draws is mined from `user.events`, which is
@@ -1422,7 +1422,7 @@ fetch spans, from: ${since}
  * matches). RE-MEASURED 2026-08-16: that invariant is GONE — 1,108 of 78,619
  * RUM events now carry trace ids that DO join Grail spans, and the 10-minute
  * join alone returns 7 services. The chain still renders correctly because
- * the trace join and this classic walk AGREE on this tenant; if they ever
+ * the trace join and this classic walk AGREE on a live estate; if they ever
  * diverge, useAppScope's union would double-source volumes. Watch it.
  * The classic entity model still
  * knows the truth: `calls[dt.entity.service]` is the same relationship the
@@ -1505,7 +1505,7 @@ fetch user.events, from: now()-30m
 export const qDomMetrics = (rumAppId: string, domain: string) => `
 fetch user.events, from: now()-30m
 /* failed CALLS ride as fetch-source errors, not status >= 400 on request
- * records (those carry only 200/201 — measured on both tenants) */
+ * records (those carry only 200/201 — measured on both estates) */
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and url.domain == "${domain.replace(/["\\]/g, "")}"
     and (characteristics.classifier == "request"
@@ -1521,7 +1521,7 @@ fetch user.events, from: now()-30m
  * ONE SCAN FOR TWO QUESTIONS.
  *
  * The board asked the Davis store three separate times over the same 24-hour
- * window, and measured on a customer tenant each of those scans cost 8.7 GiB —
+ * window, and measured on a live estate each of those scans cost 8.7 GiB —
  * 26.1 GiB of a 30.6 GiB page load, 85% of it, to read one store three ways.
  *
  * Two of the three were coarse counts with no expansion: "events per type and
@@ -1658,7 +1658,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * the finding is stated once, with its true weight behind it. The pattern is
  * DPL, not a regex, and the replacement is POSITIONAL: with: is rejected.
  *
- * AN ERROR IS NOT ALWAYS NAMED. Measured on this tenant: all 25 errors of one
+ * AN ERROR IS NOT ALWAYS NAMED. Measured on a live estate: all 25 errors of one
  * application carry a null error.name — HTTP 500s with no message and no url.
  * An earlier isNotNull(name) filter dropped every one of them, so the card
  * read "27 errors" while this panel read "nothing recorded". Nothing is
@@ -1695,7 +1695,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * Web requests per domain.
  *
  * Failures come from the ERROR events, not from status codes: measured on this
- * tenant, `request` records carry only 200 and 201 — every failed call is
+ * estate, `request` records carry only 200 and 201 — every failed call is
  * filed as an error with source "fetch". Counting 4xx/5xx off the request
  * records returned 0 failures against 598 real ones.
  */
@@ -1747,12 +1747,12 @@ timeseries p50 = percentile(dt.service.request.response_time, 50),
 /**
  * The provider behind a host: instance, then zone.
  *
- * Validated against Smartscape Gen3 on this tenant before it became code:
+ * Validated against Smartscape Gen3 on a live estate before it became code:
  *
- *   HOST-34B959AE58123C71 (ip-172-31-10-60, 15 services)
+ *   HOST-<id> (ip-<redacted>, 15 services)
  *     runs_on → AWS_EC2_INSTANCE-B1CFB55F52DF66F6
  *       runs_on → AWS_AVAILABILITY_ZONE  (use1-az4)
- *   HOST-696AF78FBB4E6F8B (gke-…)
+ *   HOST-<id> (gke-…)
  *     runs_on → GCP_COMPUTE_…_INSTANCE
  *       uses  → GCP_ZONE  (us-central1-b)
  *
@@ -1766,11 +1766,11 @@ timeseries p50 = percentile(dt.service.request.response_time, 50),
  * AZURE_MICROSOFT_COMPUTE_DISKS — three of them here — so a disk would have
  * been drawn as the machine a service runs on.
  *
- * COVERAGE, honestly: AWS and GCP are verified end to end against this tenant.
+ * COVERAGE, honestly: AWS and GCP are verified end to end against a live estate.
  * Azure is listed from its entity types and has NOT been observed carrying a
  * host, so it is written but unproven. Azure models VMs inside scale sets and
  * reaches a location rather than a zone, so its second hop may need its own
- * handling when a tenant with Azure hosts turns up.
+ * handling when a live estate with Azure hosts turns up.
  */
 export const qCloudPlacement = (hostIds: string[]) => `
 smartscapeEdges "runs_on"
@@ -1796,7 +1796,7 @@ smartscapeEdges "runs_on"
  * The Databases app's entity behind a store address, when one exists.
  *
  * A store card is discovered from spans and carries an ADDRESS, while the
- * Gen3 Databases app (dynatrace.database.overview — read off this tenant's
+ * Gen3 Databases app (dynatrace.database.overview — read off a live estate's
  * registry) is keyed on DB_INSTANCE_* / DB_DATABASE_* smartscape ids. The
  * bridge is the name, and it was measured before it became a rule:
  *
@@ -1832,7 +1832,7 @@ smartscapeNodes "*"
 /**
  * Every store address resolved to its DB entity in ONE Smartscape lookup —
  * the per-click qDbEntity, batched, so store CARDS can carry entity ids up
- * front. Why it matters (audit, 2026-08-25): the tenant's active database
+ * front. Why it matters (audit, 2026-08-25): a live estate's active database
  * health alerts bind to the instances' CLASSIC ids (CUSTOM_DEVICE-…), and a
  * card with no ids can never light — the Databases app showed a store's
  * "Configuration" alert while our chain painted it calm.
@@ -1873,7 +1873,7 @@ fetch user.sessions, from: now()-24h
  *
  * A lambda-backed service produces no HOST, so the Cloud layer — born only
  * from hosts — never existed for it, and the chain ended at Run while the
- * platform knew better. Measured on the reference tenant: the AWS_LAMBDA_FUNCTION node
+ * platform knew better. Measured on a live estate: the AWS_LAMBDA_FUNCTION node
  * itself carries cloud.provider "aws", aws.region "us-east-1" and
  * aws.account.id — the whole Provider card, as node properties, no edge
  * needed. A region is not an availability zone, and the card says region.
@@ -1891,7 +1891,7 @@ smartscapeNodes "AWS_LAMBDA_FUNCTION"
  * The data stores this application's services talk to.
  *
  * NOT from Smartscape, and that was measured rather than assumed. On this
- * tenant Smartscape holds 14 AWS_RDS_DBINSTANCE and 36 AWS_DYNAMODB_TABLE
+ * estate Smartscape holds 14 AWS_RDS_DBINSTANCE and 36 AWS_DYNAMODB_TABLE
  * nodes and exactly ZERO edges from a service to any of them — the only edge
  * touching a store at all is an event-source mapping. A chain built on that
  * would draw databases for nobody.
@@ -1934,7 +1934,7 @@ fetch spans, from: now()-10m, to: now()
  * What the CLASSIC topology says these services call — used only for what
  * Smartscape does not know.
  *
- * Measured on the reference tenant, on the easyTravel mainframe application, and this is
+ * Measured on a live estate, on the easyTravel mainframe application, and this is
  * the whole reason it exists: Smartscape Gen3 draws seven services and six
  * `calls` edges between them, and stops. The classic entity model, over the
  * SAME entity ids, adds one more — `MF easyTravelBusiness`, a
@@ -1970,7 +1970,7 @@ fetch dt.entity.service, from: now()-2h
 /* An EXTERNAL WEB service is the same code seen from its caller.
  *
  * The classic model describes one running process at more than one
- * granularity, and the walk finds every level. Measured on the reference tenant:
+ * granularity, and the walk finds every level. Measured on a live estate:
  *
  *   MF JourneyService                             WEB_SERVICE   external=false
  *   MF /services/JourneyService/ on port 8091     WEB_SERVICE   external=TRUE
@@ -2005,7 +2005,7 @@ fetch dt.entity.service, from: now()-2h
  * A service's vitals from the METRIC STORE, for services that have no spans.
  *
  * The drawer reads spans, which is right for anything OneAgent traces into
- * Grail — and wrong for everything else. Measured on the reference tenant: `MF
+ * Grail — and wrong for everything else. Measured on a live estate: `MF
  * easyTravelBusiness` has zero spans, so the tiles printed p50 0ms, p90 0ms,
  * throughput 0 for a service the metric store shows serving 17, 280 and 60
  * requests in consecutive minutes at 4.7ms, 0.3ms and 3.9ms. A confident zero
@@ -2035,7 +2035,7 @@ timeseries { rt = avg(dt.service.request.response_time),
  *
  * The selector is built from `user.events`, which is right for anything
  * sending RUM to Grail and silently wrong for everything else. Measured on
- * the reference tenant: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
+ * a live estate: `easyTravel Mobile (mainframe)` has ZERO events in seven days,
  * so it could never be listed — while the platform's own service flow drew
  * its whole backend, mainframe included. `easyTravel Mobile` has 375 events
  * in 24h and simply falls out of a two-hour window.
@@ -2059,7 +2059,7 @@ smartscapeNodes "FRONTEND"
  *
  * Used as the scope's seed when neither the trace join nor Smartscape found
  * anything — the third source, asked last. Verified on
- * MOBILE_APPLICATION-773D0C09E8E14B58: the seed is `MF EasyTravelWebserver:9079`,
+ * MOBILE_APPLICATION-<id>: the seed is `MF EasyTravelWebserver:9079`,
  * and walking `calls` from there reaches MF EasytravelService,
  * ConfigurationService, BookingService, JourneyService, VerificationService,
  * AuthenticationService, CheckDestination and MF easyTravelBusiness — the
@@ -2084,7 +2084,7 @@ smartscapeEdges "calls"
  * It used to read the device-profile rows, and those are a TOP-20 over the
  * whole environment: grouped by application AND resolution AND pixel ratio AND
  * orientation, twenty rows is a handful of the busiest applications. Measured
- * on the reference tenant — 248 profile rows across 14 applications, and the top twenty
+ * on a live estate — 248 profile rows across 14 applications, and the top twenty
  * covered seven of them. easyTravel mainframe has 26 profile rows and 431
  * sessions, none of which reach the cut, so its Consume layer drew "No
  * coverage" while the Sessions app listed 281 of them with their browsers.
@@ -2122,7 +2122,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
     res = takeAny(concat(device.screen.width, "×", device.screen.height)),
     views = countIf(characteristics.classifier == "view_summary"),
     // start_time, NOT timestamp: measured, timestamp is null on every
-    // user.events row of this tenant (14,099 of 14,099 sessions)
+    // user.events row of a live estate (14,099 of 14,099 sessions)
     t0 = min(start_time),
     // whether THIS session met an error — summed per origin below it makes
     // the per-origin impact MEASURED; the audit found it was a proportional

@@ -77,7 +77,7 @@ export function verdictOf(v: VerdictInput): Verdict {
   const sessions = v.sessions ?? 0;
   const hit = v.hit ?? 0;
   /* ── who actually felt it ──
-   * Measured on this tenant: two applications report 100% of sessions hit by
+   * Measured on a live estate: two applications report 100% of sessions hit by
    * errors and have not one human user between them — every session is a robot
    * or a synthetic monitor. Judging those "Critical" put them at the top of the
    * estate table and pushed the one application with 24,491 real users and
@@ -185,7 +185,7 @@ export const FAIL_LEGEND =
  * Fewest measured journeys before a screen states a SHARE, a percentage or a
  * superlative ("biggest loss", "worst screen").
  *
- * Below it the arithmetic still works and means nothing: on a customer tenant
+ * Below it the arithmetic still works and means nothing: on a live estate
  * an application with four journeys was being shown a funnel with "25%", "50%"
  * and a named biggest loss of two sessions. The pictures still draw — they
  * portray what happened and are honest at any size — but the ratios wait for a

@@ -8,7 +8,7 @@
 // only four pairs, none of them for these apps. They were first read off the
 // chooser itself (an earlier note claimed no registry endpoint exposes intent
 // declarations; that is no longer true — `dtctl get intents` lists all 1,304
-// declared on this tenant, and every pair below was re-validated against that
+// declared on a live estate, and every pair below was re-validated against that
 // listing on 2026-08-16). The chooser capture: each option it renders is an
 // anchor carrying
 //
@@ -17,7 +17,7 @@
 //
 // so sending a payload with no recommendation and scraping the dialog lists
 // every app that accepts it, with its action id. Each pair below was captured
-// that way against this tenant, and `dynatrace.infraops/view_host` was then
+// that way against a live estate, and `dynatrace.infraops/view_host` was then
 // confirmed end to end — it navigated straight to the host, no dialog.
 //
 // Two of them could never have been guessed: the Logs app uses snake_case
@@ -46,7 +46,7 @@ const INTENTS: Partial<Record<Capability, Record<string, IntentRef>>> = {
     "dynatrace.classic.hosts": { intentId: "view-host", source: "verified" },
   },
   processes: {
-    // Read off this tenant's registry (2026-08-25): view_process declares
+    // Read off a live estate's registry (2026-08-25): view_process declares
     // the same shape as the verified view_host pair (meId required). With no
     // entry here the process route named no action and every click landed on
     // the "Open with…" chooser — the reader's screenshot.
@@ -145,7 +145,7 @@ export const TRACES_LIST: IntentRef = { intentId: "view-traces", source: "verifi
  * "sessions". `explorer.properties.filters` is an optional filter-bar string;
  * if the environment ignores it the list opens unfiltered — a safe
  * degradation, never an empty screen. End-to-end navigation check pending:
- * the tenant shell would not render in a browser the day this was wired.
+ * a live estate shell would not render in a browser the day this was wired.
  */
 export const SESSIONS_LIST = {
   appId: "dynatrace.users.sessions",
@@ -165,7 +165,7 @@ export const SESSIONS_LIST = {
  * entity id goes in as is and mobile applications are covered by the same
  * pair. `dt.timeframe` is the ordinary `{from, to}` object — the window the
  * page is reading travels with the hand-off, so the app opens on the same
- * numbers. `error.type` is optional and free-form; the two this tenant emits
+ * numbers. `error.type` is optional and free-form; the two a live estate emits
  * are "exception" and "request", and omitting it opens all of them.
  */
 /* NOT used for the drill-downs any more, and the reason is worth keeping:

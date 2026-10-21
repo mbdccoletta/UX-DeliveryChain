@@ -56,7 +56,7 @@ export const TIERS: Array<[string, string, string]> = [
   ["Runtime", "pods and containers", "Run"],
   ["Infrastructure & cloud", "nodes, hosts and provider", "Host"],
   // The eighth layer exists only where the machinery has a provider behind it.
-  // Measured on this tenant: 7 of 49 hosts do; for the other 42 the chain ends
+  // Measured on a live estate: 7 of 49 hosts do; for the other 42 the chain ends
   // at Infrastructure rather than showing an empty column.
   ["Cloud", "where the machine lives", "Provider"],
 ];
@@ -134,7 +134,7 @@ interface Elo {
    * An offer the card makes, rather than a cost the page already paid.
    *
    * The span read that measures a backend link scans the biggest store in
-   * Grail — ~32 GiB for ten minutes on a tenant carrying 169M spans in two
+   * Grail — ~32 GiB for ten minutes on a live estate carrying 169M spans in two
    * hours, about $0.11 a click. Topology answers free and answers first; when
    * it cannot, the card SAYS what the deeper read would cost and lets a person
    * decide, instead of billing them for opening a page.
@@ -265,7 +265,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    *
    * Profiles are a top-20 over the whole environment — grouped by application
    * and resolution and pixel ratio and orientation, twenty rows is a handful
-   * of the busiest applications. Measured on the reference tenant: 248 profile rows across
+   * of the busiest applications. Measured on a live estate: 248 profile rows across
    * 14 applications, the top twenty covering seven of them. easyTravel
    * mainframe has 431 sessions and 26 profile rows, none of which survive the
    * cut, so this layer drew "No coverage" while the Sessions app listed those
@@ -299,7 +299,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   };
 
   // rows arrive split by origin for the edges; cards aggregate per domain.
-  // err now counts failed CALLS (fetch-source errors); on tenants whose
+  // err now counts failed CALLS (fetch-source errors); on estates whose
   // error events carry no url.domain they arrive under domain "" — those
   // failures are real but unattributable, so they gate the "clean" word
   // instead of joining a domain's tally.
@@ -325,7 +325,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       reqs: r.reqs, p50: r.p50, p90: r.p90, err: r.err, bytes: r.bytes,
       late: r.late ?? null });
   }
-  /* Latency with its dignity. Measured on this tenant: over half of the
+  /* Latency with its dignity. Measured on a live estate: over half of the
    * 916k first-party requests report ZERO duration, so the median is 0 and
    * a bare "0ms" was truth wearing the clothes of nonsense. When the median
    * is silent the tail speaks, labelled as itself; the ledger says WHY. */
@@ -401,12 +401,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * host-based deployment maps as completely as a Kubernetes one.
    */
   /* A serverless function is a PLACEMENT, not a layer of its own: measured on
-   * the reference tenant, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
+   * a live estate, `SERVICE runs_on AWS_LAMBDA_FUNCTION` exists five times, exactly
    * the shape of `runs_on HOST`. So a lambda-backed service maps with no new
    * query and no new column — the runtime card simply says "lambda" where
    * another says "host".
    *
-   * Listed even though the dev tenant has none of those edges today, because the
+   * Listed even though a live estate has none of those edges today, because the
    * list is read against what the placement query returned: a type absent from
    * the environment costs nothing, while a type missing from this list is a
    * service silently drawn as running on nothing. */
@@ -449,9 +449,9 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   /* TWO DIFFERENT FINDINGS, TWO DIFFERENT SENTENCES. "No trace reaches a
      service" covered both an application that never propagated a trace id and
      one whose traces landed on nothing monitored — and they call for opposite
-     actions. Measured on a customer tenant: of twenty applications, nine
+     actions. Measured on a live estate: of twenty applications, nine
      carried thousands of requests and not one trace id, while neighbours on
-     the same tenant carried tens of thousands. That is a tracing-context gap
+     the same estate carried tens of thousands. That is a tracing-context gap
      in the frontend's own configuration, and telling that reader to "check
      OneAgent coverage" on the backend sends them to the wrong building. */
   const noLink: Elo = scope.tracesSeen === 0
@@ -514,7 +514,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           v: fmtMs(wAvg((s) => s.p50)), tone: "info", vol: calls,
           store, grp: "stores",
           /* ids WHEN the DB entity resolves (batched, useDbEntities): the
-           * tenant's database health alerts bind to the instances' classic
+           * estate's database health alerts bind to the instances' classic
            * CUSTOM_DEVICE- ids, and a card with no ids could never light —
            * the Databases app showed a "Configuration" alert this chain
            * painted calm. A store with no DB_* node (redis, mongo) still
@@ -819,7 +819,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
 
     /* ── Cloud, and only where there is one ──
      * Present exactly when a host in scope has a provider behind it. On this
-     * tenant that is 7 hosts of 49; for the rest this layer holds nothing and
+     * estate that is 7 hosts of 49; for the rest this layer holds nothing and
      * the renderer drops it, so the chain ends at Infrastructure rather than
      * showing an eighth column with nothing in it.
      *
@@ -1152,7 +1152,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   /* the entity, derived when the qApps row is gone — which is EXACTLY the
    * quiet case: zero events in the window means no row to read it from.
    * Measured: a mobile RUM id is the entity's hex as a dashed uuid
-   * (21cb4989-d0a5-46c7-… ⇔ MOBILE_APPLICATION-21CB4989D0A546C7); a web
+   * (<uuid>… ⇔ MOBILE_APPLICATION-<id>); a web
    * RUM id is the 16-hex itself. */
   const quietEntity = data.apps.find((a) => a.appId === appId)?.entity
     ?? (/^[0-9a-f]{16}$/.test(appId) ? `APPLICATION-${appId.toUpperCase()}`
@@ -1208,7 +1208,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const { t: view, fit, zoomIn, zoomOut, reset } = usePanZoom(shellRef, canvasRef);
-  // Assist may be off for this tenant or this user; the routes ask before offering
+  // Assist may be off for a live estate or this user; the routes ask before offering
   const assist = useAssist();
   // which app owns each capability here — Gen3 if installed, classic otherwise
   const apps = useApps();
@@ -1377,7 +1377,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
       /* ONE FINDING, SAID ONCE.
        *
        * The old rule deduplicated on value AND label, so every leg out of a
-       * busy node survived — thirteen of them, measured on a customer tenant,
+       * busy node survived — thirteen of them, measured on a live estate,
        * each reading "requests ↗" down the left of the diagram. Thirteen
        * labels saying the same word are not thirteen findings; they are one
        * finding repeated until it stops being read.
@@ -1942,7 +1942,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
               const beTone: Tone = [4, 5, 6, 7].reduce<Tone>(
                 (acc, ti) => worseOf(acc, tiers[ti]?.tone ?? "good"), "good");
               const storeCount = new Set((stores ?? []).map((st) => st.store)).size;
-              /* THIS app's runtime, not the tenant's: `data.runtime` is the
+              /* THIS app's runtime, not a live estate's: `data.runtime` is the
                * whole environment, and it sent a VM-deployed application's
                * reader to the Kubernetes app — measured, easytravel's 8
                * services run on zero pods. While the scope is still

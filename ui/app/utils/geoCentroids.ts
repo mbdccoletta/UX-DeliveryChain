@@ -1,6 +1,6 @@
 // ISO-3166 alpha-2 → [lat, lng] country centroids.
 //
-// Measured on this tenant: RUM events carry NO city coordinates
+// Measured on a live estate: RUM events carry NO city coordinates
 // (geo.city.latitude/longitude are null on every row), only country codes.
 // The platform's DotLayer wants latitude/longitude — so the bubbles the
 // standard component draws are placed at COUNTRY centroids, which is the

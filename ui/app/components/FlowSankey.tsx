@@ -71,7 +71,7 @@ function stageIdOf(path: string[], outcomes: boolean, deepest: number): string {
    * "checkout" meant completed — which is a guess dressed as a measurement:
    * it fits one demo application and misses every customer whose screens are
    * named in another language, or whose completion is not a screen at all.
-   * Measured on this tenant, 185 sessions of 970 counted as "converted" on
+   * Measured on a live estate, 185 sessions of 970 counted as "converted" on
    * evidence the journey never showed, so a path that ended could display a
    * conversion. Depth is the honest signal, and it is defined for every
    * application without asking anyone anything. */
@@ -675,7 +675,7 @@ export function FlowSankey({
   /* "No page telemetry", unpacked on click: what those sessions are made of
    * and which pages their stray beacons name. null = closed. */
   /** The folded remainder, unpacked by DESTINATION — opened from the band
-   *  while the "N other paths" node is selected. Measured on this tenant:
+   *  while the "N other paths" node is selected. Measured on a live estate:
    *  162 folded routes ended at just 10 views, one of them the conversion
    *  page — 392 real completions the reader could not see, let alone teach
    *  a goal from. Computed in memory: the journeys are already here. */
@@ -990,13 +990,37 @@ export function FlowSankey({
       /* tooltip: the full path and its numbers, near the hovered node */
       const hv = hover ? placed.find((p) => p.id === hover) : null;
       if (hv) {
-        const l1 = hv.full ?? hv.nm;
+        /* THE BOX IS CLAMPED BY ITS TEXT, NOT ONLY BY ITS POSITION.
+         *
+         * This positioned with Math.max(6, Math.min(w - bw - 6, …)) — which is
+         * right for a box that FITS. A mined route can be 120 screens long, and
+         * once bw exceeds the canvas, `w - bw - 6` goes negative, the Math.max
+         * hands back 6, and the box starts at the left margin and runs off the
+         * right edge of the screen. No position solves a box wider than the
+         * surface; the text has to give.
+         *
+         * So the label is cut to what the canvas can hold, with an ellipsis
+         * saying it was cut. The full route is still reachable — it is the row
+         * the reader is hovering, and the selection carries it onward. */
         const l2 = `${fmtN(hv.v)} · ${hv.sub}`;
+        const maxW = Math.max(120, w - 32);
         ctx.font = "600 11px sans-serif";
+        let l1 = hv.full ?? hv.nm;
+        if (ctx.measureText(l1).width > maxW) {
+          // binary search the longest prefix that fits, so a 120-screen route
+          // costs one measure per halving rather than one per character
+          let lo = 0, hi = l1.length;
+          while (lo < hi) {
+            const mid = Math.ceil((lo + hi) / 2);
+            if (ctx.measureText(l1.slice(0, mid) + "…").width <= maxW) lo = mid;
+            else hi = mid - 1;
+          }
+          l1 = l1.slice(0, lo) + "…";
+        }
         const w1 = ctx.measureText(l1).width;
         ctx.font = "500 10px monospace";
-        const w2 = ctx.measureText(l2).width;
-        const bw = Math.max(w1, w2) + 20, bh = 40;
+        const w2 = Math.min(ctx.measureText(l2).width, maxW);
+        const bw = Math.min(Math.max(w1, w2) + 20, w - 12), bh = 40;
         const bx = Math.max(6, Math.min(w - bw - 6, hv.x + 16));
         const by = Math.max(6, Math.min(h - bh - 6, hv.y + hv.h / 2 - bh - 6 < 6 ? hv.y + hv.h / 2 + 10 : hv.y + hv.h / 2 - bh - 6));
         ctx.fillStyle = cssVar("--panel-2");
@@ -1201,7 +1225,7 @@ export function FlowSankey({
       /* THE JOIN THAT WAS MISSING. The poster already knew where sessions end
        * and, separately, how the application loads — and never put the two
        * together, leaving the reader to assume the first is caused by the
-       * second. Measured on this tenant it is not: the four screens where
+       * second. Measured on a live estate it is not: the four screens where
        * sessions end most run 386–523ms while the slowest screen in the app
        * (1,126ms) is barely an ending at all. The per-view timing is already
        * fetched for the chain, so the join costs nothing. */

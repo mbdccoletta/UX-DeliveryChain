@@ -2,10 +2,10 @@
 //
 // The chain used to end at the host. Smartscape keeps going: a host runs on an
 // EC2 instance or a GCE instance, and that instance sits in an availability
-// zone. Validated against Gen3 before this existed — HOST-34B959AE58123C71
+// zone. Validated against Gen3 before this existed — HOST-<id>
 // (15 services) → AWS_EC2_INSTANCE-B1CFB55F52DF66F6 → use1-az1.
 //
-// CONDITIONAL BY DESIGN. Measured on this tenant, 7 of 49 hosts have a cloud
+// CONDITIONAL BY DESIGN. Measured on a live estate, 7 of 49 hosts have a cloud
 // parent; the other 42 have none. Rather than draw an empty column for them,
 // the layer is absent, and the chain honestly ends at Infrastructure. An empty
 // column would be one more component connected to nothing, which is the defect
@@ -40,7 +40,7 @@ export function useCloudScope(
   /** AWS_LAMBDA_FUNCTION placement ids — a lambda-backed service produces no
    *  HOST, and the Provider column born only from hosts never existed for
    *  it. The function node itself carries provider, region and account
-   *  (measured on the reference tenant), so serverless earns the column too. */
+   *  (measured on a live estate), so serverless earns the column too. */
   lambdaIds: string[] = [],
   active = true,
 ): CloudPlacement[] | null {

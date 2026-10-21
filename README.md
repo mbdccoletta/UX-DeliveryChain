@@ -8,8 +8,8 @@ App ID: `my.deliverychain.ux`.
 ## Run on the dev server
 
 Point the checkout at your own environment first. `app.config.json` ships a
-placeholder on purpose — the tenant you use is a local fact, not a committed
-one:
+placeholder on purpose — the environment you point at is a local fact, not a
+committed one:
 
 ```bash
 cp .env.example .env      # then edit DT_APP_ENVIRONMENT_URL
@@ -24,8 +24,8 @@ in `app.config.json`, so a one-off environment needs no edit at all:
 npm start -- --environment-url https://<your-environment>.apps.dynatrace.com
 ```
 
-`dt-app dev` opens the SSO URL on first run — you need to authenticate with a
-tenant account. After that the app serves on `http://localhost:3000` (or the
+`dt-app dev` opens the SSO URL on first run — you need to authenticate against
+the environment. After that the app serves on `http://localhost:3000` (or the
 port passed with `-p`).
 
 Deploy: `npm run deploy` (same precedence rules).
@@ -48,7 +48,7 @@ figures on screen and instructed to invent none.
 ## Queries
 
 All of them live in [`ui/app/utils/dql.ts`](ui/app/utils/dql.ts) and were
-validated against the tenant before becoming code. The main ones:
+validated against a live estate before becoming code. The main ones:
 
 - **Applications**: `user.events` aggregated by `dt.rum.application.id`
 - **Journey sequences**: `collectArray` of views per session, with URLs
@@ -150,5 +150,4 @@ ui/app/components/DeliveryChain.tsx  the seven layers and their signals
 ui/app/components/ReportView.tsx     Business Control
 ui/app/components/Intelligence.tsx   the per-page questions
 ui/app/styles/theme.css              tokens, then the app's own layer
-pilots/prototype.html                the navigable prototype it grew from
 ```
