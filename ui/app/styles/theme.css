@@ -2424,8 +2424,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   .cc .cc-mod { transition: none; }
 }
 /* ─── the metric chart, opened on demand ─── */
+/* A PANEL IS A PANEL. These two carried a 3px coloured rail down their left
+   edge, which is not how the platform draws a panel — a rail that thick is
+   row vocabulary, the thing an insight row uses to carry a severity, and on
+   a full-width panel it reads as a component from somewhere else. Uniform
+   1px neutral border, like every other panel in the product. */
 .mch { background: var(--panel); border: 1px solid var(--border);
-  border-left: 3px solid var(--m); border-radius: 12px; padding: 10px 14px 8px;
+  border-radius: 12px; padding: 10px 14px 8px;
   animation: mchin 220ms ease-out; }
 @keyframes mchin { from { opacity: 0; transform: translateY(-6px); } }
 .mch__hd { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
@@ -2452,7 +2457,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* ─── services drill-down: where each backend service is heading ─── */
 .svcf { background: var(--panel); border: 1px solid var(--border);
-  border-left: 3px solid var(--accent); border-radius: 12px;
+  border-radius: 12px;
   padding: 10px 14px 8px; animation: mchin 220ms ease-out; }
 .svcf__rows { display: flex; flex-direction: column; }
 .svcf__row { display: grid;
