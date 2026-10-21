@@ -56,6 +56,13 @@
   --good-fill: var(--dt-colors-background-container-success-accent, #5eb1a9);
   --warn-fill: var(--dt-colors-background-container-warning-accent, #eea746);
   --bad-fill:  var(--dt-colors-background-container-critical-accent, #c82d40);
+  /* THE PLATFORM'S OWN LINE WEIGHTS. Strato ships two and documents what
+     each is for: --dt-borders-width-default (1px) and
+     --dt-borders-width-emphasized (2px), the second "to emphasize borders …
+     clearly separate content". The cards and panels on these screens ARE the
+     separation between one reading and the next, so they take the emphasized
+     one — from the token, not from a number chosen here. */
+  --bw: var(--dt-borders-width-emphasized, 2px);
   --accent:   #6366f1;
   --accent-dim: rgba(99, 102, 241, 0.12);
   /* Identity palette: Pulse Assessment's capability colours for CATEGORIES —
@@ -274,7 +281,7 @@ svg { shape-rendering: geometricPrecision; }
   color: color-mix(in srgb, var(--accent) 55%, var(--ink-hi)); }
 
 /* panels */
-.panel { background: var(--panel); border: 1px solid var(--border); }
+.panel { background: var(--panel); border: var(--bw) solid var(--border); }
 .panel__hd { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .panel__hd::before { content: "▪"; color: var(--accent); font-size: 12px; }
 .panel__hd .hint { margin-left: auto; font: 500 12px var(--mono); text-transform: uppercase;
@@ -1774,14 +1781,14 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
      language and, over white, reads as smoke. This is the platform's own
      card surface in both themes. */
   background: var(--panel);
-  border: 1px solid color-mix(in srgb, var(--c) 65%, transparent);
+  border: var(--bw) solid color-mix(in srgb, var(--c) 65%, transparent);
   border-radius: 12px; padding: 14px 16px;
   /* NO GLOW. The border carries the status and the border is what animates;
      a 26px bloom of the same colour behind it is decoration, and on a light
      ground it is a coloured cloud around the card. */
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 14%, transparent); }
 .tk-block::before, .tk-block::after { content: ""; position: absolute; width: 14px; height: 14px;
-  border: 1px solid color-mix(in srgb, var(--c) 70%, transparent); }
+  border: var(--bw) solid color-mix(in srgb, var(--c) 70%, transparent); }
 .tk-block::before { top: -1px; left: -1px; border-right: none; border-bottom: none;
   border-radius: 10px 0 0 0; }
 .tk-block::after { bottom: -1px; right: -1px; border-left: none; border-top: none;
@@ -1825,7 +1832,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
     var(--panel);
   /* ONE LINE WEIGHT ON THIS PAGE. The hero carried 1.5px against the 1px of
      every card beside it, which is why it read as drawn by a different hand. */
-  border: 1px solid color-mix(in srgb, var(--t) 60%, transparent);
+  border: var(--bw) solid color-mix(in srgb, var(--t) 60%, transparent);
   border-radius: 18px; padding: 16px 16px 14px; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   outline: none;
@@ -1857,7 +1864,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-fc { display: flex; align-items: center; justify-content: center; gap: 7px;
   font: 600 11px var(--mono); color: var(--ink-hi);
   background: var(--panel);
-  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border: var(--bw) solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 999px; padding: 6px 14px; }
 .tk-fc svg { width: 13px; height: 13px; }
 .tk-fc--warn { border-color: color-mix(in srgb, var(--warn) 70%, transparent); }
@@ -1876,7 +1883,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* the browser window holding the trend */
 .tk-browser { background: var(--panel);
-  border: 1px solid color-mix(in srgb, var(--t) 70%, transparent); border-radius: 12px;
+  border: var(--bw) solid color-mix(in srgb, var(--t) 70%, transparent); border-radius: 12px;
   overflow: hidden; min-width: 0; }
 .tk-browser__bar { display: flex; gap: 5px; padding: 9px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--ink-hi) 18%, transparent);
@@ -1903,7 +1910,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the classic card's title row */
 .tk-hd { display: flex; align-items: center; gap: 12px; }
 .tk-hd__ic { display: inline-flex; width: 30px; height: 30px; color: var(--t, var(--ink-2));
-  border: 1px solid color-mix(in srgb, var(--t, var(--border-2)) 55%, var(--border-2));
+  border: var(--bw) solid color-mix(in srgb, var(--t, var(--border-2)) 55%, var(--border-2));
   border-radius: 9px; align-items: center; justify-content: center; }
 .tk-hd__ic svg { width: 20px; height: 20px; }
 .tk-hd__t h2 { font: 700 18px var(--sans); color: var(--ink); margin: 0; }
@@ -2429,7 +2436,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    row vocabulary, the thing an insight row uses to carry a severity, and on
    a full-width panel it reads as a component from somewhere else. Uniform
    1px neutral border, like every other panel in the product. */
-.mch { background: var(--panel); border: 1px solid var(--border);
+.mch { background: var(--panel); border: var(--bw) solid var(--border);
   border-radius: 12px; padding: 10px 14px 8px;
   animation: mchin 220ms ease-out; }
 @keyframes mchin { from { opacity: 0; transform: translateY(-6px); } }
@@ -2456,7 +2463,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 }
 
 /* ─── services drill-down: where each backend service is heading ─── */
-.svcf { background: var(--panel); border: 1px solid var(--border);
+.svcf { background: var(--panel); border: var(--bw) solid var(--border);
   border-radius: 12px;
   padding: 10px 14px 8px; animation: mchin 220ms ease-out; }
 .svcf__rows { display: flex; flex-direction: column; }
