@@ -12,7 +12,7 @@
 //
 // Fetched lazily and memoised: most sessions never switch application, and a
 // scope that has been resolved once does not change while the user looks at it.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { qAppSeedGen2, qAppServices, qAppTraceIds,
   qAppServicesTopo, qAppServicesTopoMobile,
   qServiceRuntime, runDql } from "../utils/dql";
@@ -29,6 +29,18 @@ export interface AppScope {
    * per-application tracing-context gap, not a topology fact.
    */
   tracesSeen: number;
+  /**
+   * Has the reader asked for the SPAN measurement on this application?
+   *
+   * Topology is free and answers most of the time; spans cost real money on a
+   * large estate (~32 GiB for ten minutes on a tenant carrying 169M spans in
+   * two hours) and must never be spent by the act of opening a page.
+   */
+  measured: boolean;
+  /** The span read is running. */
+  measuring: boolean;
+  /** Ask for it. Costs a scan, so it is a button, not a side effect. */
+  measure: () => void;
   /** Service entity ids this application's traces actually reach. */
   services: Set<string>;
   /** Traces observed per service — the volume an edge into it carries. */
@@ -65,17 +77,22 @@ export interface AppScope {
 
 const EMPTY: AppScope = { services: new Set(), traces: new Map(), names: new Map(),
   runtime: new Set(), placements: [], resolved: false, loading: false,
-  tracesSeen: 0 };
+  tracesSeen: 0, measured: false, measuring: false, measure: () => {} };
 const memo = new Map<string, AppScope>();
 
 export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
   const [scope, setScope] = useState<AppScope>(
     rumAppId ? memo.get(rumAppId) ?? EMPTY : EMPTY,
   );
+  /* Which applications the reader has paid the span scan for, this session.
+   * Keyed rather than boolean so switching application does not inherit
+   * someone else's decision to spend. */
+  const [paid, setPaid] = useState<Set<string>>(() => new Set());
+  const wantSpans = !!rumAppId && paid.has(rumAppId);
 
   useEffect(() => {
     if (!rumAppId) { setScope(EMPTY); return; }
-    const memoKey = `${rumAppId}|${appEntity ?? ""}`;
+    const memoKey = `${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`;
     const hit = memo.get(memoKey);
     if (hit) { setScope(hit); return; }
 
@@ -84,78 +101,74 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
     (async () => {
       let out: AppScope = { services: new Set(), traces: new Map(), names: new Map(),
         runtime: new Set(), placements: [], resolved: false, loading: false,
-        tracesSeen: 0 };
+        tracesSeen: 0, measured: false, measuring: false, measure: () => {} };
       try {
-        // UNION of the two discovery engines, so nothing measured OR declared
-        // is lost: traces catch what topology has not declared; topology
-        // catches what a 300-trace sample missed and everything classic RUM
-        // (PurePath ids, absent from Grail spans) cannot join at all.
-        /* The trace ids first, then the spans filtered by them — see
-         * qAppServices. No ids means this application sent no traceable RUM in
-         * the window, which is an empty answer, not a failed one. */
+        /* ORDER IS A PRICE LIST, and this used to be in the wrong order.
+         *
+         * Three engines answer "which services does this application reach",
+         * and they do not cost the same. Smartscape topology is metadata: a
+         * FRONTEND-to-SERVICE `calls` edge costs nothing to read. The RUM side
+         * is small. SPANS are the biggest store in Grail, billed by the window,
+         * and on a customer tenant carrying 169M spans in two hours a single
+         * ten-minute span read scans ~32 GiB — about $0.11 EVERY TIME a reader
+         * opens an application. A diagnostic that bills per click is not a
+         * diagnostic, it is a subscription.
+         *
+         * So: topology first and always, because it is free. Trace ids next,
+         * because they are cheap and they answer the question the chain most
+         * often needs — whether this application propagates trace context at
+         * all. Spans only when the reader asks for them by name.
+         */
+        const topoRows = await (async () => {
+          try {
+            // No id-shape gate: qAppServicesTopo keys on the FRONTEND node's
+            // own dt.rum.instrumentation.id, which every RUM application has
+            // whatever its id looks like. The old /^[0-9a-f]{16}$/ test skipped
+            // every UUID-shaped application for no reason a measurement backs.
+            const viaFrontend = await runDql<{ svc: string; traces: number; name?: string }>(
+              qAppServicesTopo(rumAppId), 60);
+            if (viaFrontend.length) return viaFrontend;
+            if (appEntity?.startsWith("MOBILE_APPLICATION-"))
+              return await runDql<{ svc: string; traces: number; name?: string }>(
+                qAppServicesTopoMobile(appEntity), 60);
+          } catch { /* topology view unavailable — the cheaper reads still stand */ }
+          return [];
+        })();
+        const rows: Array<{ svc: string; traces: number; name?: string }> = [...topoRows];
+
+        /* Does this application propagate trace context? Cheap, and worth
+         * knowing even when topology already answered: an empty backend has two
+         * causes and they call for opposite actions. */
         const idsIn = async (since: string) =>
           (await runDql<Record<string, unknown>>(qAppTraceIds(rumAppId, since), 300))
             .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
             .filter(Boolean);
-        /* Ten minutes first, because it answers a busy application for a
-         * twelfth of the scan. A QUIET one has no trace in ten minutes at all —
-         * measured on a customer tenant, an application with twelve sessions in
-         * two hours — and reporting "no trace reaches a service" there would
-         * state a topology fact on the strength of an empty sample. The wider
-         * window is only paid for when the cheap one comes back with nothing. */
         let since = "now()-10m";
         let traceIds = await idsIn(since);
         if (!traceIds.length) {
-          /* THIRTY MINUTES, NOT TWO HOURS. The escalation is for quiet
-           * applications, and the RUM side is cheap either way — but the SPAN
-           * side is billed by the window, and a span store is the biggest
-           * thing in Grail. Measured on a customer tenant: 169M spans in two
-           * hours, and one `fetch spans, from: now()-2h` scanned 384 GiB,
-           * about $1.35 at the DPS list rate. Paying that on every application
-           * the reader opens is not a fallback, it is a leak. Three times the
-           * window buys most of the quiet cases at a fifth of the ceiling. */
+          // the escalation stays on the CHEAP side of the wall
           since = "now()-30m";
           traceIds = await idsIn(since);
         }
-        const rows = traceIds.length
-          ? await runDql<{ svc: string; traces: number; name?: string }>(
-            qAppServices(traceIds, since), 60)
-          : [];
-        const topoRows = await (async () => {
+
+        /* THE EXPENSIVE READ, and the only one behind a decision. Topology
+         * declares what the platform knows; spans measure what actually ran,
+         * including links topology never declared. That extra truth is worth
+         * paying for sometimes — which is exactly why a person, not a page
+         * load, should decide when. */
+        if (wantSpans && traceIds.length) {
           try {
-            if (/^[0-9a-f]{16}$/.test(rumAppId))
-              return await runDql<{ svc: string; traces: number; name?: string }>(
-                qAppServicesTopo(rumAppId), 60);
-            if (appEntity?.startsWith("MOBILE_APPLICATION-"))
-              return await runDql<{ svc: string; traces: number; name?: string }>(
-                qAppServicesTopoMobile(appEntity), 60);
-          } catch { /* topology view unavailable — traces alone still stand */ }
-          return [];
-        })();
-        for (const t of topoRows) {
-          if (!rows.some((r) => r.svc === t.svc)) rows.push(t);
-        }
-        /* THIRD source, asked only when the first two came back empty.
-         *
-         * Traces need the application to send RUM into Grail and Smartscape
-         * needs it to have a Gen3 node; an application with neither is not
-         * an application without a backend, it is one whose backend only the
-         * classic model still describes. Measured: `easyTravel Mobile
-         * (mainframe)` has no events in seven days and no Smartscape edge,
-         * and `dt.entity.mobile_application.calls` names its webserver in one
-         * hop — from which the chain walks the rest.
-         *
-         * Last, never first: where the other two answer, they answer with
-         * measured volumes, and this one has none to give. */
-        if (!rows.length && appEntity) {
-          try {
-            const seed = await runDql<{ svc: string; name?: string }>(
-              qAppSeedGen2(appEntity), 40);
-            for (const r of seed) {
-              if (r.svc) rows.push({ svc: r.svc, traces: 0, name: r.name });
+            const measured = await runDql<{ svc: string; traces: number; name?: string }>(
+              qAppServices(traceIds, since), 60);
+            for (const m of measured) {
+              const hit = rows.find((r) => r.svc === m.svc);
+              // a measured volume always beats a declared zero
+              if (hit) hit.traces = Number(m.traces) || 0;
+              else rows.push(m);
             }
-          } catch { /* the classic model is unavailable too — the scope is empty */ }
+          } catch { /* the span read failed; declared topology still stands */ }
         }
+
         const topo = rows.length > 0 && rows.every((r) => !Number(r.traces));
         const services = new Set(rows.map((r) => String(r.svc)).filter(Boolean));
         const traces = new Map(rows.map((r) => [String(r.svc), Number(r.traces) || 0]));
@@ -166,7 +179,8 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         // must say so — not display the whole environment as if it belonged to
         // the app. Only a FAILED query leaves the scope unresolved.
         out = { services, traces, names, topo, runtime: new Set(), placements: [],
-          resolved: true, loading: false, tracesSeen: traceIds.length };
+          resolved: true, loading: false, tracesSeen: traceIds.length,
+          measured: wantSpans, measuring: false, measure: () => {} };
         if (services.size) {
           try {
             const rt = await runDql<{ src: string; id: string; type: string;
@@ -199,7 +213,12 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
     })();
 
     return () => { live = false; };
-  }, [rumAppId, appEntity]);
+  }, [rumAppId, appEntity, wantSpans]);
 
-  return scope;
+  const measure = useCallback(() => {
+    if (rumAppId) setPaid((s) => (s.has(rumAppId) ? s : new Set(s).add(rumAppId)));
+  }, [rumAppId]);
+
+  return { ...scope, measured: wantSpans, measure,
+    measuring: wantSpans && scope.loading };
 }

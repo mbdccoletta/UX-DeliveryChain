@@ -128,6 +128,16 @@ interface Elo {
    * subtitle. A divider is drawn where the group changes.
    */
   grp?: "classic" | "stores";
+  /**
+   * An offer the card makes, rather than a cost the page already paid.
+   *
+   * The span read that measures a backend link scans the biggest store in
+   * Grail — ~32 GiB for ten minutes on a tenant carrying 169M spans in two
+   * hours, about $0.11 a click. Topology answers free and answers first; when
+   * it cannot, the card SAYS what the deeper read would cost and lets a person
+   * decide, instead of billing them for opening a page.
+   */
+  act?: { label: string; run: () => void; hint: string };
 }
 
 /**
@@ -432,11 +442,24 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     ? { nm: "No trace context", mt: "this application propagates none", v: "—",
         tone: "info", miss: true,
         det: [["Meaning", "its RUM records requests but attaches no trace id, so there is nothing to follow into the backend"],
-              ["Action", "enable W3C traceparent for this application's API domains in its RUM configuration"]] }
-    : { nm: "No measured link", mt: `${fmtN(scope.tracesSeen)} traces reach no service`, v: "—",
-        tone: "info", miss: true,
-        det: [["Meaning", "trace ids exist on this application's requests, but no span carrying them belongs to a monitored service"],
-              ["Action", "check that the receiving services report spans, and that their trace context survives the hop"]] };
+              ["Action", "enable W3C traceparent for this application's API domains in its RUM configuration"],
+              ["Why no deeper read is offered", "with no trace id there is nothing to look for; scanning spans would cost money to confirm an empty set"]] }
+    : scope.measured
+      ? { nm: "No measured link", mt: `${fmtN(scope.tracesSeen)} traces reach no service`, v: "—",
+          tone: "info", miss: true,
+          det: [["Meaning", "trace ids exist on this application's requests, but no span carrying them belongs to a monitored service"],
+                ["Action", "check that the receiving services report spans, and that their trace context survives the hop"]] }
+      /* TOPOLOGY HAD NOTHING TO DECLARE, and the deeper read is a purchase. */
+      : { nm: "Not measured yet", mt: `${fmtN(scope.tracesSeen)} traces available to follow`, v: "—",
+          tone: "info", miss: true,
+          act: { label: scope.measuring ? "measuring…" : "follow the traces ↗",
+                 run: scope.measure,
+                 hint: "Reads the span store for these trace ids. Spans are the "
+                   + "largest store in Grail and are billed by the window — on a "
+                   + "large estate this single read scans tens of gigabytes, so "
+                   + "the app asks instead of spending it on every page load." },
+          det: [["Meaning", "Smartscape declares no service behind this application, and the traces have not been followed"],
+                ["Why it is a button", "following them reads the span store, which is billed by what it scans — a page load must not spend that on its own"]] };
 
   /* ── the data stores those services call ────────────────────────────────
    * One card per store, not per service-to-store pair: `easytrade-db` is one
@@ -1767,6 +1790,12 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                           <span className="gnode__v">{n.v} {n.spark?.rising && (
                             <em className="gnode__fc" title={ahead ? `Forecast: errors rising over the next ${aheadOf(ahead)} — the platform's own predictive analyzer, over this application's error series` : "This component's error count is rising across the window"}>↗ forecast</em>
                           )}</span>
+                          {n.act && (
+                            <button className="gnode__act" title={n.act.hint}
+                              onClick={(e) => { e.stopPropagation(); n.act!.run(); }}>
+                              {n.act.label}
+                            </button>
+                          )}
                         </div>
                       </React.Fragment>);
                     })}
