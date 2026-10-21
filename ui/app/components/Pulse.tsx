@@ -131,7 +131,28 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, appId, data.tf.from, data.tf.to]);
-  useEffect(() => { setGeoSel(null); }, [appId, data.tf.from, data.tf.to]);
+  /* THE FRAME THE MAP ACTUALLY MOUNTED ON.
+   * MapView is uncontrolled, which is the right call — see the note at the
+   * component — but uncontrolled means it honours initialViewState ONCE, on
+   * the render that mounts it. The geo rows arrive after that render, so the
+   * map mounted on the empty-estate default (lat 20, lng 0, zoom 1.1) and
+   * stayed there, while the overlay went on projecting against the frame
+   * computed from the data that had since arrived. That is how a country's
+   * mark ended up alone in the Atlantic: the overlay drew it at the centre of
+   * a view the map was never in.
+   * So the frame is captured the first time there is real data to frame, both
+   * the map and the overlay read that one object, and it is also the map's
+   * key — so the arrival of the first rows REMOUNTS the map onto the frame
+   * instead of leaving it behind. Panning does not touch it, so a refresh of
+   * the same application never yanks the view back. */
+  const geoFrame = useRef<{ latitude: number; longitude: number; zoom: number } | null>(null);
+  useEffect(() => {
+    setGeoSel(null);
+    /* a different estate is a different frame, and a view the reader panned
+       to on the old one says nothing about this one */
+    geoFrame.current = null;
+    setGeoView(null);
+  }, [appId, data.tf.from, data.tf.to]);
   useEffect(() => { setGeoViewSel(null); setRegionSel(null); }, [geoSel]);
   /* The map draws into a CANVAS: ReactNode shapes do not paint and CSS cannot
    * animate there — measured, zero dots rendered. So the animated pins are an
@@ -588,6 +609,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
          * RESOLVES the three verdict tokens instead of carrying literals of
          * its own — the map's marks are the platform's success, warning and
          * critical, and they follow light mode like every other verdict. */
+        /* captured once per estate: see geoFrame at the top of the component */
+        if (located.length && !geoFrame.current) {
+          geoFrame.current = { latitude: cLat, longitude: cLng, zoom };
+        }
+        const frame = geoFrame.current ?? { latitude: cLat, longitude: cLng, zoom };
         const COL = geoCol();
         const TOK = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" } as const;
         const WORD = GEO_WORD;
@@ -644,12 +670,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     its position again; the overlay reads the same view it
                     reports, so the marks land where the places are. */}
                 <MapView height={MAP_H}
-                  initialViewState={{ latitude: cLat, longitude: cLng, zoom }}
+                  key={`${frame.latitude.toFixed(3)},${frame.longitude.toFixed(3)},${frame.zoom}`}
+                  initialViewState={frame}
                   onViewStateChange={(v) => {
                     const next = {
-                      latitude: v.latitude ?? cLat,
-                      longitude: v.longitude ?? cLng,
-                      zoom: v.zoom ?? zoom,
+                      latitude: v.latitude ?? frame.latitude,
+                      longitude: v.longitude ?? frame.longitude,
+                      zoom: v.zoom ?? frame.zoom,
                     };
                     setGeoView((cur) => {
                       const same = cur
@@ -673,7 +700,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       shaded. */}
                 </MapView>
                 {(() => {
-                  const vs = geoView ?? { latitude: cLat, longitude: cLng, zoom };
+                  const vs = geoView ?? frame;
                   const world = 512 * Math.pow(2, vs.zoom);
                   const mx = (lng: number) => ((lng + 180) / 360) * world;
                   const my = (lat: number) => {
