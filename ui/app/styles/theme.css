@@ -2987,7 +2987,8 @@ div:has(> header):has(main) > div {
 .gpin__lbl em { font-style: normal; font: 700 10px var(--mono); color: var(--ink-2); }
 /* THEME TOKENS, not the canvas hexes — the HTML pins live in the page and
    must follow the light theme like every other verdict on screen (only the
-   canvas DotLayer, which paints outside CSS, keeps GEO_COL's literals). */
+   canvas DotLayer, which paints outside CSS, resolves the same tokens through
+   geoCol()). */
 .gpin--good { background: var(--panel);
   box-shadow: 0 0 10px color-mix(in srgb, var(--good) 45%, transparent); }
 .gpin--warn { background: var(--panel);
