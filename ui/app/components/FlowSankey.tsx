@@ -43,6 +43,7 @@ import { Button } from "@dynatrace/strato-components/buttons";
 import { Intelligence } from "./Intelligence";
 import { JOURNEY_STARTERS } from "../utils/starters";
 import { HIT_BAD, HIT_WARN, SAMPLE_MIN} from "../utils/verdict";
+import { XmarkIcon } from "@dynatrace/strato-icons";
 
 type Tone = "good" | "warn" | "bad" | "info";
 interface Node {
@@ -1654,7 +1655,7 @@ export function FlowSankey({
                 <button key={id} className="flow-pick"
                   title="Remove this waypoint"
                   onClick={() => setPicks((cur) => cur.filter((x) => x !== id))}>
-                  {word(id)} ✕
+                  {word(id)} <XmarkIcon />
                 </button>
               ))}
               {stepHint && (
@@ -1725,7 +1726,7 @@ export function FlowSankey({
               })()}
               {picks.length > 0 && (
                 <button className="flow-sel__b" onClick={() => setPicks([])}>
-                  {mode === "steps" ? "clear path" : "clear selection"} ✕
+                  {mode === "steps" ? "clear path" : "clear selection"} <XmarkIcon />
                 </button>
               )}
             </div>
@@ -1755,7 +1756,7 @@ export function FlowSankey({
                     <span>sessions without a recorded view in this window</span>
                   </div>
                 )}
-                <button className="drawer__x" onClick={() => setNtel(null)} aria-label="Close">✕</button>
+                <button className="drawer__x" onClick={() => setNtel(null)} aria-label="Close"><XmarkIcon /></button>
               </header>
               {!d ? <div className="rinfo__loading">unpacking…</div> : (
                 <>
@@ -1818,7 +1819,7 @@ export function FlowSankey({
               try again
             </Button>
             <button className="drawer__x" aria-label="Close"
-              onClick={() => { setInfo(null); cohortRef.current = null; }}>✕</button>
+              onClick={() => { setInfo(null); cohortRef.current = null; }}><XmarkIcon /></button>
           </div>
         </div>
       )}

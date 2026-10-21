@@ -28,7 +28,7 @@ import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 import { aheadOf, type Forecast } from "../utils/forecast";
 import type { SvgIconProps } from "@dynatrace/strato-icons";
-import {
+import { XmarkIcon,
   ApplicationsIcon, AutomationEngineIcon, ContainerIcon, DatabaseIcon, DesktopIcon, TerminalIcon,
   HostsIcon, InternetIcon, MobileIcon, NetworkIcon, NodeIcon,
   ServicesIcon, SyntheticMonitoringSignetIcon, UserSessionsIcon,
@@ -2114,7 +2114,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
             ? `${TIER_NAME[selAll] ?? "layer"} — all elements`
             : selElo ? ENTITY_WORD[kindOf(selTier ?? -1, selElo)] : "element"}</span>
           <span className="hint">{TIER_NAME[selTier ?? selAll ?? 0] ?? ""}</span>
-          <button className="drawer__x" onClick={() => setSel(null)} aria-label="Close">✕</button>
+          <button className="drawer__x" onClick={() => setSel(null)} aria-label="Close"><XmarkIcon /></button>
         </div>
         <div className="pad side__body drawer__body">
           {selAll !== null ? (

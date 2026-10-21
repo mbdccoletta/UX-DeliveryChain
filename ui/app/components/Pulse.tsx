@@ -39,7 +39,7 @@ import { useServiceVitals, type ServiceVitals } from "../hooks/useServiceVitals"
 import { aheadOf, type Forecast } from "../utils/forecast";
 import { useUxOverview } from "../hooks/useUxOverview";
 import { originOf } from "./DeliveryChain";
-import {
+import { XmarkIcon,
   AnalyticsIcon, DesktopIcon, HttpIcon,
   MobileIcon, ServicesIcon, UserSessionsIcon, WarningIcon,
 } from "@dynatrace/strato-icons";
@@ -957,7 +957,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   <span>{geoDetail === null ? "reading this country's sessions…"
                     : `top screens · ${data.tf.label}`}</span>
                   <button className="geo__drill-x" aria-label="Close"
-                    onClick={() => setGeoSel(null)}>✕</button>
+                    onClick={() => setGeoSel(null)}><XmarkIcon /></button>
                 </div>
 
                 {/* STATES, AND THE SESSIONS THAT HAVE NONE.
@@ -1767,7 +1767,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
         <span className="mch__fc">
           {rows === null ? "measuring…" : `${rows.length} shown`}
         </span>
-        <button className="mch__x" onClick={onClose} aria-label="Close">✕</button>
+        <button className="mch__x" onClick={onClose} aria-label="Close"><XmarkIcon /></button>
       </div>
 
       {rows !== null && rows.length === 0 && (
@@ -1937,7 +1937,7 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
         <span className="mch__fc">
           {rows.length} of {total} shown{total > rows.length ? " · busiest first" : ""}
         </span>
-        <button className="mch__x" onClick={onClose} aria-label="Close">✕</button>
+        <button className="mch__x" onClick={onClose} aria-label="Close"><XmarkIcon /></button>
       </div>
 
       <div className="svcf__rows">
