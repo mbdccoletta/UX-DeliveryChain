@@ -2162,6 +2162,66 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | limit 12`;
 
 
+/**
+ * INSIDE ONE COUNTRY: its states, and its cities.
+ *
+ * The map stopped at the country because an older comment in this file said
+ * city was null on every RUM row. Re-measured on a live estate: of 498,426
+ * events in two hours, `geo.city.name` rides 223,457 of them (45%) and
+ * `geo.region.name` 213,009 (43%). The claim was stale.
+ *
+ * STATES GO ON THE MAP, CITIES DO NOT, and the reason is in the data rather
+ * than in effort. Strato's ChoroplethLayer paints by ISO 3166-2 — the
+ * sub-national standard — which is exactly what `geo.region.iso_code`
+ * carries, so a state needs no centroid table at all. A city has neither an
+ * ISO code nor a coordinate: `geo.location.latitude` measured NULL on 100% of
+ * rows. Nothing can be positioned from a name, so cities are a ranked list.
+ *
+ * ONE CAVEAT THE CALLER MUST HONOUR: the platform returns the region SUFFIX
+ * alone — "CA", "NSW", "32" — while ISO 3166-2 is "US-CA", "AU-NSW", "PL-32".
+ * The country has to be prefixed, and not for tidiness: "CA" on its own is
+ * both California and Canada.
+ *
+ * Coverage travels with the rows. Where fewer than half the sessions carry a
+ * location this fine, a reader adding the states up and finding less than the
+ * country is owed the reason, not left to guess at a bug.
+ */
+export const qGeoRegions = (tf: Timeframe, rumAppId: string, iso: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter geo.country.iso_code == "${iso.replace(/["\\]/g, "")}"
+// Named states only. Measured on a live estate, one application's US traffic
+// was 419 sessions with NO region against 3 with one — and an unnamed row
+// sorted to the top would have been the loudest thing on the map while saying
+// nothing. The sessions without a state are not lost: the caller holds the
+// country's own total and states the shortfall as coverage, which is a fact
+// about instrumentation rather than a place.
+| filter isNotNull(geo.region.iso_code)
+| summarize
+    sessions = countDistinct(dt.rum.session.id),
+    hit = countDistinct(if(characteristics.classifier == "error",
+      dt.rum.session.id, else: null)),
+  by: { region = geo.region.iso_code, name = geo.region.name }
+| sort sessions desc
+| limit 40`;
+
+/** The cities of one state — a list, because a city has no code and no
+ *  coordinate to put it anywhere on a map. */
+export const qGeoCities = (tf: Timeframe, rumAppId: string, iso: string,
+  region: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter geo.country.iso_code == "${iso.replace(/["\\]/g, "")}"
+| filter geo.region.iso_code == "${region.replace(/["\\]/g, "")}"
+| filter isNotNull(geo.city.name)
+| summarize
+    sessions = countDistinct(dt.rum.session.id),
+    hit = countDistinct(if(characteristics.classifier == "error",
+      dt.rum.session.id, else: null)),
+  by: { city = geo.city.name }
+| sort sessions desc
+| limit 20`;
+
 /** What ONE COUNTRY does inside this application: its screens, and where it
  *  meets errors — the geo tile's drilldown, one leg per click, memoised. */
 /**
