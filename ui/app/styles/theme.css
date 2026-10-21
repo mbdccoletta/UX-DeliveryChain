@@ -3217,18 +3217,45 @@ div:has(> header):has(main) > div {
    .tk-block paints `color-mix(--c 52%, --tint)`: over #12122b that is a card
    with a whisper of its hue, and over #ffffff it is a saturated purple slab —
    measured in light, the same rule resolved to srgb(0.64 0.62 0.95). The hue
-   is identity here, not a verdict, so in light it steps back to the same
-   whisper it has in dark, and the number stays the brightest thing in the box. */
+   had to come down. It came down too far: at 9% over white the fill resolved
+   to srgb(0.94 0.93 0.99) — a card with no ground at all, so in light the
+   section read as a hole in the page with a coloured halo floating over it,
+   which is what the reader photographed. The mix now keeps the DARK THEME'S
+   RATIO at a fraction of its strength (52/24/38 → 22/11/17, about 0.43x), so
+   the gradient has the same shape and the ground is visibly there. Dark text
+   on the strongest stop still clears AA by a wide margin — the fill never
+   drops below 0.78 relative luminance. */
 [data-theme="light"] .tk-block,
 :root:not([data-theme="dark"]) .tk-block {
   background: linear-gradient(165deg,
-    color-mix(in srgb, var(--c) 9%, var(--tint)),
-    color-mix(in srgb, var(--c) 4%, var(--tint)) 55%,
-    color-mix(in srgb, var(--c) 7%, var(--tint)));
-  border-color: color-mix(in srgb, var(--c) 32%, var(--border));
+    color-mix(in srgb, var(--c) 22%, var(--tint)),
+    color-mix(in srgb, var(--c) 11%, var(--tint)) 55%,
+    color-mix(in srgb, var(--c) 17%, var(--tint)));
+  border-color: color-mix(in srgb, var(--c) 40%, var(--border));
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
+/* THE HERO HAD NO LIGHT RULE, so it kept the dark one — a radial that fades
+   to var(--tint), which in light IS the page. The card therefore had no fill
+   of its own: everything you could see of it was the breathing glow leaking
+   past its edge, and a halo with nothing inside it is the worst reading of
+   the lot. Same correction as the blocks above: keep the gradient's shape,
+   land it on a ground that exists. */
+[data-theme="light"] .tk-core__b,
+:root:not([data-theme="dark"]) .tk-core__b {
+  background: radial-gradient(circle at 50% 30%,
+    color-mix(in srgb, var(--t) 20%, var(--tint)),
+    color-mix(in srgb, var(--t) 10%, var(--tint)) 80%);
+  border-color: color-mix(in srgb, var(--t) 45%, var(--border));
+}
+/* and the one caption that the new ground costs: at 60% ink over the hero's
+   old white fill "open the delivery chain" measured 4.5:1 with nothing to
+   spare, and over a fill that exists it fell to 4.28. 10px text owes 4.5. */
+[data-theme="light"] .tk-core__go,
+:root:not([data-theme="dark"]) .tk-core__go {
+  color: color-mix(in srgb, var(--ink-hi) 78%, transparent);
+}
+
 [data-theme="light"] .tk-block::before, [data-theme="light"] .tk-block::after,
 :root:not([data-theme="dark"]) .tk-block::before,
 :root:not([data-theme="dark"]) .tk-block::after {
