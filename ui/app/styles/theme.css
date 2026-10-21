@@ -3302,3 +3302,13 @@ div:has(> header):has(main) > div {
 .bc__seqs-churn b.num { color: var(--warn); font-weight: 700;
   font-variant-numeric: tabular-nums; }
 .bc__seqs-churn span { font-weight: 500; color: var(--ink-hi); }
+
+/* AN OFFER, NOT A CHARGE. The card that cannot answer for free says what the
+   deeper read would cost and hands the decision to a person. Sized like a
+   caption so it never competes with the measurements around it. */
+.gnode__act { margin-top: 4px; font: 600 10px var(--mono); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 5px; padding: 3px 7px; cursor: pointer; white-space: nowrap; }
+.gnode__act:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.gnode__act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
