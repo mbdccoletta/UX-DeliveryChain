@@ -1768,10 +1768,12 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* a block: the classic purple card, redrawn as a lit module */
 .tk-block { position: relative; overflow: hidden; display: flex;
-  flex-direction: column; justify-content: flex-start; background:
-    linear-gradient(165deg, color-mix(in srgb, var(--c) 52%, var(--tint)),
-      color-mix(in srgb, var(--c) 24%, var(--tint)) 55%,
-      color-mix(in srgb, var(--c) 38%, var(--tint)));
+  flex-direction: column; justify-content: flex-start; /* NEUTRAL SURFACE. The fill used to be a gradient of the card's own tone —
+     a coloured wash behind the numbers. Status belongs to the border, which
+     is the thing that animates; a tinted ground repeats it in a second
+     language and, over white, reads as smoke. This is the platform's own
+     card surface in both themes. */
+  background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--c) 65%, transparent);
   border-radius: 12px; padding: 14px 16px;
   /* NO GLOW. The border carries the status and the border is what animates;
@@ -1820,8 +1822,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-core { display: flex; flex-direction: column; gap: 12px; align-items: stretch;
   justify-content: center; }
 .tk-core__b { position: relative; background:
-    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--t) 26%, var(--tint)),
-      var(--tint) 80%);
+    var(--panel);
   border: 1.5px solid color-mix(in srgb, var(--t) 60%, transparent);
   border-radius: 18px; padding: 16px 16px 14px; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -1853,15 +1854,11 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-core__b:hover .tk-core__go, .tk-core__b:focus-visible .tk-core__go { color: var(--ink-hi); }
 .tk-fc { display: flex; align-items: center; justify-content: center; gap: 7px;
   font: 600 11px var(--mono); color: var(--ink-hi);
-  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 45%, var(--tint)),
-    color-mix(in srgb, var(--accent) 22%, var(--tint)));
+  background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 999px; padding: 6px 14px; }
 .tk-fc svg { width: 13px; height: 13px; }
-.tk-fc--warn { background: linear-gradient(165deg,
-    color-mix(in srgb, var(--warn) 50%, var(--tint)),
-    color-mix(in srgb, var(--warn) 24%, var(--tint)));
-  border-color: color-mix(in srgb, var(--warn) 70%, transparent); }
+.tk-fc--warn { border-color: color-mix(in srgb, var(--warn) 70%, transparent); }
 
 .tk-foot { display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
   font: 500 11px var(--mono); color: var(--ink-2);
@@ -2985,6 +2982,9 @@ div:has(> header):has(main) > div {
 /* the animated pins the DotLayer draws — shape is a ReactNode, so the map
    itself can move: problem countries pulse a sonar ring, the busiest breathe */
 .geo__map { position: relative; }
+.geo__map { opacity: 0; transition: opacity 220ms ease-out; }
+.geo__map--on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .geo__map { transition: none; } }
 .geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
   /* invisible until the map reports where it actually is — see geoView in
      Pulse. The marks are laid out the whole time, so nothing moves when they
@@ -3250,10 +3250,6 @@ div:has(> header):has(main) > div {
    drops below 0.78 relative luminance. */
 [data-theme="light"] .tk-block,
 :root:not([data-theme="dark"]) .tk-block {
-  background: linear-gradient(165deg,
-    color-mix(in srgb, var(--c) 22%, var(--tint)),
-    color-mix(in srgb, var(--c) 11%, var(--tint)) 55%,
-    color-mix(in srgb, var(--c) 17%, var(--tint)));
   border-color: color-mix(in srgb, var(--c) 40%, var(--border));
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
@@ -3266,9 +3262,6 @@ div:has(> header):has(main) > div {
    land it on a ground that exists. */
 [data-theme="light"] .tk-core__b,
 :root:not([data-theme="dark"]) .tk-core__b {
-  background: radial-gradient(circle at 50% 30%,
-    color-mix(in srgb, var(--t) 20%, var(--tint)),
-    color-mix(in srgb, var(--t) 10%, var(--tint)) 80%);
   border-color: color-mix(in srgb, var(--t) 45%, var(--border));
   /* An ordinary lift, not a bloom. The halo is gone from the keyframes
      themselves now, so light has nothing to switch off and keeps the same
