@@ -56,6 +56,14 @@
   --good-fill: var(--dt-colors-background-container-success-accent, #5eb1a9);
   --warn-fill: var(--dt-colors-background-container-warning-accent, #eea746);
   --bad-fill:  var(--dt-colors-background-container-critical-accent, #c82d40);
+  --info-fill: var(--dt-colors-background-container-primary-accent, #999bed);
+  /* THE PLATFORM'S OWN LINE WEIGHTS. Strato ships two and documents what
+     each is for: --dt-borders-width-default (1px) and
+     --dt-borders-width-emphasized (2px), the second "to emphasize borders …
+     clearly separate content". The cards and panels on these screens ARE the
+     separation between one reading and the next, so they take the emphasized
+     one — from the token, not from a number chosen here. */
+  --bw: var(--dt-borders-width-emphasized, 2px);
   --accent:   #6366f1;
   --accent-dim: rgba(99, 102, 241, 0.12);
   /* Identity palette: Pulse Assessment's capability colours for CATEGORIES —
@@ -106,13 +114,14 @@
   --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 85%, var(--bg));
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
-  --good: var(--dt-colors-text-success-default, #3d8a83);
-  --warn: var(--dt-colors-text-warning-default, #a15c07);
-  --bad:  var(--dt-colors-text-critical-default, #c82d40);
+  --good: var(--dt-colors-text-success-default, #2d6761);
+  --warn: var(--dt-colors-text-warning-default, #855400);
+  --bad:  var(--dt-colors-text-critical-default, #bb0731);
   --info: var(--dt-colors-text-primary-default, #4f46e5);
-  --good-fill: var(--dt-colors-background-container-success-accent, #3d8a83);
-  --warn-fill: var(--dt-colors-background-container-warning-accent, #a15c07);
-  --bad-fill:  var(--dt-colors-background-container-critical-accent, #c82d40);
+  --good-fill: var(--dt-colors-background-container-success-accent, #2f6862);
+  --warn-fill: var(--dt-colors-background-container-warning-accent, #eea53c);
+  --bad-fill:  var(--dt-colors-background-container-critical-accent, #c62239);
+  --info-fill: var(--dt-colors-background-container-primary-accent, #474fcf);
   --accent: #4f46e5; --accent-dim: rgba(79, 70, 229, 0.1);
   --t-cyan: #0891b2; --t-azure: #2563eb; --t-indigo: #4f46e5; --t-violet: #7c3aed;
   --t-magenta: #c026d3; --t-pink: #db2777; --t-teal: #3d8a83; --t-orange: #ea580c;
@@ -155,13 +164,14 @@
   --ink-3: color-mix(in srgb, var(--dt-colors-text-neutral-default, #0f172a) 85%, var(--bg));
   /* the same tokens — Strato already flips them for light mode; the hex values
      are the standalone-dev fallbacks only */
-  --good: var(--dt-colors-text-success-default, #3d8a83);
-  --warn: var(--dt-colors-text-warning-default, #a15c07);
-  --bad:  var(--dt-colors-text-critical-default, #c82d40);
+  --good: var(--dt-colors-text-success-default, #2d6761);
+  --warn: var(--dt-colors-text-warning-default, #855400);
+  --bad:  var(--dt-colors-text-critical-default, #bb0731);
   --info: var(--dt-colors-text-primary-default, #4f46e5);
-  --good-fill: var(--dt-colors-background-container-success-accent, #3d8a83);
-  --warn-fill: var(--dt-colors-background-container-warning-accent, #a15c07);
-  --bad-fill:  var(--dt-colors-background-container-critical-accent, #c82d40);
+  --good-fill: var(--dt-colors-background-container-success-accent, #2f6862);
+  --warn-fill: var(--dt-colors-background-container-warning-accent, #eea53c);
+  --bad-fill:  var(--dt-colors-background-container-critical-accent, #c62239);
+  --info-fill: var(--dt-colors-background-container-primary-accent, #474fcf);
   --accent: #4f46e5; --accent-dim: rgba(79, 70, 229, 0.1);
   --t-cyan: #0891b2; --t-azure: #2563eb; --t-indigo: #4f46e5; --t-violet: #7c3aed;
   --t-magenta: #c026d3; --t-pink: #db2777; --t-teal: #3d8a83; --t-orange: #ea580c;
@@ -205,16 +215,16 @@ svg { shape-rendering: geometricPrecision; }
   min-width: 2px; }
 .scanb__b { width: 2px; border-radius: 1px; background: var(--t-teal);
   opacity: 0.75; }
-.scanb__b--cut { background: var(--bad); opacity: 1;
-  box-shadow: 0 0 4px color-mix(in srgb, var(--bad) 70%, transparent); }
+.scanb__b--cut { background:var(--bad-fill); opacity: 1;
+  box-shadow:0 0 4px color-mix(in srgb, var(--bad-fill) 70%, transparent); }
 .scanb__n { color: var(--ink); font-size: 11px; letter-spacing: 0; }
 .scanb__cut { font: 700 9px var(--mono); font-style: normal; color: var(--bad);
   text-transform: uppercase; letter-spacing: 0.08em; }
-.scanb--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
-.scanb--warn .scanb__led { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
-.scanb--warn .scanb__b { background: var(--warn); }
-.scanb--bad { border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); }
-.scanb--bad .scanb__led { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
+.scanb--warn { border-color:color-mix(in srgb, var(--warn-fill) 45%, var(--border)); }
+.scanb--warn .scanb__led { background:var(--warn-fill); box-shadow:0 0 6px var(--warn-fill); }
+.scanb--warn .scanb__b { background:var(--warn-fill); }
+.scanb--bad { border-color:color-mix(in srgb, var(--bad-fill) 50%, var(--border)); }
+.scanb--bad .scanb__led { background:var(--bad-fill); box-shadow:0 0 6px var(--bad-fill); }
 @media (prefers-reduced-motion: reduce) {
   .scanb--live .scanb__led { animation: none; }
 }
@@ -274,16 +284,26 @@ svg { shape-rendering: geometricPrecision; }
   color: color-mix(in srgb, var(--accent) 55%, var(--ink-hi)); }
 
 /* panels */
-.panel { background: var(--panel); border: 1px solid var(--border); }
+.panel { background: var(--panel); border: var(--bw) solid var(--border); }
+/* every close control carries Strato's XmarkIcon now, at one size */
+.mch__x svg, .drawer__x svg, .geo__drill-x svg { width: 13px; height: 13px; }
+/* the two that sit after a word carry a smaller one, sized to the text */
+.flow-pick svg, .flow-sel__b svg { width: 10px; height: 10px;
+  vertical-align: -1px; margin-left: 3px; }
+.mch__x, .drawer__x, .geo__drill-x { display: inline-flex;
+  align-items: center; justify-content: center; }
 .panel__hd { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-.panel__hd::before { content: "▪"; color: var(--accent); font-size: 12px; }
+/* The square bullet that used to sit before every panel title was a glyph
+   doing an icon's job, and it is not one of the platform's. A panel title
+   needs no mark in front of it; the panel's own border already says where
+   the panel starts. */
 .panel__hd .hint { margin-left: auto; font: 500 12px var(--mono); text-transform: uppercase;
                    letter-spacing: 0.08em; color: var(--ink-3); }
 .pad { padding: 14px 16px; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 /* bounded: the raw DQL of a failed query ran to three paragraphs and pushed
    the whole page down — the sentence stays, the syntax lives in the title */
-.banner { border: 1px solid var(--border); border-left: 3px solid var(--warn); padding: 10px 14px;
+.banner { border: 1px solid var(--border); border-left:3px solid var(--warn-fill); padding: 10px 14px;
           font-size: 12px; color: var(--ink-2); margin-bottom: 14px;
           max-height: 5.4em; overflow: hidden; }
 .loading { display: flex; align-items: center; gap: 10px; padding: 40px 16px; color: var(--ink-2);
@@ -423,10 +443,10 @@ svg { shape-rendering: geometricPrecision; }
 .rinfo__kpi-l { font: 600 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
   color: color-mix(in srgb, var(--ink-hi) 70%, transparent); }
 .rinfo__kpi em { font: 500 11px var(--mono); color: var(--ink-3); font-style: normal; }
-.rinfo__kpi--bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+.rinfo__kpi--bad { border-color:color-mix(in srgb, var(--bad-fill) 55%, transparent);
   background: var(--panel); }
 .rinfo__kpi--bad .num, .rinfo__kpi--bad em { color: var(--bad); }
-.rinfo__kpi--good { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.rinfo__kpi--good { border-color:color-mix(in srgb, var(--good-fill) 45%, transparent); }
 .rinfo__kpi--good .num { color: var(--good); }
 
 /* the portrait blocks: solid bar = cohort, ghost = everyone else */
@@ -465,8 +485,8 @@ svg { shape-rendering: geometricPrecision; }
 .rinfo__bar-ghost { background: color-mix(in srgb, var(--ink-hi) 14%, transparent); }
 .rinfo__bar-fill { background: color-mix(in srgb, var(--accent) 80%, var(--ink-hi));
   box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); }
-.rinfo__bar-fill--up { background: var(--warn);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 60%, transparent); }
+.rinfo__bar-fill--up { background:var(--warn-fill);
+  box-shadow:0 0 10px color-mix(in srgb, var(--warn-fill) 60%, transparent); }
 .rinfo__bar-v { color: var(--ink-hi); text-align: right; }
 .rinfo__bar-d { color: var(--ink-3); font-style: normal; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rinfo__ft { font: 400 10px var(--mono); color: var(--ink-3); text-align: center;
@@ -491,7 +511,7 @@ svg { shape-rendering: geometricPrecision; }
                border: 1px solid var(--border-2); padding: 4px 10px; cursor: pointer;
                white-space: nowrap; }
 .flow-sel__b:hover { border-color: var(--ink-2); }
-.flow-sel__b--teach { border-color: color-mix(in srgb, var(--good) 60%, var(--border));
+.flow-sel__b--teach { border-color:color-mix(in srgb, var(--good-fill) 60%, var(--border));
   color: var(--good); }
 .flow-sel__b--teach:hover { background: none; }
 /* THE FILLED BUTTON IS GONE. A solid accent slab is the loudest thing the
@@ -569,7 +589,11 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 3%, transparent)); }
 .dcf-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
 .dcf-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.dcf-svg .e-base { filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 55%, transparent)); }
+/* The ribbons used to carry a 6px halo of their own colour. With ribbons
+   this thick and this many of them, the halos overlapped into a wash that
+   tinted the entire panel — the gold the reader saw was as much the glow as
+   the stroke. The stroke is the signal; it needs no aura. */
+.dcf-svg .e-base { filter: none; }
 /* one luminous packet per trace; the gap is long so a single pulse travels */
 .dcf-svg .e-pulse { stroke-dasharray: 16 178; animation: gpulse 2s linear infinite; }
 @keyframes gpulse { to { stroke-dashoffset: -194; } }
@@ -593,7 +617,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .stagecol__cap { text-align: center; font: 600 12px var(--mono); letter-spacing: 0.18em;
                  text-transform: uppercase; color: var(--ink-3); margin-bottom: 9px; }
 .stagecol__cap b { display: block; color: var(--hue, var(--accent)); font-size: 12px; letter-spacing: 0.16em; }
-.stagecol__cap .pb { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+.stagecol__cap .pb { color: var(--bad); border:1px solid color-mix(in srgb, var(--bad-fill) 45%, transparent);
                      padding: 0 4px; margin-left: 5px; font-size: 12px; }
 
 .pillar { flex: 1; border-radius: 14px; border: 1px solid var(--border);
@@ -633,14 +657,14 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .spark polyline { fill: none; stroke: var(--ink-2); stroke-width: 1.6;
                   stroke-dasharray: 3 3; stroke-linecap: round;
                   animation: sparkdraw 1.2s var(--ease) both; }
-.spark .spark--up, .spark polyline.spark--up { stroke: var(--warn); }
+.spark .spark--up, .spark polyline.spark--up { stroke:var(--warn-fill); }
 @keyframes sparkdraw { from { stroke-dashoffset: 90; opacity: 0; }
                        to { stroke-dashoffset: 0; opacity: 1; } }
 
 /* A red card breathes — the one motion reserved for an active Davis problem. */
 .nd--sig { animation: sigpulse 2.8s var(--ease) infinite; }
 @keyframes sigpulse {
-  50% { box-shadow: 0 0 14px 1px color-mix(in srgb, var(--bad) 30%, transparent); }
+  50% { box-shadow:0 0 14px 1px color-mix(in srgb, var(--bad-fill) 30%, transparent); }
 }
 
 /* layer summary strip at the top of each pillar */
@@ -901,7 +925,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   background: color-mix(in srgb, var(--ink-hi) 14%, transparent); }
 /* the goal reached: the one bar that is entirely good news */
 .bc__fun-b--goal { border-radius: 3px;
-  background: color-mix(in srgb, var(--good) 78%, var(--panel-2)); }
+  background:color-mix(in srgb, var(--good-fill) 78%, var(--panel-2)); }
 .bc__fun-r b.num { font: 700 12px var(--mono); color: var(--ink-hi);
   font-variant-numeric: tabular-nums; }
 .bc__fun-r em.num { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
@@ -964,7 +988,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 /* the biggest single loss, sized in the board's own unit */
 .bc__loss { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline;
   gap: 4px 10px; padding: 9px 12px; border-radius: 9px;
-  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--border));
+  border:1px solid color-mix(in srgb, var(--warn-fill) 38%, var(--border));
   background: var(--panel); }
 .bc__loss-l { font: 700 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
   color: var(--warn); }
@@ -986,18 +1010,18 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__out-bar { grid-column: 1 / -1; height: 5px; border-radius: 999px; overflow: hidden;
   background: color-mix(in srgb, var(--ink-hi) 7%, transparent); }
 .bc__out-bar i { display: block; height: 100%; border-radius: 999px;
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--warn) 55%, transparent), var(--bad)); }
+  background:linear-gradient(90deg,
+    color-mix(in srgb, var(--warn-fill) 55%, transparent), var(--bad-fill)); }
 .bc__out-ft { display: block; margin-top: 9px; font: 400 11px var(--mono);
   color: var(--ink-3); line-height: 1.5; }
 /* the stop verdict — the join between where sessions end and how those screens
    perform, stated as a conclusion rather than left for the reader to infer */
 .rinfo__stopv { margin: 9px 0 2px; padding: 9px 12px; border-radius: 9px;
   font: 400 12px var(--mono); line-height: 1.55; color: var(--ink-2);
-  border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border));
+  border:1px solid color-mix(in srgb, var(--good-fill) 38%, var(--border));
   background: var(--panel); }
 .rinfo__stopv b { color: var(--good); font-weight: 700; }
-.rinfo__stopv--tech { border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+.rinfo__stopv--tech { border-color:color-mix(in srgb, var(--warn-fill) 45%, var(--border));
   background: var(--panel); }
 .rinfo__stopv--tech b { color: var(--warn); }
 /* traffic as one instrument: volume, the failing share against it, the rate */
@@ -1010,9 +1034,9 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .trf__bar { position: relative; height: 7px; border-radius: 999px; overflow: hidden;
   border: 1px solid var(--border); background: var(--panel); }
 .trf__ok { position: absolute; inset: 0;
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--good) 55%, transparent),
-    color-mix(in srgb, var(--good) 22%, transparent)); }
+  background:linear-gradient(90deg,
+    color-mix(in srgb, var(--good-fill) 55%, transparent),
+    color-mix(in srgb, var(--good-fill) 22%, transparent)); }
 .trf__no { position: absolute; right: 0; top: 0; bottom: 0; }
 /* the latency ladder — three percentiles on one logarithmic rail, so the tail
    reads as distance instead of as three tidy numbers */
@@ -1023,9 +1047,9 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
     color-mix(in srgb, var(--ink-hi) 12%, transparent));
   border: 1px solid var(--border); }
 .lad__fill { position: absolute; top: -1px; bottom: -1px; border-radius: 999px;
-  background: linear-gradient(90deg,
+  background:linear-gradient(90deg,
     color-mix(in srgb, var(--t-cyan) 45%, transparent),
-    color-mix(in srgb, var(--bad) 55%, transparent)); }
+    color-mix(in srgb, var(--bad-fill) 55%, transparent)); }
 .lad__tick { position: absolute; top: -4px; width: 2px; height: 16px; border-radius: 1px;
   box-shadow: 0 0 6px currentColor; }
 .lad__legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px;
@@ -1133,7 +1157,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   margin: -2px 0 12px; padding: 7px 12px; border-radius: 9px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--panel) 60%, transparent); }
-.bc__rule--taught { border-color: color-mix(in srgb, var(--good) 32%, var(--border)); }
+.bc__rule--taught { border-color:color-mix(in srgb, var(--good-fill) 32%, var(--border)); }
 .bc__rule-k { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--ink-3); }
 .bc__rule-v { font: 400 11px var(--mono); color: var(--ink-2); }
@@ -1227,7 +1251,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__diff-e { font: 500 11px var(--mono); color: var(--ink-2);
   border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
 .bc__diff-e b { color: var(--ink-hi); margin-right: 4px; }
-.bc__diff-e--in { border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+.bc__diff-e--in { border-color:color-mix(in srgb, var(--bad-fill) 55%, var(--border));
   background: var(--panel); }
 .bc__diff-verdict { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
   font: 400 12px var(--mono); color: var(--ink-2); border-top: 1px solid var(--border);
@@ -1328,7 +1352,7 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 /* the problem count carried by the origin, like the badge on a Davis node */
 .path__badge { position: absolute; top: -3px; right: 26px; min-width: 18px; height: 18px;
     display: grid; place-items: center; padding: 0 4px; border-radius: 999px;
-    font: 700 10px var(--mono); color: var(--bg); background: var(--bad); }
+    font: 700 10px var(--mono); color: var(--bg); background:var(--bad-fill); }
 
 /* hand-offs to other Dynatrace apps */
 .dl { display: grid; gap: 5px; margin-top: 8px; }
@@ -1370,9 +1394,9 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .lrow__tag { font: 700 9px var(--mono); font-style: normal; letter-spacing: 0.04em;
   text-transform: uppercase; border-radius: 999px; padding: 1px 7px; margin-left: 7px;
   vertical-align: 1px; white-space: nowrap; }
-.lrow__tag--p { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+.lrow__tag--p { color: var(--bad); border:1px solid color-mix(in srgb, var(--bad-fill) 55%, transparent);
   background: var(--panel); }
-.lrow__tag--a { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+.lrow__tag--a { color: var(--warn); border:1px solid color-mix(in srgb, var(--warn-fill) 55%, transparent);
   background: var(--panel); }
 .lrow__impn { color: var(--bad); font-weight: 700; }
 .lrow__m { grid-column: 1 / -1; font: 400 12px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
@@ -1447,7 +1471,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* marks a node that is only classic because no new-platform app is installed */
 .path__gen { font: 700 9px var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
-             color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+             color: var(--warn); border:1px solid color-mix(in srgb, var(--warn-fill) 45%, transparent);
              padding: 0 4px; }
 
 /* how old the numbers are, and the way to make them fresh */
@@ -1480,13 +1504,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .plate::after { content: ""; position: absolute; inset: 0; border-radius: 18px;
          transform: translate(7px, 7px); z-index: -1;
          background: color-mix(in srgb, var(--accent) 10%, rgba(4, 6, 14, 0.95)); }
-.plate--warn { border-color: var(--warn);
-         box-shadow: 0 0 26px color-mix(in srgb, var(--warn) 30%, transparent); }
-.plate--bad { border-color: var(--bad);
-         box-shadow: 0 0 30px color-mix(in srgb, var(--bad) 38%, transparent);
+.plate--warn { border-color:var(--warn-fill);
+         box-shadow:0 0 26px color-mix(in srgb, var(--warn-fill) 30%, transparent); }
+.plate--bad { border-color:var(--bad-fill);
+         box-shadow:0 0 30px color-mix(in srgb, var(--bad-fill) 38%, transparent);
          animation: platepulse 2.8s var(--ease) infinite; }
 @keyframes platepulse {
-  50% { box-shadow: 0 0 44px 2px color-mix(in srgb, var(--bad) 50%, transparent); }
+  50% { box-shadow:0 0 44px 2px color-mix(in srgb, var(--bad-fill) 50%, transparent); }
 }
 
 /* chips float screen-facing above the slab — text never tilts */
@@ -1513,13 +1537,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
            stroke-width: 1; }
 .slab__l { fill: color-mix(in srgb, var(--top) 52%, #060812); }
 .slab__r { fill: color-mix(in srgb, var(--top) 30%, #060812); }
-.slab--warn { filter: drop-shadow(0 0 12px color-mix(in srgb, var(--warn) 55%, transparent)); }
-.slab--warn .slab__t { stroke: var(--warn); stroke-width: 2; }
+.slab--warn { filter:drop-shadow(0 0 12px color-mix(in srgb, var(--warn-fill) 55%, transparent)); }
+.slab--warn .slab__t { stroke:var(--warn-fill); stroke-width: 2; }
 .slab--bad { animation: slabpulse 2.6s var(--ease) infinite; }
-.slab--bad .slab__t { stroke: var(--bad); stroke-width: 2.5; }
+.slab--bad .slab__t { stroke:var(--bad-fill); stroke-width: 2.5; }
 @keyframes slabpulse {
-  0%, 100% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--bad) 45%, transparent)); }
-  50% { filter: drop-shadow(0 0 26px color-mix(in srgb, var(--bad) 70%, transparent)); }
+  0%, 100% { filter:drop-shadow(0 0 10px color-mix(in srgb, var(--bad-fill) 45%, transparent)); }
+  50% { filter:drop-shadow(0 0 26px color-mix(in srgb, var(--bad-fill) 70%, transparent)); }
 }
 /* the reference puts the big ordinal on the slab, and nothing else */
 .plate__no { position: absolute; left: 34%; top: 32%; z-index: 3; pointer-events: none;
@@ -1549,15 +1573,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
         padding: 12px 12px 18px; border-radius: 14px;
         background: linear-gradient(180deg, var(--panel-2), transparent 65%);
         border: 1px solid var(--border); }
-.gcol--warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent);
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--warn) 8%, transparent),
-          color-mix(in srgb, var(--warn) 2%, transparent) 60%, transparent); }
-.gcol--bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent);
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--bad) 9%, transparent),
-          color-mix(in srgb, var(--bad) 2%, transparent) 60%, transparent);
-        box-shadow: 0 0 18px color-mix(in srgb, var(--bad) 18%, transparent); }
+/* The column's verdict is a MARK, so it reads the saturated member of the
+   family rather than the text one — the text colour resolves to a dark olive
+   in light theme, which is what painted this whole panel gold. No wash and
+   no bloom either: the border says it, the way it does on every other card
+   in the product. */
+.gcol--warn { border-color: color-mix(in srgb, var(--warn-fill) 55%, transparent); }
+.gcol--bad { border-color: color-mix(in srgb, var(--bad-fill) 65%, transparent); }
 .gcol__hd { display: flex; align-items: center; gap: 7px; justify-content: center;
             background: none; border: none; cursor: pointer; padding: 4px 6px;
             color: var(--ink-3); }
@@ -1566,8 +1588,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .gcol__hd b { font: 700 calc(15px * var(--gs, 1)) var(--mono); letter-spacing: 0.2em;
               text-transform: uppercase; color: var(--ink); }
 .gcol__hd:hover b, .gcol__hd--on b { color: var(--accent); }
-.gcol--warn .gcol__hd { border-bottom-color: color-mix(in srgb, var(--warn) 55%, transparent); }
-.gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad) 60%, transparent); }
+.gcol--warn .gcol__hd { border-bottom-color: color-mix(in srgb, var(--warn-fill) 65%, transparent); }
+.gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad-fill) 70%, transparent); }
 /* the reader asked for legible column captions — up from 10px ink-2 the
    layer names were furniture, not labels */
 .gcol__name { text-align: center; font: 600 12px var(--sans); color: var(--ink);
@@ -1629,14 +1651,14 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
                         0 0 22px color-mix(in srgb, var(--accent) 30%, transparent); }
 .gnode--sel:hover .gnode__c { transform: scale(1.55); }
 .gnode--sel .gnode__nm { color: var(--accent); font-size: 12px; }
-.gnode__c--warn { color: var(--warn); border-color: var(--warn);
-            background: color-mix(in srgb, var(--warn) 18%, var(--panel-2));
-            box-shadow: 0 0 12px color-mix(in srgb, var(--warn) 35%, transparent); }
-.gnode__c--bad { color: var(--bad); border-color: var(--bad);
-            background: color-mix(in srgb, var(--bad) 22%, var(--panel-2));
+.gnode__c--warn { color: var(--warn); border-color:var(--warn-fill);
+            background:color-mix(in srgb, var(--warn-fill) 18%, var(--panel-2));
+            box-shadow:0 0 12px color-mix(in srgb, var(--warn-fill) 35%, transparent); }
+.gnode__c--bad { color: var(--bad); border-color:var(--bad-fill);
+            background:color-mix(in srgb, var(--bad-fill) 22%, var(--panel-2));
             animation: gnodepulse 2.6s var(--ease) infinite; }
 @keyframes gnodepulse {
-  50% { box-shadow: 0 0 18px 2px color-mix(in srgb, var(--bad) 55%, transparent); }
+  50% { box-shadow:0 0 18px 2px color-mix(in srgb, var(--bad-fill) 55%, transparent); }
 }
 .gnode--miss .gnode__c { border-style: dashed; opacity: 0.55; background: none; }
 /* A line may route wherever it likes; it may never cross TEXT. The label sits
@@ -1688,8 +1710,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .ovcounts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ovpill { font: 600 11px var(--mono); color: var(--ink-2); border: 1px solid var(--border-2);
           border-radius: 999px; padding: 3px 11px; white-space: nowrap; }
-.ovpill--bad { color: var(--bad); border-color: var(--bad); }
-.ovpill--warn { color: var(--warn); border-color: var(--warn); }
+.ovpill--bad { color: var(--bad); border-color:var(--bad-fill); }
+.ovpill--warn { color: var(--warn); border-color:var(--warn-fill); }
 .ovq { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
        color: var(--ink); font: 500 11px var(--mono); padding: 4px 12px; width: 150px; }
 .ovq:focus { outline: none; border-color: var(--border-2); }
@@ -1741,8 +1763,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .rp-ecg__grid { stroke: var(--border); }
 .rp-ecg__s { fill: none; stroke: var(--info); stroke-width: 1.8;
              filter: drop-shadow(0 0 6px color-mix(in srgb, var(--info) 60%, transparent)); }
-.rp-ecg__e { fill: none; stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 5 3;
-             filter: drop-shadow(0 0 5px color-mix(in srgb, var(--bad) 55%, transparent)); }
+.rp-ecg__e { fill: none; stroke:var(--bad-fill); stroke-width: 1.5; stroke-dasharray: 5 3;
+             filter:drop-shadow(0 0 5px color-mix(in srgb, var(--bad-fill) 55%, transparent)); }
 .rp-ecg__x { display: flex; justify-content: space-between; align-items: center;
              font: 500 10px var(--mono); color: var(--ink-3); padding-top: 5px; }
 .rp-ecg__leg { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
@@ -1768,16 +1790,20 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* a block: the classic purple card, redrawn as a lit module */
 .tk-block { position: relative; overflow: hidden; display: flex;
-  flex-direction: column; justify-content: flex-start; background:
-    linear-gradient(165deg, color-mix(in srgb, var(--c) 52%, var(--tint)),
-      color-mix(in srgb, var(--c) 24%, var(--tint)) 55%,
-      color-mix(in srgb, var(--c) 38%, var(--tint)));
-  border: 1px solid color-mix(in srgb, var(--c) 65%, transparent);
+  flex-direction: column; justify-content: flex-start; /* NEUTRAL SURFACE. The fill used to be a gradient of the card's own tone —
+     a coloured wash behind the numbers. Status belongs to the border, which
+     is the thing that animates; a tinted ground repeats it in a second
+     language and, over white, reads as smoke. This is the platform's own
+     card surface in both themes. */
+  background: var(--panel);
+  border: var(--bw) solid color-mix(in srgb, var(--c) 65%, transparent);
   border-radius: 12px; padding: 14px 16px;
-  box-shadow: 0 0 26px color-mix(in srgb, var(--c) 28%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 14%, transparent); }
+  /* NO GLOW. The border carries the status and the border is what animates;
+     a 26px bloom of the same colour behind it is decoration, and on a light
+     ground it is a coloured cloud around the card. */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 14%, transparent); }
 .tk-block::before, .tk-block::after { content: ""; position: absolute; width: 14px; height: 14px;
-  border: 1.5px solid color-mix(in srgb, var(--c) 70%, transparent); }
+  border: var(--bw) solid color-mix(in srgb, var(--c) 70%, transparent); }
 .tk-block::before { top: -1px; left: -1px; border-right: none; border-bottom: none;
   border-radius: 10px 0 0 0; }
 .tk-block::after { bottom: -1px; right: -1px; border-left: none; border-top: none;
@@ -1818,21 +1844,26 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-core { display: flex; flex-direction: column; gap: 12px; align-items: stretch;
   justify-content: center; }
 .tk-core__b { position: relative; background:
-    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--t) 26%, var(--tint)),
-      var(--tint) 80%);
-  border: 1.5px solid color-mix(in srgb, var(--t) 60%, transparent);
+    var(--panel);
+  /* ONE LINE WEIGHT ON THIS PAGE. The hero carried 1.5px against the 1px of
+     every card beside it, which is why it read as drawn by a different hand. */
+  border: var(--bw) solid color-mix(in srgb, var(--t) 60%, transparent);
   border-radius: 18px; padding: 16px 16px 14px; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
-  box-shadow: 0 0 26px color-mix(in srgb, var(--t) 30%, transparent); outline: none;
+  outline: none;
   animation: tkbreathe 4s ease-in-out infinite; }
-.tk-core__b:hover, .tk-core__b:focus-visible {
-  box-shadow: 0 0 40px color-mix(in srgb, var(--t) 55%, transparent); }
+.tk-core__b:hover, .tk-core__b:focus-visible { border-color: var(--t); }
+/* the breath is the BORDER now, in both themes — same telemetry, no halo */
 @keyframes tkbreathe {
-  0%,100% { box-shadow: 0 0 20px color-mix(in srgb, var(--t) 25%, transparent); }
-  50% { box-shadow: 0 0 30px color-mix(in srgb, var(--t) 45%, transparent); } }
-.tk-core__ic { color: var(--ink-hi); width: 30px; height: 30px; }
-.tk-core__ic svg { width: 30px; height: 30px;
-  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--ink-hi) 55%, transparent)); }
+  0%,100% { border-color: color-mix(in srgb, var(--t) 45%, transparent); }
+  50% { border-color: var(--t); } }
+/* THE DEVICE CARRIES THE VERDICT. It was --ink-hi with a glow behind it: the
+   one mark on the hero that said nothing, lit as if it did. It is the same
+   verdict the number and the word already carry, so it reads it from --t and
+   drops the halo — a glow around a shape that is now coloured would only
+   argue with it. */
+.tk-core__ic { color: var(--t); width: 30px; height: 30px; }
+.tk-core__ic svg { width: 30px; height: 30px; }
 .tk-core__pct--word, .cc .tk-core__pct--word { font-size: 30px; letter-spacing: 0.02em;
   text-transform: uppercase; }
 .tk-core__pct { font-size: 40px; color: var(--ink-hi); line-height: 1;
@@ -1847,15 +1878,11 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-core__b:hover .tk-core__go, .tk-core__b:focus-visible .tk-core__go { color: var(--ink-hi); }
 .tk-fc { display: flex; align-items: center; justify-content: center; gap: 7px;
   font: 600 11px var(--mono); color: var(--ink-hi);
-  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 45%, var(--tint)),
-    color-mix(in srgb, var(--accent) 22%, var(--tint)));
-  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  background: var(--panel);
+  border: var(--bw) solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 999px; padding: 6px 14px; }
 .tk-fc svg { width: 13px; height: 13px; }
-.tk-fc--warn { background: linear-gradient(165deg,
-    color-mix(in srgb, var(--warn) 50%, var(--tint)),
-    color-mix(in srgb, var(--warn) 24%, var(--tint)));
-  border-color: color-mix(in srgb, var(--warn) 70%, transparent); }
+.tk-fc--warn { border-color:color-mix(in srgb, var(--warn-fill) 70%, transparent); }
 
 .tk-foot { display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
   font: 500 11px var(--mono); color: var(--ink-2);
@@ -1870,11 +1897,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-chev--down { padding: 0; line-height: 1; }
 
 /* the browser window holding the trend */
-.tk-browser { background:
-    linear-gradient(180deg, color-mix(in srgb, var(--t) 26%, var(--tint)),
-      color-mix(in srgb, var(--t) 10%, var(--tint)) 60%);
-  border: 1.5px solid color-mix(in srgb, var(--t) 70%, transparent); border-radius: 12px;
-  box-shadow: 0 0 30px color-mix(in srgb, var(--t) 32%, transparent);
+.tk-browser { background: var(--panel);
+  border: var(--bw) solid color-mix(in srgb, var(--t) 70%, transparent); border-radius: 12px;
   overflow: hidden; min-width: 0; }
 .tk-browser__bar { display: flex; gap: 5px; padding: 9px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--ink-hi) 18%, transparent);
@@ -1901,9 +1925,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the classic card's title row */
 .tk-hd { display: flex; align-items: center; gap: 12px; }
 .tk-hd__ic { display: inline-flex; width: 30px; height: 30px; color: var(--t, var(--ink-2));
-  border: 1.5px solid color-mix(in srgb, var(--t, var(--border-2)) 55%, var(--border-2));
-  border-radius: 9px; align-items: center; justify-content: center;
-  box-shadow: 0 0 12px color-mix(in srgb, var(--t, transparent) 30%, transparent); }
+  border: var(--bw) solid color-mix(in srgb, var(--t, var(--border-2)) 55%, var(--border-2));
+  border-radius: 9px; align-items: center; justify-content: center; }
 .tk-hd__ic svg { width: 20px; height: 20px; }
 .tk-hd__t h2 { font: 700 18px var(--sans); color: var(--ink); margin: 0; }
 .tk-hd__t span { font: 500 11px var(--mono); color: var(--ink-3); }
@@ -1918,7 +1941,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   box-shadow: 0 0 14px color-mix(in srgb, var(--info) 35%, transparent); }
 /* the errors hand-off wears the critical family — it is the one button that
    only exists because something is wrong */
-.tk-btn--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border-2)); }
+.tk-btn--warn { color: var(--warn); border-color:color-mix(in srgb, var(--warn-fill) 55%, var(--border-2)); }
 
 /* The Serve column's seams: a labelled rule where the cards change nature —
    services above, classic topology (the mainframe's home) and data stores
@@ -1963,8 +1986,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   text-decoration: none; cursor: pointer; }
 .bsum__row:hover, .bsum__row:focus-visible { outline: none;
   border-color: color-mix(in srgb, var(--accent) 70%, transparent); }
-.bsum__row--bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
-.bsum__row--warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.bsum__row--bad { border-color:color-mix(in srgb, var(--bad-fill) 55%, var(--border)); }
+.bsum__row--warn { border-color:color-mix(in srgb, var(--warn-fill) 55%, var(--border)); }
 .bsum__ic { grid-area: ic; width: 28px; height: 28px; position: relative; }
 .bsum__sig { position: absolute; top: -6px; right: -8px; }
 .bsum__pb { font: 700 10px var(--mono); color: var(--bad); }
@@ -1987,8 +2010,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the spotlight treats the block as one component */
 .graph--hl .bsum--dim { opacity: 0.22; filter: saturate(0.3); }
 .graph--hl .bsum--spot .bsum__c {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent),
-    0 0 22px color-mix(in srgb, var(--warn) 45%, transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--warn-fill) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--warn-fill) 45%, transparent);
   animation: hlspot 1.6s ease-in-out infinite; }
 
 /* the badge a signalled card wears: its own anomaly count, always on.
@@ -1998,25 +2021,25 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .gnode__sig { position: absolute; top: -4px; right: 14px; min-width: 15px;
   height: 15px; padding: 0 3px; border-radius: 8px; display: flex;
   align-items: center; justify-content: center;
-  font: 700 9px var(--mono); color: #1a1a2e; background: var(--warn);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 60%, transparent);
+  font: 700 9px var(--mono); color: #1a1a2e; background:var(--warn-fill);
+  box-shadow:0 0 8px color-mix(in srgb, var(--warn-fill) 60%, transparent);
   z-index: 3; }
 
 /* the layer caption's amber twin of the red problem count */
 .gcol__hd .pb { color: var(--bad); font: 700 11px var(--mono);
-  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  border:1px solid color-mix(in srgb, var(--bad-fill) 45%, transparent);
   border-radius: 4px; padding: 0 4px; }
 .gcol__hd .pb--warn { color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  border-color:color-mix(in srgb, var(--warn-fill) 45%, transparent); }
 
 /* the spotlight's own caption: the total, and the way out */
 .hlbar { position: sticky; top: 6px; left: 50%; transform: translateX(-50%);
   z-index: 6; width: max-content; max-width: 90%;
   font: 600 11px var(--mono); color: var(--warn); cursor: pointer;
-  background: color-mix(in srgb, var(--warn) 12%, var(--panel));
-  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  background:color-mix(in srgb, var(--warn-fill) 12%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--warn-fill) 55%, transparent);
   border-radius: 999px; padding: 5px 14px; }
-.hlbar:hover { border-color: var(--warn); }
+.hlbar:hover { border-color:var(--warn-fill); }
 
 /* ── the anomaly spotlight ──
    Arriving from the "N anomalies" button, the question is "where are they?"
@@ -2025,18 +2048,18 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    colour. Cleared on the first selection — from there the reader navigates. */
 .graph--hl .gnode--dimmed { opacity: 0.22; filter: saturate(0.3); }
 .graph--hl .gnode--spot .gnode__c {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent),
-    0 0 22px color-mix(in srgb, var(--warn) 45%, transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--warn-fill) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--warn-fill) 45%, transparent);
   animation: hlspot 1.6s ease-in-out infinite; }
 @keyframes hlspot {
-  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn) 30%, transparent),
-    0 0 30px color-mix(in srgb, var(--warn) 65%, transparent); } }
+  50% { box-shadow:0 0 0 6px color-mix(in srgb, var(--warn-fill) 30%, transparent),
+    0 0 30px color-mix(in srgb, var(--warn-fill) 65%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
   .graph--hl .gnode--spot .gnode__c { animation: none; } }
-.tk-btn--warn:hover, .tk-btn--warn:focus-visible { color: var(--warn); border-color: var(--warn); }
-.tk-btn--sig { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--border-2)); }
-.tk-btn--sig:hover, .tk-btn--sig:focus-visible { color: var(--bad); border-color: var(--bad);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--bad) 30%, transparent); }
+.tk-btn--warn:hover, .tk-btn--warn:focus-visible { color: var(--warn); border-color:var(--warn-fill); }
+.tk-btn--sig { color: var(--bad); border-color:color-mix(in srgb, var(--bad-fill) 55%, var(--border-2)); }
+.tk-btn--sig:hover, .tk-btn--sig:focus-visible { color: var(--bad); border-color:var(--bad-fill);
+  box-shadow:0 0 14px color-mix(in srgb, var(--bad-fill) 30%, transparent); }
 /* tighter modules so the three columns hold at narrow widths, like the card */
 @media (max-width: 860px) {
   .tk-stat b { font-size: 15px; }
@@ -2058,16 +2081,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* beds: soft luminous channels, width = measured share */
 .rv-bed { fill: none; stroke-linecap: round; opacity: 0.35; }
-.rv-bed--ok { stroke: var(--good);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--good) 50%, transparent)); }
-.rv-bed--hit { stroke: var(--bad);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--bad) 55%, transparent)); }
+.rv-bed--ok { stroke:var(--good-fill);
+  filter:drop-shadow(0 0 8px color-mix(in srgb, var(--good-fill) 50%, transparent)); }
+.rv-bed--hit { stroke:var(--bad-fill);
+  filter:drop-shadow(0 0 8px color-mix(in srgb, var(--bad-fill) 55%, transparent)); }
 
 /* the water itself */
-.rv-drops--ok .rv-drop { fill: color-mix(in srgb, var(--good) 80%, var(--ink-hi));
-  filter: drop-shadow(0 0 4px var(--good)); }
-.rv-drops--hit .rv-drop { fill: color-mix(in srgb, var(--bad) 78%, var(--ink-hi));
-  filter: drop-shadow(0 0 5px var(--bad)); }
+.rv-drops--ok .rv-drop { fill:color-mix(in srgb, var(--good-fill) 80%, var(--ink-hi));
+  filter:drop-shadow(0 0 4px var(--good-fill)); }
+.rv-drops--hit .rv-drop { fill:color-mix(in srgb, var(--bad-fill) 78%, var(--ink-hi));
+  filter:drop-shadow(0 0 5px var(--bad-fill)); }
 
 .rv-src__c { fill: color-mix(in srgb, var(--info) 14%, var(--panel));
   stroke: color-mix(in srgb, var(--info) 55%, transparent); stroke-width: 1.5;
@@ -2094,18 +2117,18 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .rv-go { font-size: 11px; fill: var(--ink-3); }
 .rv-gate:hover .rv-go, .rv-gate:focus-visible .rv-go { fill: var(--ink); }
 
-.rv-out__c { fill: color-mix(in srgb, var(--c, var(--good)) 20%, var(--tint));
+.rv-out__c { fill:color-mix(in srgb, var(--c, var(--good-fill)) 20%, var(--tint));
   stroke-width: 2; }
-.rv-out--ok .rv-out__c { stroke: var(--good); ---c: var(--good);
-  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--good) 40%, transparent)); }
-.rv-out--hit .rv-out__c { stroke: var(--bad);
-  fill: color-mix(in srgb, var(--bad) 22%, var(--tint));
-  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--bad) 45%, transparent)); }
+.rv-out--ok .rv-out__c { stroke:var(--good-fill); ---c: var(--good);
+  filter:drop-shadow(0 0 14px color-mix(in srgb, var(--good-fill) 40%, transparent)); }
+.rv-out--hit .rv-out__c { stroke:var(--bad-fill);
+  fill:color-mix(in srgb, var(--bad-fill) 22%, var(--tint));
+  filter:drop-shadow(0 0 14px color-mix(in srgb, var(--bad-fill) 45%, transparent)); }
 .rv-out--live .rv-out__c { animation: rvalarm 2.2s ease-in-out infinite; }
 @keyframes rvalarm {
-  0%,100% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--bad) 35%, transparent)); }
-  50% { filter: drop-shadow(0 0 26px color-mix(in srgb, var(--bad) 75%, transparent)); } }
-.rv-prob { font-size: 11px; font-weight: 700; fill: var(--bad); }
+  0%,100% { filter:drop-shadow(0 0 10px color-mix(in srgb, var(--bad-fill) 35%, transparent)); }
+  50% { filter:drop-shadow(0 0 26px color-mix(in srgb, var(--bad-fill) 75%, transparent)); } }
+.rv-prob { font-size: 11px; font-weight: 700; fill:var(--bad-fill); }
 
 .rv-fc { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; }
 
@@ -2185,7 +2208,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 @keyframes ppflow { to { transform: translateX(-30px); } }
 .pp-fb__arr { font-size: 18px; }
 .pp-outcome { font: 600 11px var(--mono); color: var(--ink-2);
-  border: 1px solid color-mix(in srgb, var(--good) 45%, var(--border-2));
+  border:1px solid color-mix(in srgb, var(--good-fill) 45%, var(--border-2));
   border-radius: 8px; padding: 6px 10px;
   background: var(--panel); }
 
@@ -2215,8 +2238,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* nodes: the chain's circles */
 @keyframes mcbad {
-  0%,100% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--bad) 35%, transparent)); }
-  50% { filter: drop-shadow(0 0 26px color-mix(in srgb, var(--bad) 75%, transparent)); } }
+  0%,100% { filter:drop-shadow(0 0 10px color-mix(in srgb, var(--bad-fill) 35%, transparent)); }
+  50% { filter:drop-shadow(0 0 26px color-mix(in srgb, var(--bad-fill) 75%, transparent)); } }
 
 .mc-cap { text-align: center; font: 500 11px var(--mono); color: var(--ink-3);
   padding: 0 14px 12px; }
@@ -2256,9 +2279,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* a live underline, the section's own pulse */
 @keyframes bbline { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
 
-@media (max-width: 860px) { .bb-cols { grid-template-columns: 1fr; }
-@media (prefers-reduced-motion: reduce) {
-}
+/* The @media that held .bb-cols and a reduced-motion block for the same dead
+   family went with it — and took the closing brace of its wrapper, which left
+   the rest of this file INSIDE an unclosed @media. Everything after it stopped
+   being a rule: measured, `.cc-ring { position: absolute }` was present in the
+   file, present in the built CSS, and absent from the parsed stylesheets. The
+   ring's SVG then laid out in flow at the size its own ResizeObserver had just
+   measured, and the Overview's cards grew past a million pixels. One brace. */
 
 /* the Journeys page's altitude toggle */
 .seg--views { align-self: flex-start; }
@@ -2268,17 +2295,22 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .cc { margin-top: 2px; }
 /* every module breathes at the speed of its health */
 .cc-mod { animation: ccbreath var(--breath, 6s) ease-in-out infinite; }
+/* THE BREATH IS THE BORDER. It used to be a 14→30px bloom of the module's
+   tone: on near-black that reads as a lit module, on white it is a coloured
+   cloud, and an animation beats a normal declaration in the cascade — so the
+   light theme's own box-shadow was being repainted by this every frame, which
+   is why taking the halo out of the light rules did not take it off the
+   screen. Animating border-color instead says the same thing in one line of
+   the card and says it identically in both themes. */
 @keyframes ccbreath {
-  0%, 100% { box-shadow: 0 0 14px color-mix(in srgb, var(--c) 18%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 10%, transparent); }
-  50% { box-shadow: 0 0 30px color-mix(in srgb, var(--c) 42%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 14%, transparent); } }
+  0%, 100% { border-color: color-mix(in srgb, var(--c) 45%, transparent); }
+  50% { border-color: var(--c); } }
 /* an anomaly makes its module knock, not just glow */
 .cc-mod--pulse .tk-block__hd { color: var(--ink-hi); }
 .cc-mod--pulse .tk-block__ic svg { animation: ccknock 1.7s ease-in-out infinite; }
 @keyframes ccknock {
-  0%, 100% { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ink-hi) 50%, transparent)); }
-  50% { filter: drop-shadow(0 0 12px var(--c)); transform: scale(1.18); } }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); } }
 /* bars grow in, one after another — the card arrives measuring */
 .cc-bar { transform-origin: bottom;
   animation: ccgrow 480ms cubic-bezier(0.2, 0.8, 0.3, 1) backwards; }
@@ -2286,8 +2318,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the core breathes with the verdict too */
 .cc-core .tk-core__b { animation: ccbreathcore var(--breath, 6s) ease-in-out infinite; }
 @keyframes ccbreathcore {
-  0%, 100% { box-shadow: 0 0 18px color-mix(in srgb, var(--t) 22%, transparent); }
-  50% { box-shadow: 0 0 40px color-mix(in srgb, var(--t) 55%, transparent); } }
+  0%, 100% { border-color: color-mix(in srgb, var(--t) 45%, transparent); }
+  50% { border-color: var(--t); } }
 /* the forecast draws itself, then stays lit; rising also pulses the pill */
 .cc-fc { flex-direction: column; gap: 4px; padding: 8px 14px 6px; }
 .cc-fc__row { display: flex; align-items: center; gap: 7px; }
@@ -2300,8 +2332,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 @keyframes ccdraw { to { stroke-dashoffset: 0; } }
 .cc-fc--rising { animation: ccalarm 2.4s ease-in-out infinite; }
 @keyframes ccalarm {
-  0%, 100% { box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 25%, transparent); }
-  50% { box-shadow: 0 0 22px color-mix(in srgb, var(--warn) 60%, transparent); } }
+  0%, 100% { border-color:color-mix(in srgb, var(--warn-fill) 45%, transparent); }
+  50% { border-color:var(--warn-fill); } }
 @media (prefers-reduced-motion: reduce) {
   .cc-mod, .cc-core .tk-core__b, .cc-fc--rising, .cc-mod--pulse .tk-block__ic svg,
   .cc-bar { animation: none; }
@@ -2316,16 +2348,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   animation: ccdraw 1.4s 200ms ease-out backwards; stroke-dashoffset: 0; }
 .rp-ecg__band { stroke: none; }
 .rp-ecg__band--s { fill: color-mix(in srgb, var(--info) 20%, transparent); }
-.rp-ecg__band--e { fill: color-mix(in srgb, var(--bad) 12%, transparent); }
+.rp-ecg__band--e { fill:color-mix(in srgb, var(--bad-fill) 12%, transparent); }
 /* the errors lane: bars on their own baseline, forecast bars hollowed */
 .rp-ecg__base { stroke: color-mix(in srgb, var(--border-2) 90%, transparent); stroke-width: 1; }
-.rp-ecg__ebar { fill: color-mix(in srgb, var(--bad) 78%, transparent); }
-.rp-ecg__ebar--fc { fill: color-mix(in srgb, var(--bad) 45%, transparent);
-  stroke: color-mix(in srgb, var(--bad) 80%, transparent); stroke-width: 1; }
+.rp-ecg__ebar { fill:color-mix(in srgb, var(--bad-fill) 78%, transparent); }
+.rp-ecg__ebar--fc { fill:color-mix(in srgb, var(--bad-fill) 45%, transparent);
+  stroke:color-mix(in srgb, var(--bad-fill) 80%, transparent); stroke-width: 1; }
 /* each lane names itself and its own peak */
 .rp-ecg__lane { font: 700 10px var(--mono); fill: var(--ink-2);
   dominant-baseline: hanging; letter-spacing: 0.06em; }
-.rp-ecg__lane--e { fill: color-mix(in srgb, var(--bad) 85%, var(--ink-2)); }
+.rp-ecg__lane--e { fill:color-mix(in srgb, var(--bad-fill) 85%, var(--ink-2)); }
 .rp-ecg__fclbl { font-style: normal; color: var(--warn); margin-left: 12px; }
 
 /* ─── motion with meaning ─── */
@@ -2336,7 +2368,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* the heartbeat's own beat: where "now" is, on each measured line */
 .rp-ecg__beat { animation: ccbeat 1.9s ease-in-out infinite; }
 .rp-ecg__beat--s { fill: var(--info); filter: drop-shadow(0 0 6px var(--info)); }
-.rp-ecg__beat--e { fill: var(--bad); filter: drop-shadow(0 0 6px var(--bad));
+.rp-ecg__beat--e { fill:var(--bad-fill); filter:drop-shadow(0 0 6px var(--bad-fill));
   animation-delay: 0.25s; }
 @keyframes ccbeat { 0%, 100% { r: 3; opacity: 0.75; } 50% { r: 5; opacity: 1; } }
 /* the card states what its movement means — motion is data, and says so */
@@ -2365,8 +2397,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   filter: drop-shadow(0 0 7px color-mix(in srgb, var(--t) 60%, transparent));
   transition: stroke-dasharray 800ms ease; }
 /* one bright pulse travelling the ring — cadence follows the measured rate */
-.cc-ring__wave { stroke: var(--bad); stroke-width: 3.5; stroke-linecap: round;
-  filter: drop-shadow(0 0 8px var(--bad));
+.cc-ring__wave { stroke:var(--bad-fill); stroke-width: 3.5; stroke-linecap: round;
+  filter:drop-shadow(0 0 8px var(--bad-fill));
   animation-name: ccwave; animation-timing-function: linear;
   animation-iteration-count: infinite; }
 @keyframes ccwave { to { stroke-dashoffset: calc(-1 * var(--per)); } }
@@ -2376,42 +2408,51 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 }
 
 /* ─── a box you can ask about: one click target, not several ─── */
+/* NOTHING JUDGED IT, SO IT SAYS NOTHING. A muted card keeps the neutral
+   border it was given and stops breathing — the breath encodes health, and a
+   card with no verdict has no health to encode. Its device icon drops to
+   ordinary ink for the same reason: a coloured mark on an unjudged card
+   reads as a verdict that was never reached. */
+.cc-mod--mute { animation: none; }
+.cc-core--mute .tk-core__b { animation: none; }
+.cc-core--mute .tk-core__ic { color: var(--ink-2); }
 .cc-mod--pick { cursor: pointer; }
 .cc-mod--pick::after { border-color: color-mix(in srgb, var(--c) 70%, transparent); }
 .cc-mod--pick:hover, .cc-mod--pick:focus-visible { outline: none;
   border-color: color-mix(in srgb, var(--c) 95%, transparent); }
 .cc-mod--pick:hover .tk-block__hd, .cc-mod--pick:focus-visible .tk-block__hd { color: var(--ink-hi); }
-/* ─── the open box: lifted, not merely lit ───────────────────────────────
- * A glow alone was too quiet to answer "which card do the numbers below
- * belong to?" — with four cards lit the same way, the reader had to guess.
- * The open one now comes FORWARD: it rises off the grid, brightens, and the
- * others recede behind it, so the ownership of the panel underneath is read
- * before it is reasoned about.
+/* ─── the open box ───────────────────────────────────────────────────────
+ * It still has to answer "which card do the numbers below belong to?", and
+ * it still does — but in the same language as every other card here. It used
+ * to answer with a 1px ring, a 30px coloured glow and a heavy drop shadow on
+ * a lifted, scaled card, which made one tile look like it came from another
+ * design: thicker line, shadow, bigger. That was written when the cards were
+ * lit. They are not lit any more.
+ * Now: its border goes to full strength, its brackets brighten, the others
+ * step back to 0.72. Three quiet differences, no new vocabulary.
  */
 .cc-mod--on {
   z-index: 3;
-  transform: translateY(-3px) scale(1.025);
   border-color: color-mix(in srgb, var(--c) 100%, transparent) !important;
-  box-shadow:
-    0 14px 30px -8px rgba(0, 0, 0, 0.55),
-    0 0 0 1px color-mix(in srgb, var(--c) 70%, transparent),
-    0 0 30px color-mix(in srgb, var(--c) 42%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 22%, transparent) !important;
+  animation: none;
 }
 .cc-mod--on::before, .cc-mod--on::after { border-color: var(--ink-hi); }
 .cc-mod--on .tk-block__hd { color: var(--ink-hi); border-bottom-color: color-mix(in srgb, var(--ink-hi) 42%, transparent); }
 /* the unopened boxes step back, so "forward" has something to be forward OF */
 .cc:has(.cc-mod--on) .cc-mod--pick:not(.cc-mod--on) { opacity: 0.72; }
 
-.cc .cc-mod { transition: transform 180ms var(--ease), opacity 180ms var(--ease),
-  box-shadow 180ms var(--ease), border-color 180ms var(--ease); }
+.cc .cc-mod { transition: opacity 180ms var(--ease), border-color 180ms var(--ease); }
 @media (prefers-reduced-motion: reduce) {
   .cc .cc-mod { transition: none; }
-  .cc-mod--on { transform: none; }
 }
 /* ─── the metric chart, opened on demand ─── */
-.mch { background: var(--panel); border: 1px solid var(--border);
-  border-left: 3px solid var(--m); border-radius: 12px; padding: 10px 14px 8px;
+/* A PANEL IS A PANEL. These two carried a 3px coloured rail down their left
+   edge, which is not how the platform draws a panel — a rail that thick is
+   row vocabulary, the thing an insight row uses to carry a severity, and on
+   a full-width panel it reads as a component from somewhere else. Uniform
+   1px neutral border, like every other panel in the product. */
+.mch { background: var(--panel); border: var(--bw) solid var(--border);
+  border-radius: 12px; padding: 10px 14px 8px;
   animation: mchin 220ms ease-out; }
 @keyframes mchin { from { opacity: 0; transform: translateY(-6px); } }
 .mch__hd { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
@@ -2437,16 +2478,15 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 }
 
 /* ─── services drill-down: where each backend service is heading ─── */
-.svcf { background: var(--panel); border: 1px solid var(--border);
-  border-left: 3px solid var(--accent); border-radius: 12px;
+.svcf { background: var(--panel); border: var(--bw) solid var(--border);
+  border-radius: 12px;
   padding: 10px 14px 8px; animation: mchin 220ms ease-out; }
 .svcf__rows { display: flex; flex-direction: column; }
 .svcf__row { display: grid;
   grid-template-columns: minmax(120px, 1.4fr) minmax(60px, 1fr) auto auto minmax(120px, auto);
   gap: 14px; align-items: center; padding: 7px 0;
   border-top: 1px solid var(--border); font: 500 12px var(--mono); }
-.svcf__row--warn { background:
-  linear-gradient(90deg, color-mix(in srgb, var(--warn) 9%, transparent), transparent 60%); }
+.svcf__row--warn { background:linear-gradient(90deg, color-mix(in srgb, var(--warn-fill) 9%, transparent), transparent 60%); }
 /* The fatal tag: a crash row names its kind before its exception message.
    Discreet by request — the filled version stretched into a full-width red
    bar on narrow rows and shouted over the list. Outline only, sized to its
@@ -2454,7 +2494,7 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .svcf__fatal { display: inline-block; vertical-align: middle;
   font: 700 9px var(--mono); letter-spacing: 0.07em; line-height: 1.5;
   color: var(--bad); background: none;
-  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  border:1px solid color-mix(in srgb, var(--bad-fill) 45%, transparent);
   border-radius: 3px; padding: 0 5px; margin-right: 6px; }
 .svcf__nm { color: var(--ink); overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
@@ -2872,12 +2912,12 @@ div:has(> header):has(main) > div {
   padding: 4px 9px; border-radius: 9999px; cursor: pointer;
   border: 1px solid var(--border); background: none;
   font: 500 11px var(--mono); color: var(--ink-2); }
-.tpick__c i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
-.tpick__c--warn i { background: var(--warn); }
-.tpick__c--bad i { background: var(--bad); }
-.tpick__c--bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+.tpick__c i { width: 6px; height: 6px; border-radius: 50%; background:var(--good-fill); }
+.tpick__c--warn i { background:var(--warn-fill); }
+.tpick__c--bad i { background:var(--bad-fill); }
+.tpick__c--bad { border-color:color-mix(in srgb, var(--bad-fill) 55%, var(--border));
   color: var(--ink); }
-.tpick__c--warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.tpick__c--warn { border-color:color-mix(in srgb, var(--warn-fill) 45%, var(--border)); }
 .tpick__c--on { border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink-hi); }
 .tpick__c b { font: 700 10px var(--mono); color: var(--bad); }
@@ -2927,7 +2967,7 @@ div:has(> header):has(main) > div {
 
 /* the second door: same shape, the error red — an <a>, so kill the underline */
 .geo__drill-go--err { text-decoration: none; display: inline-block; margin-left: 8px;
-  border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+  border-color:color-mix(in srgb, var(--bad-fill) 55%, var(--border));
   background: none;
   color: var(--bad); }
 .geo__drill-go--err:hover { background: none;
@@ -2959,10 +2999,10 @@ div:has(> header):has(main) > div {
   border-radius: 999px; padding: 1px 6px; }
 /* …and when it IS a verdict, the colour carries it alone. */
 .geo__who-x { color: var(--bad) !important; }
-.geo__who-g--bad .geo__who-r { border-color: color-mix(in srgb, var(--bad) 40%, var(--border));
+.geo__who-g--bad .geo__who-r { border-color:color-mix(in srgb, var(--bad-fill) 40%, var(--border));
   background: var(--panel); }
 .geo__who-none { font: 400 12px var(--mono); color: var(--ink-2); line-height: 1.55;
-  border: 1px solid color-mix(in srgb, var(--good) 35%, var(--border));
+  border:1px solid color-mix(in srgb, var(--good-fill) 35%, var(--border));
   background: var(--panel);
   border-radius: var(--r-container, 9px); padding: 9px 12px; }
 .geo__who-none b { color: var(--good); }
@@ -2970,10 +3010,24 @@ div:has(> header):has(main) > div {
 /* the animated pins the DotLayer draws — shape is a ReactNode, so the map
    itself can move: problem countries pulse a sonar ring, the busiest breathe */
 .geo__map { position: relative; }
-.geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.geo__map { opacity: 0; transition: opacity 220ms ease-out; }
+.geo__map--on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .geo__map { transition: none; } }
+.geo__ov { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  /* invisible until the map reports where it actually is — see geoView in
+     Pulse. The marks are laid out the whole time, so nothing moves when they
+     appear; they simply stop being painted in the wrong place first. */
+  opacity: 0; transition: opacity 220ms ease-out; }
+.geo__ov--on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .geo__ov { transition: none; } }
 .gpin { position: absolute; transform: translate(-50%, -50%);
   border: none; cursor: pointer; pointer-events: auto;
-  border-radius: 50%; padding: 0; }
+  border-radius: 50%; padding: 0; z-index: 1; }
+/* Sixteen marks over one country means labels WILL touch. A label never eats
+   a click meant for the mark behind it, and the mark under the cursor — or
+   the selected one — comes to the front so its name can be read whole. */
+.gpin__lbl { pointer-events: none; }
+.gpin:hover, .gpin:focus-visible, .gpin--sel { z-index: 6; }
 .gpin--sel { outline: 2px solid var(--ink-hi); outline-offset: 2px; }
 .gpin__lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   margin-top: 3px; display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
@@ -2983,18 +3037,19 @@ div:has(> header):has(main) > div {
 .gpin__lbl em { font-style: normal; font: 700 10px var(--mono); color: var(--ink-2); }
 /* THEME TOKENS, not the canvas hexes — the HTML pins live in the page and
    must follow the light theme like every other verdict on screen (only the
-   canvas DotLayer, which paints outside CSS, keeps GEO_COL's literals). */
+   canvas DotLayer, which paints outside CSS, resolves the same tokens through
+   geoCol()). */
 .gpin--good { background: var(--panel);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--good) 45%, transparent); }
+  box-shadow:0 0 10px color-mix(in srgb, var(--good-fill) 45%, transparent); }
 .gpin--warn { background: var(--panel);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--warn) 50%, transparent); }
+  box-shadow:0 0 12px color-mix(in srgb, var(--warn-fill) 50%, transparent); }
 .gpin--bad { background: var(--panel);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--bad) 60%, transparent); }
+  box-shadow:0 0 14px color-mix(in srgb, var(--bad-fill) 60%, transparent); }
 .gpin--bad::before, .gpin--bad::after { content: ""; position: absolute; inset: 0;
-  border-radius: 50%; border: 2px solid var(--bad); animation: gsonar 2.2s ease-out infinite; }
+  border-radius: 50%; border:2px solid var(--bad-fill); animation: gsonar 2.2s ease-out infinite; }
 .gpin--bad::after { animation-delay: 1.1s; }
 .gpin--warn::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
-  border: 2px solid var(--warn); animation: gsonar 3.2s ease-out infinite; }
+  border:2px solid var(--warn-fill); animation: gsonar 3.2s ease-out infinite; }
 .gpin--busy { animation: gbreathe 3.4s ease-in-out infinite; }
 @keyframes gsonar {
   0% { transform: scale(1); opacity: 0.9; }
@@ -3043,7 +3098,7 @@ div:has(> header):has(main) > div {
 .bc__fun--thin { padding: 2px 0; }
 .bc__fun-none { font: 400 var(--fs-small) var(--mono); color: var(--ink-2);
   line-height: 1.6; padding: 12px 14px; border-radius: 6px;
-  background: var(--panel); border-left: 3px solid var(--warn); }
+  background: var(--panel); border-left:3px solid var(--warn-fill); }
 .bc__fun-none b.num { color: var(--ink-hi); font-weight: 700;
   font-variant-numeric: tabular-nums; }
 
@@ -3067,7 +3122,7 @@ div:has(> header):has(main) > div {
 .norum__f { flex: 1 1 10rem; display: flex; flex-direction: column; gap: 3px;
   padding: 12px 14px; border-radius: 6px; background: var(--panel);
   border-left: 3px solid var(--accent); }
-.norum__f--bad { border-left-color: var(--bad); }
+.norum__f--bad { border-left-color:var(--bad-fill); }
 .norum__f b.num { font: 700 26px var(--mono); line-height: 1; color: var(--ink-hi);
   font-variant-numeric: tabular-nums; }
 .norum__f span { font: 600 var(--fs-micro) var(--mono); text-transform: uppercase;
@@ -3079,8 +3134,8 @@ div:has(> header):has(main) > div {
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); align-items: start; }
 .norum__col { padding: 12px 14px; border-radius: 6px; background: var(--panel);
   border-left: 3px solid var(--border); }
-.norum__col--no { border-left-color: var(--bad); }
-.norum__col--ok { border-left-color: var(--good); }
+.norum__col--no { border-left-color:var(--bad-fill); }
+.norum__col--ok { border-left-color:var(--good-fill); }
 .norum__col-l { display: block; font: 600 var(--fs-micro) var(--mono);
   text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3);
   margin-bottom: 8px; }
@@ -3213,18 +3268,43 @@ div:has(> header):has(main) > div {
    .tk-block paints `color-mix(--c 52%, --tint)`: over #12122b that is a card
    with a whisper of its hue, and over #ffffff it is a saturated purple slab —
    measured in light, the same rule resolved to srgb(0.64 0.62 0.95). The hue
-   is identity here, not a verdict, so in light it steps back to the same
-   whisper it has in dark, and the number stays the brightest thing in the box. */
+   had to come down. It came down too far: at 9% over white the fill resolved
+   to srgb(0.94 0.93 0.99) — a card with no ground at all, so in light the
+   section read as a hole in the page with a coloured halo floating over it,
+   which is what the reader photographed. The mix now keeps the DARK THEME'S
+   RATIO at a fraction of its strength (52/24/38 → 22/11/17, about 0.43x), so
+   the gradient has the same shape and the ground is visibly there. Dark text
+   on the strongest stop still clears AA by a wide margin — the fill never
+   drops below 0.78 relative luminance. */
 [data-theme="light"] .tk-block,
 :root:not([data-theme="dark"]) .tk-block {
-  background: linear-gradient(165deg,
-    color-mix(in srgb, var(--c) 9%, var(--tint)),
-    color-mix(in srgb, var(--c) 4%, var(--tint)) 55%,
-    color-mix(in srgb, var(--c) 7%, var(--tint)));
-  border-color: color-mix(in srgb, var(--c) 32%, var(--border));
+  border-color: color-mix(in srgb, var(--c) 40%, var(--border));
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
+/* THE HERO HAD NO LIGHT RULE, so it kept the dark one — a radial that fades
+   to var(--tint), which in light IS the page. The card therefore had no fill
+   of its own: everything you could see of it was the breathing glow leaking
+   past its edge, and a halo with nothing inside it is the worst reading of
+   the lot. Same correction as the blocks above: keep the gradient's shape,
+   land it on a ground that exists. */
+[data-theme="light"] .tk-core__b,
+:root:not([data-theme="dark"]) .tk-core__b {
+  border-color: color-mix(in srgb, var(--t) 45%, var(--border));
+  /* An ordinary lift, not a bloom. The halo is gone from the keyframes
+     themselves now, so light has nothing to switch off and keeps the same
+     breathing border the dark theme has. */
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+/* and the one caption that the new ground costs: at 60% ink over the hero's
+   old white fill "open the delivery chain" measured 4.5:1 with nothing to
+   spare, and over a fill that exists it fell to 4.28. 10px text owes 4.5. */
+[data-theme="light"] .tk-core__go,
+:root:not([data-theme="dark"]) .tk-core__go {
+  color: color-mix(in srgb, var(--ink-hi) 78%, transparent);
+}
+
 [data-theme="light"] .tk-block::before, [data-theme="light"] .tk-block::after,
 :root:not([data-theme="dark"]) .tk-block::before,
 :root:not([data-theme="dark"]) .tk-block::after {

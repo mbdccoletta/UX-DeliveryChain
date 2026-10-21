@@ -15,6 +15,7 @@ import { fmtMs, fmtN, fmtPct } from "../utils/dql";
 import { vitalTitle } from "../utils/vitals";
 import { geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
+import { XmarkIcon } from "@dynatrace/strato-icons";
 
 export interface InfoRow {
   dim: string; bucket: string; inCohort: boolean;
@@ -365,7 +366,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
             }}>
             {exporting ? "rendering…" : "export image ↓"}
           </Button>
-          <button className="drawer__x" onClick={onClose} aria-label="Close">✕</button>
+          <button className="drawer__x" onClick={onClose} aria-label="Close"><XmarkIcon /></button>
         </header>
 
         {rows === "loading" ? (
