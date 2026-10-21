@@ -42,7 +42,7 @@ export const GEO_WORD = { bad: "frustrated", warn: "tolerating", good: "satisfie
  * So the canvas resolves the tokens instead of guessing them. The fallback
  * hexes below are Strato's own dark-theme values, kept for standalone dev
  * where no shell injects anything. */
-export const GEO_COL = { bad: "#ff999c", warn: "#eea83f", good: "#6fc3ba" } as const;
+export const GEO_COL = { bad: "#c82d40", warn: "#eea746", good: "#5eb1a9" } as const;
 
 /** The three verdict tones as the live theme resolves them, for the canvas.
  *  Reading them off a probe rather than the custom property keeps the result
@@ -61,9 +61,9 @@ export function geoCol(): { bad: string; warn: string; good: string } {
     return c && c !== "rgba(0, 0, 0, 0)" ? c : fb;
   };
   const out = {
-    bad: read("--bad", GEO_COL.bad),
-    warn: read("--warn", GEO_COL.warn),
-    good: read("--good", GEO_COL.good),
+    bad: read("--bad-fill", GEO_COL.bad),
+    warn: read("--warn-fill", GEO_COL.warn),
+    good: read("--good-fill", GEO_COL.good),
   };
   probe.remove();
   return out;

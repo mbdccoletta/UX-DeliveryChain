@@ -644,7 +644,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         }
         const frame = geoFrame.current ?? { latitude: cLat, longitude: cLng, zoom };
         const COL = geoCol();
-        const TOK = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" } as const;
+        /* dots and bars are MARKS, so they take the saturated half of the
+           family — the text half resolves to #855400 in light, which is the
+           olive that made the whole tile look yellow. */
+        const TOK = { good: "var(--good-fill)", warn: "var(--warn-fill)",
+          bad: "var(--bad-fill)" } as const;
         const WORD = GEO_WORD;
         const because = (g: GeoArm) => geoBecause(g, base);
         /* Country NAMES from the browser itself — no dataset needed, and it
@@ -823,7 +827,29 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             title={`${r.name} — ${fmtN(r.sessions)} sessions,`
                               + ` ${(rate * 100).toFixed(1)}% met an error.`
                               + " Click for its cities."}
-                            onClick={() => setRegionSel((x) => (x === r.id ? null : r.id))}>
+                            onClick={() => {
+                              const opening = regionSel !== r.id;
+                              setRegionSel((x) => (x === r.id ? null : r.id));
+                              /* A MARK ON THE MAP OPENS THE DRILL BELOW IT.
+                                 The state list and its cities live under the
+                                 map, far enough down on a wide screen that
+                                 clicking a mark looked like it had done
+                                 nothing: the row highlighted somewhere off
+                                 the fold. The click now carries the reader to
+                                 what it opened. The wait lets the row and its
+                                 cities render first, so the scroll lands on
+                                 the finished block rather than on the gap
+                                 where it is about to be. */
+                              if (opening) setTimeout(() => {
+                                const t = document.querySelector(".geo__r--on")
+                                  ?? document.querySelector(".geo__rows");
+                                t?.scrollIntoView({
+                                  behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+                                    ? "auto" : "smooth",
+                                  block: "center",
+                                });
+                              }, 140);
+                            }}>
                             {/* EVERY STATE IS NAMED. The label used to need 10
                                 sessions, which on a real estate left two
                                 thirds of the marks as unexplained dots — the
@@ -918,10 +944,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         + ` ${(rate * 100).toFixed(1)}% met an error.`
                         + (c ? " Click to centre the map on it and list its cities."
                              : " No coordinate for this state, so it is counted but not placed.")}
-                      onClick={() => {
-                        const opening = regionSel !== r.id;
-                        setRegionSel((x) => (x === r.id ? null : r.id));
-                      }}>
+                      onClick={() => setRegionSel((x) => (x === r.id ? null : r.id))}>
                       <i className="geo__dot" style={{ background: TOK[t] }} />
                       <b className="geo__cc">{r.id.slice(3)}</b>
                       <span className="geo__nm">{r.name}</span>
