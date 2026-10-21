@@ -773,50 +773,13 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 .bc__fc-item em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 11px; }
 .bc__fc-wait { font: 400 12px var(--mono); color: var(--ink-3); }
 /* what failure costs */
-.bc__cost { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  padding: 16px 18px; border-radius: 14px; background: var(--panel-2);
-  border: 1px solid var(--border); }
-.bc__cost-k { display: flex; flex-direction: column; gap: 2px; }
-.bc__cost-k b { font-size: 30px; line-height: 1; color: var(--good); }
-.bc__cost-k--bad b { color: var(--bad); }
-.bc__cost-k span { font: 600 10px var(--mono); text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--ink-3); max-width: 160px; }
-.bc__cost-vs { font: 700 12px var(--mono); color: var(--ink-3); font-style: normal; }
-.bc__cost-verdict { margin-left: auto; text-align: right; font: 500 15px var(--mono);
-  color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
-.bc__cost-verdict b { font-size: 22px; color: var(--bad); }
-.bc__cost-verdict em { font: 400 11px var(--mono); color: var(--ink-3); font-style: normal; }
 /* defining the conversion journey — a declared mode, not a hidden button.
    The entry point lives in the flow header and states what it is for; while
    it is on, the bar below says what the app is waiting for and what will be
    stored, and colour marks the whole thing as an editing state. */
-.flow-def { margin-left: 0; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--good) 70%, var(--border));
-  background: var(--panel);
-  border-radius: 8px; padding: 7px 14px;
-  font: 700 10px var(--mono); letter-spacing: 0.08em; color: var(--good); }
-.flow-def:hover { background: var(--panel);
-  color: var(--ink-hi); }
 /* the two steps of the process, lit as you move through them */
-.flow-def-step { font: 700 9px var(--mono); letter-spacing: 0.1em; padding: 3px 8px;
-  border-radius: 999px; border: 1px solid var(--border-2); color: var(--ink-3); }
-.flow-def-step--now { border-color: var(--good); color: var(--good);
-  background: var(--panel); }
-.flow-def--on { border-style: solid; color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 60%, var(--border));
-  background: var(--panel); }
-.flow-def-bar { border-left: 3px solid var(--good) !important;
-  background: var(--panel) !important;
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.flow-def-bar__l { font: 700 9px var(--mono); letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--good); }
-.flow-def-bar__h { font: 400 11px var(--mono); color: var(--ink-2); }
-.flow-def-bar__h b { color: var(--ink-hi); }
-.flow-def-bar__h--no { color: var(--warn); }
 .flow-sel__no { flex-basis: 100%; font: 400 11px var(--mono); color: var(--warn);
   line-height: 1.45; }
-.flow-def-list { flex-basis: 100%; margin-top: 4px; }
-.flow-def-list .cdefs { margin: 0; }
 .flow-sel__b:disabled { opacity: 0.45; cursor: not-allowed; }
 .bc__scoped-none { flex-basis: 100%; font: 400 11px var(--mono); color: var(--warn);
   line-height: 1.5; }
@@ -1024,70 +987,10 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 /* the defined conversion journeys — one list, mounted on the board and on
    the poster. Rows are filters where filtering means something (the board)
    and plain statements where it does not (the poster). */
-.cdefs { display: flex; flex-direction: column; gap: 6px; margin: -6px 0 12px;
-  padding: 9px 12px; border-radius: 9px; border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 45%, transparent); }
-.cdefs__l { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--ink-3); display: flex; gap: 8px; align-items: baseline; }
-.cdefs__l em { font-style: normal; letter-spacing: 0.04em; color: var(--ink-2); }
-.cdefs__none { font: 400 11px var(--mono); color: var(--warn); }
-.cdefs__l--btn { background: none; border: none; cursor: pointer; padding: 0;
-  text-align: left; }
-.cdefs__l--btn i { font-style: normal; color: var(--ink-3); }
-.cdefs__l--btn:hover em, .cdefs__l--btn:hover i { color: var(--ink-hi); }
-.cdefs__hint { font: 400 10px var(--mono); color: var(--ink-3); margin-left: auto; }
-.cdefs__no { flex: none; width: 18px; text-align: right; font: 700 10px var(--mono);
-  color: var(--ink-3); }
-.cdefs__rows { display: flex; flex-direction: column; gap: 3px; }
-.cdefs__r { display: flex; align-items: center; gap: 6px; border-radius: 8px;
-  padding: 3px 4px 3px 0; }
-.cdefs__r--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.cdefs__p { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center;
-  gap: 5px; background: none; border: none; text-align: left; cursor: pointer;
-  padding: 4px 8px; border-radius: 8px; font: 500 10px var(--mono); color: var(--ink-2); }
-.cdefs__p:disabled { cursor: default; }
-.cdefs__p:not(:disabled):hover { background: color-mix(in srgb, var(--ink-hi) 8%, transparent); }
-.cdefs__p i { font-style: normal; color: var(--ink-3); }
-.cdefs__goal { color: var(--good); font-weight: 700; }
-.cdefs__a { background: none; border: 1px solid var(--border-2); border-radius: 999px;
-  cursor: pointer; padding: 3px 9px; font: 700 9px var(--mono); color: var(--ink-3); }
-.cdefs__a:hover { color: var(--ink-hi); border-color: var(--accent); }
-.cdefs__a--x:hover { color: var(--bad); border-color: var(--bad); }
-.cdefs__ft { display: flex; gap: 10px; }
-.cdefs__add { background: none; border: none; cursor: pointer; padding: 2px 0;
-  font: 700 10px var(--mono); color: var(--accent); }
 /* the START of the process, weighted like the action it is */
-.cdefs__start { cursor: pointer; padding: 8px 14px; border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--good) 70%, var(--border));
-  background: var(--panel);
-  font: 700 10px var(--mono); letter-spacing: 0.06em; color: var(--good); }
-.cdefs__start:hover { background: var(--panel);
-  color: var(--ink-hi); }
-.cdefs__add:hover { text-decoration: underline; }
 /* on the poster it is a statement, not a control surface */
-.cdefs--ro { margin: 8px 0 0; background: none; border-color: var(--border-2); }
-.cdefs--ro .cdefs__p { padding-left: 0; }
 /* the saved journeys, offered back as filters on the board. Authored one at
    a time on Journeys; combined many at a time here. */
-.bc__jf { display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-  margin: -6px 0 12px; padding: 7px 12px; border-radius: 9px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 45%, transparent); }
-.bc__jf-l { font: 700 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--ink-3); margin-right: 4px; }
-.bc__jf-c { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px;
-  border: 1px solid var(--border-2);
-  background: color-mix(in srgb, var(--panel) 70%, transparent); }
-.bc__jf-c button { background: none; border: none; cursor: pointer; padding: 4px 4px 4px 10px;
-  font: 500 10px var(--mono); color: var(--ink-2); }
-.bc__jf-c i { cursor: pointer; font-style: normal; padding: 4px 8px 4px 2px;
-  font-size: 9px; color: var(--ink-3); }
-.bc__jf-c i:hover { color: var(--bad); }
-.bc__jf-c--on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.bc__jf-c--on button { color: var(--ink-hi); font-weight: 700; }
-.bc__jf-clear { background: none; border: none; cursor: pointer; padding: 4px 6px;
-  font: 700 9px var(--mono); color: var(--ink-2); }
 /* where they stopped — the last screen of each session, with what happened
    there. Amber marks a screen that is both over-represented in this cohort and
    carrying errors: the place to look first. */
@@ -1209,35 +1112,6 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
 /* where conversion lives — and dies. Two columns, one verdict each: the
    segments that beat the route's own conversion and the ones that lose to it.
    Colour is the verdict, never identity — the same rule the rest obeys. */
-.rinfo__seg { border-color: color-mix(in srgb, var(--t-azure) 40%, var(--border));
-  background: color-mix(in srgb, var(--t-azure) 7%, transparent); }
-.rinfo__seg .rinfo__worth-l { color: var(--t-azure); }
-.rinfo__seg-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 10px; }
-.rinfo__seg-c { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
-  background: color-mix(in srgb, var(--panel) 70%, transparent); }
-.rinfo__seg-c h4 { margin: 0 0 6px; font: 700 9px var(--mono); letter-spacing: 0.12em;
-  text-transform: uppercase; }
-.rinfo__seg-c--up h4 { color: var(--good); }
-.rinfo__seg-c--dn h4 { color: var(--bad); }
-.rinfo__seg-r { display: grid; grid-template-columns: 1fr auto auto auto;
-  align-items: baseline; gap: 8px; padding: 5px 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-.rinfo__seg-r:first-of-type { border-top: none; }
-.rinfo__seg-b { font: 700 12px var(--mono); color: var(--ink-hi);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rinfo__seg-b em { font-style: normal; font-weight: 400; font-size: 9px;
-  color: var(--ink-3); margin-left: 6px; letter-spacing: 0.06em; }
-.rinfo__seg-r b { font: 700 13px var(--mono); color: var(--ink-hi); }
-.rinfo__seg-l--up, .rinfo__seg-l--dn { font: 700 10px var(--mono); font-style: normal;
-  white-space: nowrap; }
-.rinfo__seg-l--up { color: var(--good); }
-.rinfo__seg-l--dn { color: var(--bad); }
-.rinfo__seg-n { font: 400 10px var(--mono); font-style: normal; color: var(--ink-3);
-  white-space: nowrap; }
-.rinfo__seg-none { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
-.rinfo__seg-ft { display: block; margin-top: 8px; font: 400 10px var(--mono);
-  color: var(--ink-3); }
 /* "no page telemetry", unpacked */
 .ntel { width: min(660px, 92vw); max-height: 86vh; overflow-y: auto; margin: auto;
   background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px;
@@ -1543,38 +1417,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
    indigo glass, darker as it sinks, and only a Davis signal lights one up. */
 .stack3d { display: flex; flex-direction: column; gap: 0; padding: 30px 26px 60px;
          width: max-content; min-width: 100%; }
-.shelf { display: flex; align-items: center; margin-bottom: -6px; }
-.shelf__card { width: 252px; flex: none; display: flex; align-items: center; gap: 10px;
-               border: 1px solid var(--border-2); border-radius: 10px; padding: 10px 12px;
-               background: color-mix(in srgb, var(--accent) 6%, var(--panel));
-               cursor: pointer; position: relative; z-index: 4;
-               transition: border-color 140ms, box-shadow 140ms; }
-.shelf__card:hover, .shelf__card:focus-visible { border-color: var(--accent);
-               box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 25%, transparent); }
-.shelf__card--warn { border-color: color-mix(in srgb, var(--warn) 70%, transparent); }
-.shelf__card--bad { border-color: var(--bad);
-               box-shadow: 0 0 12px color-mix(in srgb, var(--bad) 30%, transparent); }
-.shelf__num { font: 700 13px var(--mono); color: var(--accent); }
-.shelf__ic { color: var(--ink-2); display: inline-flex; }
-.shelf__tx { flex: 1; min-width: 0; }
-.shelf__tx b { display: block; font: 600 12px var(--mono); letter-spacing: 0.08em;
-               text-transform: uppercase; color: var(--ink); }
-.shelf__tx i { display: block; font: 400 11px var(--sans); font-style: normal;
-               color: var(--ink-3); }
-.shelf__kpi { text-align: right; }
-.shelf__kpi b { display: block; font: 700 15px var(--mono); color: var(--ink); }
-.shelf__kpi span { font: 500 10px var(--mono); letter-spacing: 0.1em;
-                   text-transform: uppercase; color: var(--ink-3); }
-.shelf__kpi em { display: block; font: 500 10px var(--mono); font-style: normal;
-                 color: var(--ink-3); }
-.shelf__wire { width: 54px; height: 1px; flex: none; position: relative;
-               background: linear-gradient(90deg, var(--accent),
-                 color-mix(in srgb, var(--accent) 15%, transparent)); }
-.shelf__wire::before { content: ""; position: absolute; left: -2px; top: -2.5px;
-               width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 
 /* the slab: one square, tipped into isometry; thickness from a darker twin */
-.shelf__stage { position: relative; width: 520px; height: 158px; flex: none; }
 .plate { position: absolute; left: 50%; top: 50%; width: 320px; height: 320px;
          transform: translate(-50%, -54%) rotateX(62deg) rotateZ(45deg);
          border-radius: 18px;
@@ -1609,8 +1453,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .plate__tag b { display: block; font: 700 26px var(--mono); color: var(--ink); }
 .plate__tag span { font: 600 10px var(--mono); letter-spacing: 0.16em;
                    text-transform: uppercase; color: var(--ink-3); }
-.shelf__stage { cursor: pointer; transition: height 180ms var(--ease); }
-.shelf__stage--open { height: 168px; }
 
 /* ── The slab, as in the reference: an extruded block, bright top face in the
    layer's hue, sides carved darker. Signals add glow on top of identity. ── */
@@ -2154,18 +1996,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 }
 
 /* the drawn device at the centre of the mobile card */
-.tk-phone { width: 128px; height: auto;
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--t) 45%, transparent)); }
-.tk-phone__body { fill: #0d0d22; stroke: color-mix(in srgb, var(--t) 80%, var(--ink-hi));
-  stroke-width: 2.5; }
-.tk-phone__notch { fill: color-mix(in srgb, var(--t) 45%, var(--tint)); }
-.tk-phone__scr { stroke: color-mix(in srgb, var(--t) 40%, transparent); stroke-width: 1; }
-.tk-phone__pct { font: 700 30px var(--mono); fill: var(--ink-hi); text-anchor: middle;
-  text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 40%, transparent); }
-.tk-phone__cap { font: 700 9px var(--mono); fill: color-mix(in srgb, var(--ink-hi) 75%, transparent);
-  text-anchor: middle; letter-spacing: 0.14em; }
-.tk-phone__bar { fill: color-mix(in srgb, var(--ink-hi) 85%, transparent); }
-.tk-phone__home { fill: none; stroke: color-mix(in srgb, var(--ink-hi) 50%, transparent); stroke-width: 1.5; }
 
 /* ─── pulse: the living river ─── */
 .rv-stage { position: relative; background:
@@ -2241,9 +2071,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 /* ─── pulse: the platform-slide pipeline ─── */
 .pp { position: relative; display: flex; flex-direction: column; gap: 0; }
-.pp-arrows { width: 100%; height: 58px; display: block; margin: -4px 0 -16px; }
-.pp-arr { fill: none; stroke-width: 26; stroke-linejoin: round; opacity: 0.9;
-  stroke-dasharray: 26 10; animation: pparr 1.6s linear infinite; }
 @keyframes pparr { to { stroke-dashoffset: -36; } }
 
 .pp-top { display: flex; align-items: center; gap: 10px; align-self: center;
@@ -2311,28 +2138,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   border-radius: 8px; padding: 6px 10px;
   background: var(--panel); }
 
-.pp-cx { display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 4px; cursor: pointer; outline: none;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--t) 22%, var(--tint-2)), var(--tint-2));
-  border: 1.5px solid color-mix(in srgb, var(--t) 65%, transparent);
-  border-radius: 14px; padding: 12px 12px;
-  box-shadow: 0 0 24px color-mix(in srgb, var(--t) 28%, transparent);
-  animation: tkbreathe 4s ease-in-out infinite; }
-.pp-cx__ic { display: inline-flex; width: 26px; height: 26px; color: var(--ink-hi); }
-.pp-cx__ic svg { width: 26px; height: 26px;
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--ink-hi) 50%, transparent)); }
-.pp-cx__pct { font-size: 30px; color: var(--ink-hi); line-height: 1.1;
-  text-shadow: 0 0 16px color-mix(in srgb, var(--ink-hi) 30%, transparent); }
-.pp-cx__cap { font: 700 9px var(--mono); color: color-mix(in srgb, var(--ink-hi) 70%, transparent);
-  text-transform: uppercase; letter-spacing: 0.12em; }
-.pp-cx__nums { display: flex; gap: 10px; font: 600 11px var(--mono); margin-top: 6px; }
-.pp-cx__ok { font-style: normal; color: var(--good); }
-.pp-cx__hit { font-style: normal; color: var(--bad); }
-.pp-cx__go { font: 500 10px var(--mono); color: color-mix(in srgb, var(--ink-hi) 55%, transparent); margin-top: 5px; }
-.pp-cx:hover .pp-cx__go, .pp-cx:focus-visible .pp-cx__go { color: var(--ink-hi); }
 
 @media (prefers-reduced-motion: reduce) {
-  .pp-arr, .pp-step, .pp-fb__bar::after, .pp-cx { animation: none; }
 }
 
 /* ─── pulse: the mini-chain — the chain's grammar at overview altitude ─── */
@@ -2356,30 +2163,9 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 
 /* nodes: the chain's circles */
-.mc-n { cursor: pointer; outline: none; }
-.mc-n__c { fill: color-mix(in srgb, var(--c) 16%, var(--tint-2));
-  stroke: color-mix(in srgb, var(--c) 70%, transparent); stroke-width: 2;
-  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--c) 35%, transparent)); }
-.mc-n:hover .mc-n__c, .mc-n:focus-visible .mc-n__c {
-  filter: drop-shadow(0 0 26px color-mix(in srgb, var(--c) 65%, transparent)); }
-.mc-n--bad .mc-n__c { animation: mcbad 2.1s ease-in-out infinite; }
 @keyframes mcbad {
   0%,100% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--bad) 35%, transparent)); }
   50% { filter: drop-shadow(0 0 26px color-mix(in srgb, var(--bad) 75%, transparent)); } }
-.mc-n__fo { pointer-events: none; }
-.mc-n__ic { width: 30px; height: 30px; color: var(--ink-hi); display: flex;
-  align-items: center; justify-content: center; }
-.mc-n__ic svg { width: 30px; height: 30px;
-  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ink-hi) 45%, transparent)); }
-.mc-n__nm { font-size: 15px; font-weight: 700; fill: var(--ink);
-  font-family: var(--sans); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
-.mc-n__v { font-size: 18px; font-weight: 700; fill: var(--ink);
-  paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
-.mc-n--warn .mc-n__v { fill: var(--warn); }
-.mc-n--bad .mc-n__v { fill: var(--bad); }
-.mc-n--good .mc-n__v { fill: var(--good); }
-.mc-n__mt { font-size: 11px; font-weight: 500; fill: var(--ink-3);
-  paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
 
 .mc-cap { text-align: center; font: 500 11px var(--mono); color: var(--ink-3);
   padding: 0 14px 12px; }
@@ -2388,12 +2174,6 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 }
 
 /* labelled flows on the slide arrows, and labelled steps between stages */
-.pp-arr__lbl { font: 700 13px var(--mono); fill: var(--ink); text-anchor: middle;
-  paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
-.pp-arr__lbl--l { text-anchor: start; }
-.pp-arr__lbl--r { text-anchor: end; }
-.pp-arr__lbl--ok { fill: var(--good); }
-.pp-arr__lbl--hit { fill: var(--bad); }
 .pp-step { display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 2px; }
 .pp-step i { font-style: normal; font-size: 18px; color: var(--info);
@@ -2411,89 +2191,22 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
     repeating-linear-gradient(90deg, transparent 0 46px, color-mix(in srgb, var(--border) 40%, transparent) 46px 47px);
   border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
 
-.bb-hero { display: flex; gap: 30px; align-items: center; flex-wrap: wrap;
-  background: linear-gradient(165deg, color-mix(in srgb, var(--t) 16%, #0d0d20),
-    #0d0d20 70%);
-  border: 1px solid color-mix(in srgb, var(--t) 55%, var(--border));
-  border-radius: 14px; padding: 20px 26px; position: relative; overflow: hidden;
-  box-shadow: 0 0 30px color-mix(in srgb, var(--t) 24%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--ink-hi) 8%, transparent); }
 /* a scanline sweeps the hero — the panel is live, not printed */
-.bb-hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(105deg, transparent 42%,
-    color-mix(in srgb, var(--ink-hi) 5%, transparent) 50%, transparent 58%);
-  animation: bbscan 5.5s linear infinite; }
 @keyframes bbscan { from { transform: translateX(-70%); } to { transform: translateX(70%); } }
-.bb-verdict { display: flex; flex-direction: column; align-items: flex-start;
-  background: none; border: none; cursor: pointer; outline: none; padding: 0; }
-.bb-verdict b { font-size: 88px; line-height: 0.95; color: var(--t);
-  text-shadow: 0 0 30px color-mix(in srgb, var(--t) 60%, transparent),
-    0 0 8px color-mix(in srgb, var(--t) 80%, transparent);
-  animation: bbbreathe 4s ease-in-out infinite; }
 @keyframes bbbreathe {
   0%,100% { text-shadow: 0 0 22px color-mix(in srgb, var(--t) 45%, transparent); }
   50% { text-shadow: 0 0 40px color-mix(in srgb, var(--t) 75%, transparent),
     0 0 10px color-mix(in srgb, var(--t) 90%, transparent); } }
-.bb-verdict span { font: 700 12px var(--mono); color: var(--ink-2);
-  text-transform: uppercase; letter-spacing: 0.14em; margin-top: 8px; }
-.bb-verdict em { font: 500 11px var(--mono); color: var(--ink-3); font-style: normal;
-  margin-top: 4px; }
-.bb-verdict:hover em, .bb-verdict:focus-visible em { color: var(--ink); }
-.bb-flow { display: flex; align-items: center; gap: 20px; margin-left: auto;
-  flex-wrap: wrap; }
 /* the flow's wires: lit traces with a packet running them */
-.bb-wire { position: relative; width: 52px; height: 3px; border-radius: 2px;
-  background: var(--panel);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--good) 30%, transparent); }
-.bb-wire::after { content: ""; position: absolute; top: -2px; width: 14px; height: 7px;
-  border-radius: 4px; background: var(--ink-hi);
-  box-shadow: 0 0 10px var(--good), 0 0 4px var(--ink-hi);
-  animation: bbpk 1.8s linear infinite; }
-.bb-wire--bad { background: var(--panel);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--bad) 35%, transparent); }
-.bb-wire--bad::after { box-shadow: 0 0 10px var(--bad), 0 0 4px var(--ink-hi);
-  animation-delay: 0.9s; }
 @keyframes bbpk { from { left: -8px; } to { left: 100%; } }
-.bb-big { display: flex; flex-direction: column; min-width: 0; }
-.bb-big b { font-size: 40px; line-height: 1.05; color: var(--ink);
-  text-shadow: 0 0 14px color-mix(in srgb, var(--ink-hi) 18%, transparent); }
-.bb-big span { font: 600 10px var(--mono); color: var(--ink-3);
-  text-transform: uppercase; letter-spacing: 0.1em; margin-top: 3px; }
 
-.bb-aud { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.bb-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.bb-sec { position: relative; overflow: hidden;
-  background: linear-gradient(180deg, var(--tint-2), #0c0c1c);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column;
-  gap: 15px; box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 10%, transparent); }
 /* the chain's corner brackets */
-.bb-sec::before, .bb-sec::after { content: ""; position: absolute; width: 15px;
-  height: 15px; border: 1.5px solid color-mix(in srgb, var(--accent) 70%, transparent); }
-.bb-sec::before { top: -1px; left: -1px; border-right: none; border-bottom: none;
-  border-radius: 12px 0 0 0; }
-.bb-sec::after { bottom: -1px; right: -1px; border-left: none; border-top: none;
-  border-radius: 0 0 12px 0; }
-.bb-sec h3 { display: flex; align-items: center; gap: 8px;
-  font: 700 11px var(--mono); color: var(--ink); margin: 0;
-  text-transform: uppercase; letter-spacing: 0.16em; padding-bottom: 9px;
-  position: relative; }
-.bb-sec h3 i { display: inline-flex; width: 15px; height: 15px; color: var(--accent); }
-.bb-sec h3 i svg { width: 15px; height: 15px;
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 70%, transparent)); }
 /* a live underline, the section's own pulse */
-.bb-sec h3::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
-  height: 1.5px; background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent) 75%, transparent), transparent 70%);
-  animation: bbline 3.2s ease-in-out infinite; }
 @keyframes bbline { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
-.bb-sec .bb-big b { font-size: 30px; }
 
 @media (max-width: 860px) { .bb-cols { grid-template-columns: 1fr; }
-  .bb-verdict b { font-size: 52px; } .bb-big b { font-size: 30px; } }
 @media (prefers-reduced-motion: reduce) {
-  .bb-hero::after, .bb-verdict b, .bb-wire::after, .bb-sec h3::after { animation: none; }
 }
 
 /* the Journeys page's altitude toggle */
