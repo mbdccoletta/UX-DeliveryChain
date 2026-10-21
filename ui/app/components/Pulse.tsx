@@ -24,6 +24,8 @@ import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
 import { useGeo } from "../hooks/useGeo";
+import { Intelligence } from "./Intelligence";
+import { OVERVIEW_STARTERS } from "../utils/starters";
 import { DotLayer, MapView } from "@dynatrace/strato-geo";
 import { CENTROID } from "../utils/geoCentroids";
 import { usePulse } from "../hooks/usePulse";
@@ -42,7 +44,7 @@ import {
 } from "@dynatrace/strato-icons";
 
 import { verdictOf, VERDICT_LEGEND, HIT_WARN, davisCategory,
-  type Tone } from "../utils/verdict";
+  type Tone, failTone} from "../utils/verdict";
 import { errorsExplorerHref, servicesExplorerHref, rowDrilldown, open,
   intentsAvailable, appEntityOf } from "../utils/links";
 import type { DeepLink } from "../utils/links";
@@ -348,8 +350,57 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * in an iframe and the hand-off leaves it. */
   const errExplorer = app.errors > 0 ? errorsExplorerHref(data.tf, app.name) : null;
 
+  /* What this page measured, in the order a reader meets it. Built here so
+   * the Intelligence starters cite exactly the figures on screen — and so a
+   * figure the page could NOT measure is named as unmeasured rather than
+   * quietly omitted, which is how a model ends up inventing one. */
+  const overviewFacts = () => {
+    const L: string[] = [
+      `Application: ${app.name}`,
+      `Window: ${data.tf.label}`,
+      `Verdict:  — `,
+      impacted
+        ? `Sessions: ${fmtN(impacted.sessions)} (${fmtN(impacted.realSessions)} from real people, the rest robots or synthetic)`
+        : "Sessions: not measured in this window",
+      impacted && impacted.realSessions > 0
+        ? `Sessions that met an error: ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} real ones`
+        : "Sessions that met an error: not measurable — no real-user sessions on record",
+      `Errors recorded: ${fmtN(app.errors)}`,
+      `Views recorded: ${fmtN(app.views)}`,
+      problems.length + scopeProblems > 0
+        ? `Davis problems on this application or its chain: ${fmtN(problems.length + scopeProblems)}`
+        : "Davis problems: none open on this application or its chain",
+      anomalies > 0
+        ? `Davis baselining anomalies on its components: ${fmtN(anomalies)}`
+        : "Davis baselining anomalies: none",
+      "",
+    ];
+    if (geo && geo.length) {
+      const tot = geo.reduce((a, g) => a + g.sessions, 0) || 1;
+      L.push("Where they connect from (sessions, and the share that met an error):");
+      for (const g of [...geo].sort((a, b) => b.sessions - a.sessions).slice(0, 8)) {
+        L.push(`  ${g.country}: ${fmtN(g.sessions)} sessions`
+          + ` (${((g.sessions / tot) * 100).toFixed(1)}% of the window)`
+          + `, ${g.sessions > 0 ? ((g.hit / g.sessions) * 100).toFixed(1) : "0"}% met an error`);
+      }
+    } else {
+      L.push("Geography: no located sessions in this window");
+    }
+    L.push("",
+      "Note: these counts include robot and synthetic traffic unless a line says",
+      "otherwise. Anything this page did not measure is stated as such above —",
+      "do not substitute a figure for it.");
+    return L.filter((x) => x !== undefined).join("\n");
+  };
+
   return (
     <div className="stack">
+      {/* INTELLIGENCE — this application's own questions. overviewFacts is
+          built from what the page rendered, so an answer can only cite what
+          the reader can also see. */}
+      <Intelligence subject="the Overview of this application"
+        starters={OVERVIEW_STARTERS} facts={overviewFacts} />
+
       {/* THE ESTATE LINE IS GONE. This page is scoped to ONE application —
           the header's selector says which — so a headline counting every
           application, the whole estate's error-free share and every problem in
@@ -471,12 +522,48 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const base = totHit / tot;
         const max = Math.max(...geo.map((g) => g.sessions), 1);
         const located = geo.filter((g) => CENTROID[g.country]);
-        // frame the map on the traffic itself
-        const lats = located.map((g) => CENTROID[g.country][0]);
-        const lngs = located.map((g) => CENTROID[g.country][1]);
-        const cLat = lats.length ? (Math.min(...lats) + Math.max(...lats)) / 2 : 20;
-        const cLng = lngs.length ? (Math.min(...lngs) + Math.max(...lngs)) / 2 : 0;
-        const span = lngs.length ? Math.max(Math.max(...lngs) - Math.min(...lngs), 30) : 360;
+        /* FRAME THE MAP ON THE PEOPLE, NOT ON THE PLACES.
+         *
+         * This used to centre on the midpoint of the bounding box of every
+         * located country — one vote per country, however few sessions it
+         * held. Measured on a customer tenant: 391 sessions in Brazil and TWO
+         * in the United States put the centre at roughly 14°N 76°W, so the map
+         * opened on the Caribbean with Brazil clipped at the right edge and
+         * 99.5% of the traffic off-screen. Two sessions outvoted three hundred
+         * and ninety-one.
+         *
+         * So the centre is weighted by sessions, and the frame is sized from
+         * the countries that actually carry traffic. The outliers still draw —
+         * they are dots on a map and rows in the list beside it — they just no
+         * longer decide where everyone else is looking.
+         */
+        const wsum = located.reduce((a, g) => a + g.sessions, 0) || 1;
+        /* The CENTRE follows the sessions — latitude averages directly, but
+         * longitude has to go round the circle, or an estate split across the
+         * antimeridian averages to its own opposite (Tokyo and California
+         * would centre on Africa). */
+        const cLat = located.length
+          ? located.reduce((a, g) => a + CENTROID[g.country][0] * g.sessions, 0) / wsum : 20;
+        const cLng = located.length ? (() => {
+          const x = located.reduce((a, g) =>
+            a + Math.cos((CENTROID[g.country][1] * Math.PI) / 180) * g.sessions, 0);
+          const y = located.reduce((a, g) =>
+            a + Math.sin((CENTROID[g.country][1] * Math.PI) / 180) * g.sessions, 0);
+          return (Math.atan2(y, x) * 180) / Math.PI;
+        })() : 0;
+        /* …but the FRAME holds everyone, weight or none. A country with two
+         * sessions must not decide where the map looks, and it must not fall
+         * off the edge either: it is a real place real people connected from,
+         * and the panel beside the map names it. So the span reaches the
+         * furthest country, not the heaviest one, measured the short way round
+         * the globe. */
+        const away = (lng: number) =>
+          Math.abs(((lng - cLng + 540) % 360) - 180);
+        const PAD = 1.6; // dots sit inside the view, not against its edges
+        const span = located.length
+          ? Math.min(360, Math.max(
+            2 * Math.max(...located.map((g) => away(CENTROID[g.country][1]))) * PAD, 30))
+          : 360;
         const zoom = span > 200 ? 1.1 : span > 120 ? 1.6 : span > 60 ? 2.2 : 3;
         /* The rule itself lives in utils/geoVerdict — the board and the
          * poster judge locations too, and three copies of a threshold is
@@ -1097,7 +1184,8 @@ function CleanCard(p: CardProps) {
   // 0.0% — turning the box red and making it knock for that is a false alarm,
   // and a card that cries wolf is worse than one that says nothing.
   const reqRate = p.requests > 0 ? p.reqFail / p.requests : 0;
-  const reqTone: Tone = reqRate >= 0.01 ? "bad" : reqRate >= 0.001 ? "warn" : "info";
+  // the shared rule (utils/verdict.failTone), not a second copy of it
+  const reqTone: Tone = failTone(reqRate);
   const apdexWords = (() => {
     if (!p.apdexBands) return null;
     const { sat, tol, fru, fruErr } = p.apdexBands;

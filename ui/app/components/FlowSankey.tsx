@@ -39,7 +39,10 @@ import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic
 import type { AppRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
 import { ExplainButton } from "./ExplainButton";
-import { HIT_BAD, HIT_WARN } from "../utils/verdict";
+import { Button } from "@dynatrace/strato-components/buttons";
+import { Intelligence } from "./Intelligence";
+import { JOURNEY_STARTERS } from "../utils/starters";
+import { HIT_BAD, HIT_WARN, SAMPLE_MIN} from "../utils/verdict";
 
 type Tone = "good" | "warn" | "bad" | "info";
 interface Node {
@@ -569,7 +572,7 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 
 export function FlowSankey({
   apps, seqs, appId, transitions = [], views = [], ux, tf,
-  cohort, onCohortConsumed,
+  cohort, onCohortConsumed, openRoutes,
   outcomeDefs, onBizScope, onPickApp,
 }: {
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
@@ -578,6 +581,19 @@ export function FlowSankey({
   /** A cohort intent from Business Control: "unconverted" opens the
    *  infographic on the journeys that reached no goal, no picks required. */
   cohort?: "unconverted" | null;
+  /**
+   * A ROUTE SENT BACK FROM BUSINESS CONTROL.
+   *
+   * The trip out already existed: picking routes here carried them to the
+   * board through onBizScope. The return trip did not — the board listed its
+   * busiest sequences, offered one unfiltered "every sequence, on the flow →"
+   * and no way to open the ONE route a reader was reading about. So a figure
+   * on the board could not be traced to the picture that produced it.
+   *
+   * These are route ids in this diagram's own vocabulary (jp-…), applied once
+   * on arrival and then owned by the reader like any other selection.
+   */
+  openRoutes?: string[] | null;
   onCohortConsumed?: () => void;
   /** The value of one conversion (Business Control's field, via url state) —
    *  turns the route economics into money. null = customers only. */
@@ -1008,6 +1024,18 @@ export function FlowSankey({
   // a custom path belongs to one application's step view — changing either
   // dissolves it, because the picked positions mean nothing elsewhere
   useEffect(() => { setPicks([]); setStepHint(null); }, [appId, mode]);
+  /* The board's route, applied ONCE when it arrives. Keyed on the value so a
+   * second hand-off re-selects, but re-renders in between leave the reader's
+   * own clicks alone — a selection that keeps reasserting itself is a
+   * selection the reader cannot clear. */
+  const arrived = React.useRef<string | null>(null);
+  useEffect(() => {
+    const key = (openRoutes ?? []).join("\u0001");
+    if (!key || arrived.current === key) return;
+    arrived.current = key;
+    setMode("paths");
+    setPicks(openRoutes ?? []);
+  }, [openRoutes]);
   useEffect(() => { setStepHint(null); }, [picks.length]);
   // Business Control sends "unconverted": land in step mode and open the
   // portrait of who left without converting, then drop the intent so a manual
@@ -1396,8 +1424,115 @@ export function FlowSankey({
   // the app the selection belongs to: a clicked application node, or the picked one
   const selApp = selNode?.appId ?? appId ?? null;
 
+  /* THE JOURNEYS PAGE, STATED — and it derives its own subject.
+   *
+   * This used to live inside the selection bar's closure, which is where the
+   * reader's narrowing is known. That tied the Intelligence section to the same
+   * spot, and it landed between the selection strip and the diagram, crowding
+   * the thing it is meant to explain. It is a function called on click, not on
+   * render, so re-deriving app, mine, all, word and orderly here costs nothing
+   * and frees the section to sit where it belongs: after the picture.
+   */
+  const journeyFacts = () => {
+    const app = apps.find((a) => a.appId === appId);
+    if (!app) return "No application selected.";
+    const steps = mode === "steps";
+    const names = new Map(a11yModel.nodes.map((n) => [n.id, n.nm]));
+    const word = (id: string) => {
+      if (!steps) return names.get(id) ?? id.replace(/^jp-/, "").split("\u0001").join(" → ");
+      const end = /^(done|exit)-(\d+)$/.exec(id);
+      if (end) return end[1] === "done" ? "✓ completed" : "⊗ left";
+      const m = /^n(\d+)-([\s\S]*)$/.exec(id);
+      const nth = (n: number) => `${n}${["th", "st", "nd", "rd"][
+        (n % 100 > 10 && n % 100 < 14) ? 0 : Math.min(n % 10, 4) % 4] ?? "th"}`;
+      return m ? `${nth(Number(m[1]) + 1)} ${m[2]}` : id;
+    };
+    const orderly = steps ? [...picks].sort((a, b) => {
+      const st = (id: string) => Number((/(\d+)/.exec(id) ?? [0, 0])[1]);
+      return st(a) - st(b);
+    }) : picks;
+    const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0)
+                      .sort((a, b) => b.sessions - a.sessions);
+    const all = mine.reduce((a, q) => a + q.sessions, 0);
+                    /* THE SELECTION IS THE SUBJECT. This used to SAY the diagram
+                     * was narrowed and then hand over the whole application's
+                     * routes anyway — Assist would explain the flow the reader had
+                     * just filtered away.
+                     *
+                     * And "selected" means EITHER of the two ways this diagram
+                     * narrows: the route chips (picks), or a single node clicked
+                     * from the canvas or the list (sel), which dims everything
+                     * else on screen and is just as much a selection to the person
+                     * looking at it. Reading only the first explained the whole
+                     * flow while the reader stared at one lit band. */
+                    const selCohort = !picks.length && sel
+                      && /^(jp-|jg-|j-rest$|st-|n\d+-|done-|exit-)/.test(sel) ? [sel] : [];
+                    const active = picks.length ? picks : selCohort;
+                    const scope = active.length
+                      ? mine.filter((q) => matchesMode(q.journey, active)) : mine;
+                    const scopeN = scope.reduce((a, q) => a + q.sessions, 0);
+                    const deep = deepestOf(mine); // the app's own completion depth
+                    const doneN = deep > 1
+                      ? scope.filter((q) => q.journey.length >= deep)
+                        .reduce((a, q) => a + q.sessions, 0) : 0;
+                    // where the unfinished ones in THIS cohort stopped
+                    const byLast = new Map<string, number>();
+                    for (const q of scope) {
+                      if (deep > 1 && q.journey.length >= deep) continue;
+                      const v = q.journey[q.journey.length - 1];
+                      if (v) byLast.set(v, (byLast.get(v) ?? 0) + q.sessions);
+                    }
+                    const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
+                    const lines = [
+                      `Application: ${app?.name ?? "unknown"}`,
+                      `Window: ${tf?.label ?? "unknown"}`,
+                      active.length
+                        ? `THE READER HAS NARROWED THE DIAGRAM. Everything below describes`
+                          + ` ONLY that selection — ${fmtN(scopeN)} of the application's`
+                          + ` ${fmtN(all)} journeyed sessions`
+                          + ` (${all > 0 ? pct100((scopeN / all) * 100) : "—"}).`
+                          + ` Picked: ${(picks.length ? orderly : active).map(word).join(" ; ")}`
+                        : `No narrowing: the whole flow is on screen —`
+                          + ` ${fmtN(scopeN)} sessions with a mined journey`,
+                      deep > 1
+                        ? `Completed within this${active.length ? " selection" : " flow"}:`
+                          + ` ${fmtN(doneN)} of ${fmtN(scopeN)}`
+                          + ` (${scopeN > 0 ? pct100((doneN / scopeN) * 100) : "—"}).`
+                          + ` Complete = reaching ${deep} screens, the depth a tenth of the`
+                          + " APPLICATION's own traffic still reaches (an app-level rule,"
+                          + " not recomputed for the selection)"
+                        : "No completion depth could be established for this application",
+                      worst
+                        ? `Biggest single loss inside it: ${fmtN(worst[1])} sessions ended on ${worst[0]}`
+                        : "",
+                      "",
+                      active.length
+                        ? "The routes INSIDE the selection, busiest first (each an exact"
+                          + " sequence of screens):"
+                        : "The routes, busiest first (each an exact sequence of screens):",
+                      ...scope.slice(0, 8).map((q) =>
+                        `  ${fmtN(q.sessions)} sessions · ${q.journey.join(" -> ")}`),
+                      scope.length > 8 ? `  (+${scope.length - 8} more, smaller)` : "",
+                      scope.length === 0
+                        ? "  (the selection matched no mined journey in this window)" : "",
+                      "",
+                      "Note: these counts include robot and synthetic traffic; sessions that"
+                      + " recorded no view at all are excluded from the mined journeys.",
+                    ];
+                    return lines.filter(Boolean).join("\n");
+  };
+
+
   return (
     <div className="panel flow-shell">
+      {/* INTELLIGENCE — AFTER the picture, never beside it. Placed in the
+          selection strip it sat between the reader and the diagram and took
+          the width the flow needed. journeyFacts resolves the narrowing on
+          its own, so the section still asks about the cohort on screen from
+          down here. */}
+      <Intelligence subject="the Journeys flow diagram"
+        starters={JOURNEY_STARTERS} facts={journeyFacts} />
+
       {/* One band: what you are asking, and the answer in numbers. */}
       <div className="flow-hd">
         <div className="seg" role="group" aria-label="Question">
@@ -1415,7 +1550,20 @@ export function FlowSankey({
         {sum && (
           <span className="flow-hd__a"
             title="Journeyed sessions — robots and synthetic included, no-telemetry excluded. Finished = reached the deepest journey, the same depth rule the stage column uses. Business Control's conversion uses its own declared depth (the ConvRule strip states it) over the same mined journeys.">
-            {sum.outcomes ? (
+            {/* A PERCENTAGE NEEDS A POPULATION, HERE TOO. Business Control
+                refuses to draw a funnel below SAMPLE_MIN journeys; this page was
+                still printing "11 of 108 finished (10%)" and naming a "biggest
+                loss" whatever the count. On a handful of sessions both are
+                noise wearing a measurement's clothes, and one outlier moves
+                the share by whole points. The diagram still draws — it is a
+                picture of what happened, and it is honest at any size — but
+                the SHARE and the superlative wait for a population. */}
+            {sum.measured < SAMPLE_MIN ? (
+              <>
+                <b>{fmtN(sum.measured)}</b> journeyed session{sum.measured === 1 ? "" : "s"}
+                {" — too few to put a share or a worst-screen on"}
+              </>
+            ) : sum.outcomes ? (
               <>
                 <b>{fmtN(sum.done)}</b> of {fmtN(sum.measured)} sessions finished
                 {" "}(<b className={sum.pct >= 50 ? "ok" : "no"}>{pct100(sum.pct)}</b>)
@@ -1423,7 +1571,7 @@ export function FlowSankey({
             ) : (
               <><b>{fmtN(sum.measured)}</b> sessions with a recorded view</>
             )}
-            {sum.dropView && (
+            {sum.dropView && sum.measured >= SAMPLE_MIN && (
               <>
                 {" · biggest loss at "}<b className="no">{sum.dropView}</b>
                 {", "}{fmtN(sum.dropSessions)} sessions
@@ -1472,154 +1620,92 @@ export function FlowSankey({
          * journeys chosen so far and the DESTINATIONS it will actually store —
          * because arriving is what converting means, and a reader is owed the
          * difference between what they clicked and what gets saved. */
-        return (
-          <div className="flow-sel flow-sel--path">
-            <span className="flow-sel__nm">
-              {picks.length ? (steps ? "custom path" : "custom selection") : "whole flow"}</span>
-            {orderly.map((id) => (
-              <button key={id} className="flow-pick"
-                title="Remove this waypoint"
-                onClick={() => setPicks((cur) => cur.filter((x) => x !== id))}>
-                {word(id)} ✕
-              </button>
-            ))}
-            {stepHint && (
-              <span className="flow-sel__no">{stepHint}</span>
-            )}
-            <span className="flow-sel__num">
-              {picks.length
-                ? <>{fmtN(iso)} of {fmtN(all)} sessions{all > 0 ? ` · ${pct100((iso / all) * 100)}` : ""}</>
-                : <>{fmtN(all)} sessions on screen · click {mode === "steps" ? "views" : "routes or stages"} to narrow</>}
-            </span>
-            <div className="spacer" />
-            {/* THE PAGE, READ BACK IN WORDS. The facts are built at click
-                time from what is on screen right now — the narrowed cohort if
-                the reader narrowed it — so Assist explains the diagram they
-                are actually looking at. */}
-            <ExplainButton subject="journey diagram" className="flow-sel__b"
-              facts={() => {
-                const mine = seqs.filter((q) => q.appId === appId && q.journey.length > 0)
-                  .sort((a, b) => b.sessions - a.sessions);
-                /* THE SELECTION IS THE SUBJECT. This used to SAY the diagram
-                 * was narrowed and then hand over the whole application's
-                 * routes anyway — Assist would explain the flow the reader had
-                 * just filtered away.
-                 *
-                 * And "selected" means EITHER of the two ways this diagram
-                 * narrows: the route chips (picks), or a single node clicked
-                 * from the canvas or the list (sel), which dims everything
-                 * else on screen and is just as much a selection to the person
-                 * looking at it. Reading only the first explained the whole
-                 * flow while the reader stared at one lit band. */
-                const selCohort = !picks.length && sel
-                  && /^(jp-|jg-|j-rest$|st-|n\d+-|done-|exit-)/.test(sel) ? [sel] : [];
-                const active = picks.length ? picks : selCohort;
-                const scope = active.length
-                  ? mine.filter((q) => matchesMode(q.journey, active)) : mine;
-                const scopeN = scope.reduce((a, q) => a + q.sessions, 0);
-                const deep = deepestOf(mine); // the app's own completion depth
-                const doneN = deep > 1
-                  ? scope.filter((q) => q.journey.length >= deep)
-                    .reduce((a, q) => a + q.sessions, 0) : 0;
-                // where the unfinished ones in THIS cohort stopped
-                const byLast = new Map<string, number>();
-                for (const q of scope) {
-                  if (deep > 1 && q.journey.length >= deep) continue;
-                  const v = q.journey[q.journey.length - 1];
-                  if (v) byLast.set(v, (byLast.get(v) ?? 0) + q.sessions);
-                }
-                const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
-                const lines = [
-                  `Application: ${app?.name ?? "unknown"}`,
-                  `Window: ${tf?.label ?? "unknown"}`,
-                  active.length
-                    ? `THE READER HAS NARROWED THE DIAGRAM. Everything below describes`
-                      + ` ONLY that selection — ${fmtN(scopeN)} of the application's`
-                      + ` ${fmtN(all)} journeyed sessions`
-                      + ` (${all > 0 ? pct100((scopeN / all) * 100) : "—"}).`
-                      + ` Picked: ${(picks.length ? orderly : active).map(word).join(" ; ")}`
-                    : `No narrowing: the whole flow is on screen —`
-                      + ` ${fmtN(scopeN)} sessions with a mined journey`,
-                  deep > 1
-                    ? `Completed within this${active.length ? " selection" : " flow"}:`
-                      + ` ${fmtN(doneN)} of ${fmtN(scopeN)}`
-                      + ` (${scopeN > 0 ? pct100((doneN / scopeN) * 100) : "—"}).`
-                      + ` Complete = reaching ${deep} screens, the depth a tenth of the`
-                      + " APPLICATION's own traffic still reaches (an app-level rule,"
-                      + " not recomputed for the selection)"
-                    : "No completion depth could be established for this application",
-                  worst
-                    ? `Biggest single loss inside it: ${fmtN(worst[1])} sessions ended on ${worst[0]}`
-                    : "",
-                  "",
-                  active.length
-                    ? "The routes INSIDE the selection, busiest first (each an exact"
-                      + " sequence of screens):"
-                    : "The routes, busiest first (each an exact sequence of screens):",
-                  ...scope.slice(0, 8).map((q) =>
-                    `  ${fmtN(q.sessions)} sessions · ${q.journey.join(" -> ")}`),
-                  scope.length > 8 ? `  (+${scope.length - 8} more, smaller)` : "",
-                  scope.length === 0
-                    ? "  (the selection matched no mined journey in this window)" : "",
-                  "",
-                  "Note: these counts include robot and synthetic traffic; sessions that"
-                  + " recorded no view at all are excluded from the mined journeys.",
-                ];
-                return lines.filter(Boolean).join("\n");
-              }} />
-            {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
-                narrowed one; the reader's rule: characteristics refer to
-                everything the screen currently shows */}
-            {sel === "j-none" && (
-              <button className="flow-sel__b"
-                onClick={openNoTelemetry} disabled={ntel === "loading"}
-                title="What the sessions without a recorded view are made of — measured, not guessed">
-                {ntel === "loading" ? "unpacking…" : "what are these? ↗"}
-              </button>
-            )}
-            {picks.length > 0 && onBizScope && (
-              <button className="flow-sel__b"
-                onClick={() => onBizScope(picks)}
-                title="Take this selection to Business Control — it recomputes conversion, customers and what failure costs for exactly these routes">
-                business control ↗
-              </button>
-            )}
-            <button className="flow-sel__b flow-sel__b--on"
-              onClick={() => openInfographic()}
-              disabled={info === "loading"}
-              title="Draw the portrait of everything on screen — who these users are, on what, from where, with what outcome">
-              {info === "loading" ? "drawing…" : "infographic ↗"}
-            </button>
-            {(() => {
-              /* The customer's "this is what converted means", read from
-               * whichever sankey they are on. The reader's design: a GOAL is
-               * where the customer ARRIVES, and its natural home is the
-               * routes view — pick the successful route(s) and the app
-               * learns their DESTINATION as the conversion. The step view
-               * keeps its per-view teaching for surgical definitions.
-               * Folded/starred names are excluded (they cannot equality-
-               * match raw view names). */
-              const pickedViews = mode === "steps"
-                ? [...new Set(picks
-                    .map((id) => /^n\d+-([\s\S]*)$/.exec(id)?.[1])
-                    .filter((v): v is string => !!v && !v.includes("*")))]
-                : [...new Set(picks
-                    .filter((id) => id.startsWith("jp-"))
-                    .map((id) => id.replace(/^jp-/, "").split("\u0001").pop() ?? "")
-                    .filter((v) => !!v && !v.includes("*")))];
 
-              return (<>
-                {/* the taught-conversion controls were removed with the
-                    unreachable definition mode (audit) — outcomeDefs still
-                    steers the queries and the poster's rule line */}
-              </>);
-            })()}
-            {picks.length > 0 && (
-              <button className="flow-sel__b" onClick={() => setPicks([])}>
-                {mode === "steps" ? "clear path" : "clear selection"} ✕
-              </button>
-            )}
-          </div>
+        return (
+          <>
+            <div className="flow-sel flow-sel--path">
+              <span className="flow-sel__nm">
+                {picks.length ? (steps ? "custom path" : "custom selection") : "whole flow"}</span>
+              {orderly.map((id) => (
+                <button key={id} className="flow-pick"
+                  title="Remove this waypoint"
+                  onClick={() => setPicks((cur) => cur.filter((x) => x !== id))}>
+                  {word(id)} ✕
+                </button>
+              ))}
+              {stepHint && (
+                <span className="flow-sel__no">{stepHint}</span>
+              )}
+              <span className="flow-sel__num">
+                {picks.length
+                  ? <>{fmtN(iso)} of {fmtN(all)} sessions{all > 0 ? ` · ${pct100((iso / all) * 100)}` : ""}</>
+                  : <>{fmtN(all)} sessions on screen · click {mode === "steps" ? "views" : "routes or stages"} to narrow</>}
+              </span>
+              <div className="spacer" />
+              {/* THE PAGE, READ BACK IN WORDS. The facts are built at click
+                  time from what is on screen right now — the narrowed cohort if
+                  the reader narrowed it — so Assist explains the diagram they
+                  are actually looking at. */}
+              <ExplainButton subject="journey diagram" className="flow-sel__b"
+                facts={journeyFacts} />
+              {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
+                  narrowed one; the reader's rule: characteristics refer to
+                  everything the screen currently shows */}
+              {sel === "j-none" && (
+                <button className="flow-sel__b"
+                  onClick={openNoTelemetry} disabled={ntel === "loading"}
+                  title="What the sessions without a recorded view are made of — measured, not guessed">
+                  {ntel === "loading" ? "unpacking…" : "what are these? ↗"}
+                </button>
+              )}
+              {picks.length > 0 && onBizScope && (
+                <button className="flow-sel__b"
+                  onClick={() => onBizScope(picks)}
+                  title="Take this selection to Business Control — it recomputes conversion, customers and what failure costs for exactly these routes">
+                  business control ↗
+                </button>
+              )}
+              {/* Strato's own button, unfilled. It used to be a solid accent
+                  slab: a fill is the loudest treatment the palette has and this
+                  is an action, not a verdict — the border and the arrow already
+                  say it can be clicked. */}
+              <Button variant="default"
+                onClick={() => openInfographic()}
+                disabled={info === "loading"}
+                title="Draw the portrait of everything on screen — who these users are, on what, from where, with what outcome">
+                {info === "loading" ? "drawing…" : "infographic ↗"}
+              </Button>
+              {(() => {
+                /* The customer's "this is what converted means", read from
+                 * whichever sankey they are on. The reader's design: a GOAL is
+                 * where the customer ARRIVES, and its natural home is the
+                 * routes view — pick the successful route(s) and the app
+                 * learns their DESTINATION as the conversion. The step view
+                 * keeps its per-view teaching for surgical definitions.
+                 * Folded/starred names are excluded (they cannot equality-
+                 * match raw view names). */
+                const pickedViews = mode === "steps"
+                  ? [...new Set(picks
+                      .map((id) => /^n\d+-([\s\S]*)$/.exec(id)?.[1])
+                      .filter((v): v is string => !!v && !v.includes("*")))]
+                  : [...new Set(picks
+                      .filter((id) => id.startsWith("jp-"))
+                      .map((id) => id.replace(/^jp-/, "").split("\u0001").pop() ?? "")
+                      .filter((v) => !!v && !v.includes("*")))];
+
+                return (<>
+                  {/* the taught-conversion controls were removed with the
+                      unreachable definition mode (audit) — outcomeDefs still
+                      steers the queries and the poster's rule line */}
+                </>);
+              })()}
+              {picks.length > 0 && (
+                <button className="flow-sel__b" onClick={() => setPicks([])}>
+                  {mode === "steps" ? "clear path" : "clear selection"} ✕
+                </button>
+              )}
+            </div>
+          </>
         );
       })()}
 
@@ -1703,10 +1789,10 @@ export function FlowSankey({
           aria-label="The portrait failed to load">
           <p>The portrait could not be drawn — a scan behind it failed.</p>
           <div>
-            <button className="export-btn"
+            <Button variant="default"
               onClick={() => void openInfographic(infoIsCohort ? "unconverted" : undefined)}>
               try again
-            </button>
+            </Button>
             <button className="drawer__x" aria-label="Close"
               onClick={() => { setInfo(null); cohortRef.current = null; }}>✕</button>
           </div>
