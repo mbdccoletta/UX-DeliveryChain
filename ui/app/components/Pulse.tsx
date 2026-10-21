@@ -53,6 +53,10 @@ import { apdexOf, apdexBand, apdexTone, fmtApdex, APDEX_LABEL, APDEX_T_MS } from
 import { useCardDetail, type DetailRow, type DetailMetric } from "../hooks/useCardDetail";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 
+
+/** "BR-SP" → "SP". The map pin is already standing on the country. */
+const uf = (id: string) => (id.includes("-") ? id.split("-").pop() ?? id : id);
+
 const TVAR: Record<Tone, string> = {
   good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", info: "var(--info)",
 };
@@ -759,6 +763,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           not coming. Smaller than a country mark, so the two
                           levels never read as the same thing. */}
                       {geoSel && regions && regions.map((r) => {
+                        /* "BR-SP" → "SP": ISO 3166-2 carries the country, the
+                           map is already standing on it. */
                         const c = REGION_CENTROID[r.id];
                         if (!c) return null;
                         const rate = r.hit / Math.max(r.sessions, 1);
@@ -777,9 +783,21 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                               + ` ${(rate * 100).toFixed(1)}% met an error.`
                               + " Click for its cities."}
                             onClick={() => setRegionSel((x) => (x === r.id ? null : r.id))}>
-                            {r.sessions >= 10 && (
-                              <span className="gpin__lbl"><b>{r.name}</b></span>
-                            )}
+                            {/* EVERY STATE IS NAMED. The label used to need 10
+                                sessions, which on a real estate left two
+                                thirds of the marks as unexplained dots — the
+                                panel beside the map named them, the map did
+                                not. Now each mark carries its own name: the
+                                full one where the mark is big enough to hang
+                                it on, the two-letter code otherwise, which is
+                                the same identifier the list uses. The count
+                                stays with the big marks only; sixteen numbers
+                                over one country is a wall, and the list is
+                                right there holding all of them. */}
+                            <span className="gpin__lbl">
+                              <b>{sz >= 20 ? r.name : uf(r.id)}</b>
+                              {sz >= 20 && <em>{fmtK(r.sessions)}</em>}
+                            </span>
                           </button>
                         );
                       })}
