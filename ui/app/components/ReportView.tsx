@@ -11,6 +11,8 @@
 // of the traffic, the reader states the monitored share and every VOLUME is
 // extrapolated to the whole (marked with an approx sign and a bar notice);
 // RATES are untouched — a representative sample carries them as they are.
+import { SAMPLE_MIN } from "../utils/verdict";
+import { Button } from "@dynatrace/strato-components/buttons";
 import React from "react";
 import type { ChainData, SeqRow } from "../hooks/useChainData";
 import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
@@ -25,6 +27,11 @@ import { useGeo } from "../hooks/useGeo";
 import { GEO_WORD, geoBecause, geoJudge, geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
 import { ExplainButton } from "./ExplainButton";
+import { useFrontendNames } from "../hooks/useFrontendNames";
+import { SESSION_CHIP, chips, intentsAvailable, open as openIntent,
+  sessionsLink } from "../utils/links";
+import { Intelligence } from "./Intelligence";
+import { BOARD_STARTERS } from "../utils/starters";
 
 type Dir = "good" | "bad" | "flat";
 /** the shared share formatter (utils/dql) — three copies had drifted */
@@ -44,12 +51,6 @@ function trend(cur: number, prev: number, riseIsGood: boolean):
 }
 const TONE: Record<Dir, string> = { good: "var(--good)", bad: "var(--bad)", flat: "var(--ink-3)" };
 
-/**
- * Fewest journeys a funnel may be drawn from. Below it the rungs, the
- * percentages and the "biggest single loss" all describe a handful of sessions
- * and read as findings; the page says so instead of drawing them.
- */
-const FUNNEL_MIN = 30;
 
 /**
  * Most screen names a merged rung will spell out before it counts the rest.
@@ -161,6 +162,18 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
   const kpis = useBizKpis(data.tf, outcomeDefs, scopeApp || null);
+  /* The name Users & Sessions filters by. Its Frontends facet keys on
+   * frontend.name, which differs from the inventory name — the same lookup
+   * the Overview uses, so the two pages hand off to the identical filter. */
+  const feNames = useFrontendNames();
+  const boardApp = data.apps.find((a) => a.appId === scopeApp);
+  const feName = (boardApp && feNames?.get(boardApp.entity ?? "")) || "";
+  /** A hand-off to Users & Sessions, narrowed to one kind of session. */
+  const toSessions = (chip: string, label: string, hint: string, n: number) =>
+    (feName && intentsAvailable()
+      ? { label, hint, run: () => openIntent(sessionsLink(data.tf, feName, n,
+          chips(SESSION_CHIP.realUsers(), chip), label)) }
+      : undefined);
   const bcRef = React.useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = React.useState(false);
   /* Access and health by location — the same rows and the same three-arm
@@ -463,7 +476,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
      * sessions. Percentages over a handful of journeys are noise wearing the
      * costume of a measurement, and this product says "not measurable" rather
      * than dressing noise up. The floor is stated on screen, not hidden. */
-    if (total < FUNNEL_MIN) return { thin: true as const, total };
+    if (total < SAMPLE_MIN) return { thin: true as const, total };
     /* EVERY RUNG NAMES ITS SCREEN. "saw 2 screens" is a position, not a
      * place: it tells a reader nothing they can open, act on, or recognise.
      * The mine already knows WHICH screen the journeys at that depth are on,
@@ -633,7 +646,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       <FunnelScope />
       <div className="bc__fun-none">
         <b className="num">{fmtCount(ladder.total)}</b> journeys in this window —
-        a funnel needs at least <b className="num">{FUNNEL_MIN}</b>.
+        a funnel needs at least <b className="num">{SAMPLE_MIN}</b>.
         Percentages and a “biggest loss” over this many sessions would be noise
         with the confidence of a measurement, so they are not drawn. Widen the
         window, or pick an application with more traffic.
@@ -700,8 +713,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                         <i className={last ? "bc__fun-b bc__fun-b--goal" : "bc__fun-b"}
                           style={{ width: `${Math.max(2, share * 100)}%` }} />
                         {lost > 0 && (
-                          <i className={i === ladder.worst
-                            ? "bc__fun-x bc__fun-x--worst" : "bc__fun-x"}
+                          <i className="bc__fun-x"
                             title={`${fmtCount(lost)} left between the rung above and this one`}
                             style={{ width: `${(lost / ladder.total) * 100}%` }} />
                         )}
@@ -751,7 +763,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   );
 
   const Stat = ({ label, cur: cv, prev: pv, fmt, riseIsGood, tab, coh, caption, share,
-    liveOnly, unmeasured }: {
+    liveOnly, unmeasured, go }: {
     label: string; cur: number; prev: number; fmt: (v: number) => string;
     riseIsGood: boolean; tab: "home" | "flow" | "chain";
     /** A cohort intent passed to the Flow — opens its infographic directly. */
@@ -765,6 +777,19 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     /** The fact could not be measured (e.g. zero real users in the window) —
      *  renders "•••" with this sentence, never a fabricated 0% or 100%. */
     unmeasured?: string;
+    /**
+     * WHERE THIS NUMBER GOES WHEN YOU PUSH IT.
+     *
+     * Measured on this board: 85 numbers on screen and 73 with no affordance
+     * at all — no click, no hover. Eight of them are the headline business
+     * figures, and exactly ONE carried a drilldown, because only one declared
+     * a cohort. The machinery was already here; it was wired to a single card.
+     *
+     * A figure like "197 customers hit by a failure" is precisely what a
+     * reader wants to open. `go` names where, and the WHOLE card becomes the
+     * target — a number nobody can push is a number nobody can act on.
+     */
+    go?: { label: string; hint: string; run: () => void };
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
     if (unmeasured) return (
@@ -780,9 +805,20 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       </div>
     );
     const t = trend(cv, pv, riseIsGood);
+    // the cohort hand-off stays, and `go` joins it: either way the card leads
+    // somewhere, and the whole card is the target rather than a buried link
     const drill = coh && scopeApp;
+    const dest = go ?? (drill
+      ? { label: "who they are", hint: "Portrait of who left — country, device, browser, where they enter",
+          run: () => onGo?.(tab, scopeApp, coh) }
+      : null);
     return (
-      <div className="bc__stat">
+      <div className={dest ? "bc__stat bc__stat--go" : "bc__stat"}
+        {...(dest ? { role: "button" as const, tabIndex: 0, title: dest.hint,
+          onClick: dest.run,
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dest.run(); }
+          } } : {})}>
         <span className="bc__stat-l">{label}</span>
         <div className="bc__stat-row">
           <b className="bc__stat-v num">{fmt(cv)}</b>
@@ -804,11 +840,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             title={liveOnly ? "Only live problems are known — there is no honest previous value"
               : `Previous ${data.tf.label}`}>
             {liveOnly ? "live now" : `was ${fmt(pv)}`}</span>
-          {drill && (
-            <button className="bc__stat-mv" onClick={() => onGo?.(tab, scopeApp, coh)}
-              title="Portrait of who left — country, device, browser, where they enter">
-              ↗ who they are</button>
-          )}
+          {dest && <span className="bc__stat-mv">↗ {dest.label}</span>}
         </div>
       </div>
     );
@@ -896,38 +928,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   const range = (pj: { lower: number; upper: number }) =>
     `${fmtN(Math.round(sc(Math.max(0, pj.lower))))}–${fmtN(Math.round(sc(pj.upper)))}`;
 
-  return (
-    <div className="stack bc" ref={bcRef}>
-      <div className="bc__bar">
-        <span className="lbl">Business Control</span>
-        <span className="hint">{data.tf.label} vs the {data.tf.label} before ·{" "}
-          {ex ? <b className="bc__ex-note">volumes ×{factor.toFixed(1)} — extrapolated from {covN}% monitored; rates as measured</b>
-            : "measured, not estimated"}</span>
-        <div className="spacer" />
-        <label className="bc__ticket bc__cov"
-          title="Share of your traffic Dynatrace monitors. Below 100, every volume on the board is extrapolated to the whole (marked with an approx sign); rates stay as measured — a representative sample carries them unchanged.">
-          <input inputMode="numeric" placeholder="100"
-            value={cov} onChange={(e) => onCov(e.target.value.replace(/[^\d]/g, "").slice(0, 3))} />
-          <span>% monitored</span>
-        </label>
-        {/* the board is a thing people paste into decks — export the whole
-            of it, not a viewport crop */}
-        <button className="export-btn noexport" disabled={exporting}
-          title="Download this board as a PNG (2×) — the export button itself stays out of the picture"
-          onClick={async () => {
-            if (!bcRef.current) return;
-            setExporting(true);
-            try { await exportImage(bcRef.current, `business-control-${data.tf.label.replace(/\W+/g, "-")}`); }
-            finally { setExporting(false); }
-          }}>
-          {exporting ? "rendering…" : "export image ↓"}
-        </button>
-        {/* THE BOARD, READ BACK IN WORDS. Built at click time from the same
-            figures the tiles render — including the ones that could NOT be
-            measured, stated as such, so Assist never fills a gap with a
-            plausible number. */}
-        <ExplainButton subject="board" className="export-btn noexport"
-          facts={() => {
+  /* The page's measured facts, hoisted so the Explain button and the
+   * Intelligence starters cite the SAME numbers — two builders would drift. */
+  const boardFacts = () => {
             const lines = [
               `Application: ${nameOf(scopeApp) || "unknown"}`,
               `Window: ${data.tf.label} (compared with the window of the same`
@@ -963,7 +966,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                 : "",
               ladder?.thin
                 ? `  NO FUNNEL: ${fmtCount(ladder.total)} journeys is below the`
-                  + ` ${FUNNEL_MIN}-journey floor, so no rungs, percentages or`
+                  + ` ${SAMPLE_MIN}-journey floor, so no rungs, percentages or`
                   + " biggest-loss claim are computed for this window"
                 : "",
               ladder && !ladder.thin ? "  The funnel, rung by rung:" : "",
@@ -988,7 +991,46 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               }),
             ];
             return lines.filter(Boolean).join("\n");
-          }} />
+          };
+
+  return (
+    <div className="stack bc" ref={bcRef}>
+      {/* INTELLIGENCE — the board's own questions, asked against the board's
+          own numbers. boardFacts is the same builder the Explain button uses,
+          so the two can never cite different figures for the same screen. */}
+      <Intelligence subject="the Business Control board" className="bc__intel"
+        starters={BOARD_STARTERS} facts={boardFacts} />
+
+      <div className="bc__bar">
+        <span className="lbl">Business Control</span>
+        <span className="hint">{data.tf.label} vs the {data.tf.label} before ·{" "}
+          {ex ? <b className="bc__ex-note">volumes ×{factor.toFixed(1)} — extrapolated from {covN}% monitored; rates as measured</b>
+            : "measured, not estimated"}</span>
+        <div className="spacer" />
+        <label className="bc__ticket bc__cov"
+          title="Share of your traffic Dynatrace monitors. Below 100, every volume on the board is extrapolated to the whole (marked with an approx sign); rates stay as measured — a representative sample carries them unchanged.">
+          <input inputMode="numeric" placeholder="100"
+            value={cov} onChange={(e) => onCov(e.target.value.replace(/[^\d]/g, "").slice(0, 3))} />
+          <span>% monitored</span>
+        </label>
+        {/* the board is a thing people paste into decks — export the whole
+            of it, not a viewport crop */}
+        <Button className="noexport" variant="default" disabled={exporting}
+          title="Download this board as a PNG (2×) — the export button itself stays out of the picture"
+          onClick={async () => {
+            if (!bcRef.current) return;
+            setExporting(true);
+            try { await exportImage(bcRef.current, `business-control-${data.tf.label.replace(/\W+/g, "-")}`); }
+            finally { setExporting(false); }
+          }}>
+          {exporting ? "rendering…" : "export image ↓"}
+        </Button>
+        {/* THE BOARD, READ BACK IN WORDS. Built at click time from the same
+            figures the tiles render — including the ones that could NOT be
+            measured, stated as such, so Assist never fills a gap with a
+            plausible number. */}
+        <ExplainButton subject="board" className="export-btn noexport"
+          facts={boardFacts} />
       </div>
 
       {/* WHAT CHANGED — first, because it is the first question. */}
@@ -1082,10 +1124,16 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="home"
               caption={`${pct(c.customers ? c.customersAtRisk / c.customers : 0)} of the customer base`}
-              share={c.customers ? c.customersAtRisk / c.customers : 0} />
+              share={c.customers ? c.customersAtRisk / c.customers : 0}
+              go={toSessions(SESSION_CHIP.withErrors(), "these sessions",
+                "Open exactly these sessions in Users & Sessions — real users, this window, "
+                + "filtered to the ones that met an error", c.customersAtRisk)} />
             <Stat label="sessions lost to a crash or freeze" cur={c.crashed} prev={p.crashed}
               fmt={fmtCount} riseIsGood={false} tab="home"
-              caption="crashes and ANRs — ended with no way back" />
+              caption="crashes and ANRs — ended with no way back"
+              go={toSessions(chips(SESSION_CHIP.withErrors(), SESSION_CHIP.errorType("Crash")),
+                "the crashed sessions",
+                "Open the sessions that ended in a crash, in Users & Sessions", c.crashed)} />
             {/* This slot held "brand health (0–100)": the share of customers
                 untouched by a failure, printed as an integer. Measured on
                 easytravel it read 100 against a previous 100 — and so would
@@ -1100,12 +1148,19 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="chain"
               caption="an action took longer than 3s — the platform's own satisfaction threshold"
-              share={c.customers ? c.waited / c.customers : 0} />
+              share={c.customers ? c.waited / c.customers : 0}
+              go={scopeApp ? { label: "which layer is slow",
+                hint: "Open the delivery chain for this application — waiting is made somewhere, "
+                  + "and the chain is where the layers are timed",
+                run: () => onGo?.("chain", scopeApp) } : undefined} />
             <Stat label="open incidents"
               cur={chainProblems ?? 0} prev={chainProblems ?? 0}
               fmt={(v) => (chainProblems === null ? "…" : fmtN(v))}
               riseIsGood={false} tab="chain" liveOnly
-              caption="on this application's chain — confirmed by AI monitoring" />
+              caption="on this application's chain — confirmed by AI monitoring"
+              go={scopeApp && (chainProblems ?? 0) > 0 ? { label: "where they are",
+                hint: "Open the delivery chain with the affected components highlighted",
+                run: () => onGo?.("chain", scopeApp, "anomalies") } : undefined} />
           </div>
         </div>
       </section>
@@ -1123,7 +1178,11 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             <Stat label="journeys completed" cur={c.converted} prev={p.converted}
               fmt={fmtCount} riseIsGood={true} tab="flow" liveOnly
               caption={`${pct(c.conversion)} of journeys reached the full depth`}
-              share={c.conversion} />
+              share={c.conversion}
+              go={scopeApp ? { label: "the routes that finish",
+                hint: "Open the flow diagram for this application — the finishing routes are the "
+                  + "green ribbons, and the stage column names where they end",
+                run: () => onGo?.("flow", scopeApp) } : undefined} />
             <Stat label="journeys cut short"
               cur={completeness.total - completeness.full}
               prev={completeness.total - completeness.full}
@@ -1141,13 +1200,21 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             <Stat label="reached first screen only" cur={1 - c.engagedShare} prev={1 - p.engagedShare}
               unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={pct} riseIsGood={false} tab="flow"
-              caption="never saw a second screen" share={1 - c.engagedShare} />
+              caption="never saw a second screen" share={1 - c.engagedShare}
+              go={scopeApp ? { label: "where they land",
+                hint: "Open the flow diagram — the first column is where these journeys start "
+                  + "and stop",
+                run: () => onGo?.("flow", scopeApp) } : undefined} />
             <Stat label="customers who bounced"
               cur={Math.max(0, c.customers - c.realEngaged)}
               prev={Math.max(0, p.customers - p.realEngaged)}
               unmeasured={noPeople ? NO_PEOPLE : undefined}
               fmt={fmtCount} riseIsGood={false} tab="flow"
-              caption="came, saw one screen, left" />
+              caption="came, saw one screen, left"
+              go={toSessions(SESSION_CHIP.bounced(), "the bounced sessions",
+                "Open the bounced sessions in Users & Sessions — the platform's own "
+                + "Bounced Sessions facet, real users only",
+                Math.max(0, c.customers - c.realEngaged))} />
           </div>
           {/* THE NARRATIVE BLOCKS LEAVE THE NUMBERS GRID.
               They span every column, and a spanning child means auto-fit sees

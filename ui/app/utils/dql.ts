@@ -136,10 +136,32 @@ export async function runDql<T = Record<string, unknown>>(
    * presented as a measurement. */
   const grail = (res.result as unknown as {
     metadata?: { grail?: { scannedBytes?: number;
-      notifications?: Array<{ message?: string }> } } })?.metadata?.grail;
-  noteScan(Number(grail?.scannedBytes ?? 0),
-    (grail?.notifications ?? []).some((n) => isScanLimit(n?.message)));
-  return (res.result?.records ?? []) as T[];
+      notifications?: Array<{ message?: string; severity?: string }> } } })
+    ?.metadata?.grail;
+  const notes = grail?.notifications ?? [];
+  noteScan(Number(grail?.scannedBytes ?? 0), notes.some((n) => isScanLimit(n?.message)));
+  const rows = (res.result?.records ?? []) as T[];
+  /* A WARNING PLUS AN EMPTY ANSWER IS NOT AN ANSWER.
+   *
+   * The platform reports some faults as notifications, not errors: the query
+   * state comes back SUCCEEDED and the records come back empty. Measured on a
+   * live tenant — `in(trace.id, {"…"})` against a uid column answers
+   *   "Using `in`, needle and haystack have to be of same type.
+   *    The needle was a uid, but should be a string."
+   * with zero rows and no error. The chain drew that as "no trace reaches a
+   * service" for every application: a claim about the customer's topology
+   * manufactured by a type mismatch.
+   *
+   * Zero rows on their own are a legitimate finding and stay one. Zero rows
+   * WITH a warning are a defect, and this throws so the caller's error path
+   * shows it instead of the screen inventing a fact. The scan-limit warning is
+   * excluded: it already has its own, louder treatment. */
+  const suspect = rows.length === 0 && notes.find((n) =>
+    (n?.severity === "WARN" || n?.severity === "ERROR") && !isScanLimit(n?.message));
+  if (suspect) {
+    throw new Error(`DQL returned nothing and warned: ${suspect.message ?? "unspecified"}`);
+  }
+  return rows;
 }
 
 /* ─────────────── RUM ─────────────── */
@@ -1480,11 +1502,39 @@ fetch user.events, from: now()-30m
     fails = countIf(_req == 0)
 | limit 1`;
 
-/** Events per provider — separates Davis AI, custom alerts and extensions. */
-export const qEventProviders = () => `
+/**
+ * ONE SCAN FOR TWO QUESTIONS.
+ *
+ * The board asked the Davis store three separate times over the same 24-hour
+ * window, and measured on a customer tenant each of those scans cost 8.7 GiB —
+ * 26.1 GiB of a 30.6 GiB page load, 85% of it, to read one store three ways.
+ *
+ * Two of the three were coarse counts with no expansion: "events per type and
+ * provider" and "custom alerts by name". One scan at the finer grain answers
+ * both, because a sum is derivable from its parts — type×provider is the
+ * name-level rows added up, and the custom-alert view is the same rows
+ * filtered. Measured: 1,267 rows cover all 13,383 events, so the finer grain
+ * costs rows, which are free, instead of a second scan, which is not.
+ *
+ * The third query is NOT merged here, and deliberately. It expands
+ * `affected_entity_ids` to bind each signal to what it affects, which
+ * multiplies rows per event and drops the 8% of events that affect no entity
+ * — a grain the other two cannot be rebuilt from without changing their
+ * numbers. Saving a scan is not worth quietly altering a count.
+ */
+export const qDavisRollup = () => `
 fetch dt.davis.events, from: now()-24h
-| summarize events = count(), by: { type = event.type, provider = event.provider }
-| sort events desc | limit 40`;
+| summarize events = count(), by: { type = event.type, provider = event.provider,
+    name = event.name, status = event.status }
+// 5000, and the caller checks for truncation. Measured on a reference estate:
+// 1,267 rows cover 13,383 events, so the headroom is ~4x — but a cap that is
+// silently hit turns the rollup into an undercount, and an undercount wearing
+// the same label as a measurement is the failure this product refuses. At the
+// cap the hook records an error instead of publishing short numbers.
+| sort events desc | limit 5000`;
+
+/** Rows at the cap mean the rollup was cut — the derived counts are short. */
+export const DAVIS_ROLLUP_CAP = 5000;
 
 /** Every signal bound to the entity it actually affects — this is what lets
  *  alerts and extension events show up only under the related element. */
@@ -1502,12 +1552,9 @@ fetch dt.davis.events, from: now()-24h
         etype = event.type, entityId }
 | sort events desc | limit 300`;
 
-/** Custom alerts and extension ingests, by name. */
-export const qCustomAlerts = () => `
-fetch dt.davis.events, from: now()-24h
-| filter event.provider == "METRIC_EVENTS" or event.provider == "EVENTS_REST_API_INGEST"
-| summarize events = count(), by: { name = event.name, provider = event.provider, status = event.status }
-| sort events desc | limit 40`;
+/* qCustomAlerts is gone: it was the same 24h scan of the same store, filtered
+ * to two providers. Its rows are a subset of qDavisRollup's, selected in
+ * memory by the hook that needs them. */
 
 /* ─────────────── helpers ─────────────── */
 
