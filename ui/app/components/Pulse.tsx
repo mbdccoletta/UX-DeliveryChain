@@ -16,7 +16,7 @@ import { fmtK, fmtMs, fmtN } from "../utils/dql";
 import * as Q from "../utils/dql";
 import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
-import { GEO_ABS_BAD, GEO_ABS_WARN, GEO_COL, GEO_MIN_SESSIONS, GEO_WORD,
+import { GEO_ABS_BAD, GEO_ABS_WARN, geoCol, GEO_MIN_SESSIONS, GEO_WORD,
   geoArms, geoBecause, geoEnName, geoJudge, geoName,
   type GeoArm } from "../utils/geoVerdict";
 import type { ChainData } from "../hooks/useChainData";
@@ -39,7 +39,7 @@ import { useServiceVitals, type ServiceVitals } from "../hooks/useServiceVitals"
 import { aheadOf, type Forecast } from "../utils/forecast";
 import { useUxOverview } from "../hooks/useUxOverview";
 import { originOf } from "./DeliveryChain";
-import {
+import { XmarkIcon,
   AnalyticsIcon, DesktopIcon, HttpIcon,
   MobileIcon, ServicesIcon, UserSessionsIcon, WarningIcon,
 } from "@dynatrace/strato-icons";
@@ -53,8 +53,23 @@ import { apdexOf, apdexBand, apdexTone, fmtApdex, APDEX_LABEL, APDEX_T_MS } from
 import { useCardDetail, type DetailRow, type DetailMetric } from "../hooks/useCardDetail";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 
+
+/** "BR-SP" → "SP". The map pin is already standing on the country. */
+const uf = (id: string) => (id.includes("-") ? id.split("-").pop() ?? id : id);
+
 const TVAR: Record<Tone, string> = {
   good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", info: "var(--info)",
+};
+/* THE VIVID HALF OF THE SAME PALETTE. Strato ships each status in two
+ * strengths: a TEXT colour, tuned to be read as words, and a CONTAINER ACCENT
+ * — the saturated member of the family, meant for solid marks. Borders, rings
+ * and icons were reading the text one, which is why the page looked washed
+ * beside the platform's own screens. Text keeps TVAR; everything that is a
+ * mark rather than a sentence takes this. "info" is not a verdict and stays
+ * neutral, by the rule that an unjudged box may not look judged. */
+const FVAR: Record<Tone, string> = {
+  good: "var(--good-fill)", warn: "var(--warn-fill)", bad: "var(--bad-fill)",
+  info: "var(--border-2)",
 };
 
 /** A number that climbs to its value — the page arrives moving. */
@@ -105,9 +120,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const [geoSel, setGeoSel] = useState<string | null>(null);
   /** The state opened inside the selected country — its cities follow. */
   const [regionSel, setRegionSel] = useState<string | null>(null);
-  /** Take the map to a place — a country, or one of its states. */
-  const flyTo = (lat: number, lng: number, z: number) =>
-    setGeoView({ latitude: lat, longitude: lng, zoom: z });
   /* Asked only once a country is open — the map's first level is one scan,
    * and these cost another only if a reader goes looking. */
   const regions = useRegions(data.tf, geoSel ? appId : null, geoSel);
@@ -134,7 +146,60 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, appId, data.tf.from, data.tf.to]);
-  useEffect(() => { setGeoSel(null); }, [appId, data.tf.from, data.tf.to]);
+  /* THE FRAME THE MAP ACTUALLY MOUNTED ON.
+   * MapView is uncontrolled, which is the right call — see the note at the
+   * component — but uncontrolled means it honours initialViewState ONCE, on
+   * the render that mounts it. The geo rows arrive after that render, so the
+   * map mounted on the empty-estate default (lat 20, lng 0, zoom 1.1) and
+   * stayed there, while the overlay went on projecting against the frame
+   * computed from the data that had since arrived. That is how a country's
+   * mark ended up alone in the Atlantic: the overlay drew it at the centre of
+   * a view the map was never in.
+   * So the frame is captured the first time there is real data to frame, both
+   * the map and the overlay read that one object, and it is also the map's
+   * key — so the arrival of the first rows REMOUNTS the map onto the frame
+   * instead of leaving it behind. Panning does not touch it, so a refresh of
+   * the same application never yanks the view back. */
+  const geoFrame = useRef<{ latitude: number; longitude: number; zoom: number } | null>(null);
+  /* CLICKING ANYTHING IN THIS TILE PUTS ITS ANSWER ON THE SCREEN.
+   * Everything a click opens — a country's screens, a state's cities —
+   * renders in the drill panel UNDER the map, which on a wide screen is
+   * below the fold. Framing the TILE was the old behaviour, and it left the
+   * answer off the bottom of it; the reader clicked, the map reacted, and
+   * the thing they asked for stayed out of sight. The drill itself is what
+   * gets framed now. The wait lets the panel mount first, so the scroll
+   * lands on the rendered block rather than on the gap where it is about
+   * to be. */
+  const revealDrill = React.useCallback(() => {
+    setTimeout(() => {
+      document.querySelector(".geo__drill")?.scrollIntoView({
+        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto" : "smooth",
+        block: "start",
+      });
+    }, 160);
+  }, []);
+  /* THE JUMP ON LOAD. The marks were painted from the frame we ASKED the map
+   * for, which is not where the map is during the moment it spends loading
+   * its style and settling into that frame. So the country appeared off its
+   * place and then slid into it — the overlay was right about the destination
+   * and wrong about the present.
+   * It now holds still until the map reports a view of its own through
+   * onViewStateChange, and fades in on that first report. The timer is the
+   * safety net: if the map never reports — a style that fails to load, a
+   * version that does not emit on settle — the marks appear anyway, on the
+   * requested frame, rather than never. */
+  useEffect(() => {
+    const t = setTimeout(() => setGeoView((cur) => cur ?? geoFrame.current), 1200);
+    return () => clearTimeout(t);
+  }, [appId, data.tf.from, data.tf.to]);
+  useEffect(() => {
+    setGeoSel(null);
+    /* a different estate is a different frame, and a view the reader panned
+       to on the old one says nothing about this one */
+    geoFrame.current = null;
+    setGeoView(null);
+  }, [appId, data.tf.from, data.tf.to]);
   useEffect(() => { setGeoViewSel(null); setRegionSel(null); }, [geoSel]);
   /* The map draws into a CANVAS: ReactNode shapes do not paint and CSS cannot
    * animate there — measured, zero dots rendered. So the animated pins are an
@@ -423,7 +488,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           caught the contradiction. */}
 
       <div className="tk-hd">
-        <i className="tk-hd__ic" style={{ ["--t" as string]: TVAR[tone] }}>
+        <i className="tk-hd__ic" style={{ ["--t" as string]: FVAR[tone] }}>
           {isMobile ? <MobileIcon /> : <DesktopIcon />}
         </i>
         <div className="tk-hd__t">
@@ -587,12 +652,21 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const judge = (g: GeoArm) => geoJudge(g, base);
         /* The reader's own semantics, stated as a rule: satisfied = green,
          * tolerating = yellow, frustrated = red. Blue was the odd one out.
-         * COL's literals are for the CANVAS layer only (it paints outside
-         * CSS and cannot read a var); everything rendered as HTML uses the
-         * theme tokens, so the map follows light mode like every other
-         * verdict on screen. */
-        const COL = GEO_COL;
-        const TOK = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" } as const;
+         * The canvas layer paints outside CSS and cannot read a var, so it
+         * RESOLVES the three verdict tokens instead of carrying literals of
+         * its own — the map's marks are the platform's success, warning and
+         * critical, and they follow light mode like every other verdict. */
+        /* captured once per estate: see geoFrame at the top of the component */
+        if (located.length && !geoFrame.current) {
+          geoFrame.current = { latitude: cLat, longitude: cLng, zoom };
+        }
+        const frame = geoFrame.current ?? { latitude: cLat, longitude: cLng, zoom };
+        const COL = geoCol();
+        /* dots and bars are MARKS, so they take the saturated half of the
+           family — the text half resolves to #855400 in light, which is the
+           olive that made the whole tile look yellow. */
+        const TOK = { good: "var(--good-fill)", warn: "var(--warn-fill)",
+          bad: "var(--bad-fill)" } as const;
         const WORD = GEO_WORD;
         const because = (g: GeoArm) => geoBecause(g, base);
         /* Country NAMES from the browser itself — no dataset needed, and it
@@ -636,20 +710,40 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
             <div className="panel__hd"><span className="lbl">Where they connect from</span>
               <span className="hint">sessions and health by country · {data.tf.label}</span></div>
             <div className="pad geo__wrap">
-              <div className="geo__map">
-                {/* CONTROLLED, so a click can take the reader somewhere.
-                    Uncontrolled, the map owned its own position and nothing
-                    outside could move it — a state in the list could be named
-                    but never shown. The reader's own panning still writes back
-                    through onViewStateChange, so control is shared rather than
-                    seized. */}
+              {/* THE MAP ITSELF WAITS TOO. Holding only the marks back was
+                  half the fix: the map still painted its default view and
+                  then panned to the frame, and a map that moves on its own
+                  the moment you arrive reads as a mistake being corrected.
+                  Nothing in this tile is visible until the map reports where
+                  it is; the same timer that backs the marks backs this, so a
+                  map that never reports still appears. */}
+              <div className={`geo__map${geoView ? " geo__map--on" : ""}`}>
+                {/* UNCONTROLLED, and that is the correction.
+                    Driving latitude/longitude/zoom from state bought one thing
+                    — a click that re-centres the map — and cost two defects:
+                    a render loop (every emitted view wrote state, which
+                    re-rendered the map, which emitted again), and then a view
+                    the overlay and the map disagreed about, which put the pins
+                    in the Atlantic while the land was elsewhere. The map owns
+                    its position again; the overlay reads the same view it
+                    reports, so the marks land where the places are. */}
                 <MapView height={MAP_H}
-                  latitude={geoView?.latitude ?? cLat}
-                  longitude={geoView?.longitude ?? cLng}
-                  zoom={geoView?.zoom ?? zoom}
-                  onViewStateChange={(v) => setGeoView({
-                    latitude: v.latitude ?? cLat, longitude: v.longitude ?? cLng,
-                    zoom: v.zoom ?? zoom })}>
+                  key={`${frame.latitude.toFixed(3)},${frame.longitude.toFixed(3)},${frame.zoom}`}
+                  initialViewState={frame}
+                  onViewStateChange={(v) => {
+                    const next = {
+                      latitude: v.latitude ?? frame.latitude,
+                      longitude: v.longitude ?? frame.longitude,
+                      zoom: v.zoom ?? frame.zoom,
+                    };
+                    setGeoView((cur) => {
+                      const same = cur
+                        && Math.abs(cur.latitude - next.latitude) < 1e-6
+                        && Math.abs(cur.longitude - next.longitude) < 1e-6
+                        && Math.abs(cur.zoom - next.zoom) < 1e-6;
+                      return same ? cur : next;
+                    });
+                  }}>
                   {/* a faint native layer keeps the map's own tooltip */}
                   <DotLayer shape="circle" shapeSize={6} data={located.map(dot)} />
                   {/* NO STATE CHOROPLETH, and the reason is the component, not
@@ -664,7 +758,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       shaded. */}
                 </MapView>
                 {(() => {
-                  const vs = geoView ?? { latitude: cLat, longitude: cLng, zoom };
+                  const vs = geoView ?? frame;
                   const world = 512 * Math.pow(2, vs.zoom);
                   const mx = (lng: number) => ((lng + 180) / 360) * world;
                   const my = (lat: number) => {
@@ -673,8 +767,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   };
                   const cx = mx(vs.longitude), cy = my(vs.latitude);
                   return (
-                    <div className="geo__ov" aria-hidden="true">
-                      {located.map((g) => {
+                    <div className={`geo__ov${geoView ? " geo__ov--on" : ""}`}
+                      aria-hidden="true">
+                      {/* ONE LEVEL AT A TIME. With a country open, its own
+                          bubble sat on top of the states it had just opened —
+                          two readings of the same ground, the bigger one
+                          hiding the detail that was the point of the click.
+                          The country marks step aside the moment there are
+                          states to show. If the drill comes back with none,
+                          they stay: there is nothing to step aside for. */}
+                      {!(geoSel && regions && regions.length > 0)
+                        && located.map((g) => {
                         const [la, lo] = CENTROID[g.country];
                         const sz = sizeOf(g);
                         const tone = judge(g);
@@ -688,20 +791,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             onClick={() => {
                               const opening = geoSel !== g.country;
                               setGeoSel((c) => (c === g.country ? null : g.country));
-                              /* A map pin sits at the top of a tall tile; the
-                               * drill it opens renders below the fold. The
-                               * click carries the reader to what it opened —
-                               * smooth unless they asked for reduced motion. */
-                              if (opening) setTimeout(() => {
-                                /* Not the drill centred — the TILE topped: the
-                                 * reader framed it exactly, map and legend
-                                 * above, details below, all in one screen. */
-                                document.querySelector(".geo")?.scrollIntoView({
-                                  behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-                                    ? "auto" : "smooth",
-                                  block: "start",
-                                });
-                              }, 120);
+                              if (opening) revealDrill();
                             }}>
                             {(sz >= 26 || tone !== "good") && (
                               <span className="gpin__lbl">
@@ -723,6 +813,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           not coming. Smaller than a country mark, so the two
                           levels never read as the same thing. */}
                       {geoSel && regions && regions.map((r) => {
+                        /* "BR-SP" → "SP": ISO 3166-2 carries the country, the
+                           map is already standing on it. */
                         const c = REGION_CENTROID[r.id];
                         if (!c) return null;
                         const rate = r.hit / Math.max(r.sessions, 1);
@@ -740,10 +832,36 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             title={`${r.name} — ${fmtN(r.sessions)} sessions,`
                               + ` ${(rate * 100).toFixed(1)}% met an error.`
                               + " Click for its cities."}
-                            onClick={() => setRegionSel((x) => (x === r.id ? null : r.id))}>
-                            {r.sessions >= 10 && (
-                              <span className="gpin__lbl"><b>{r.name}</b></span>
-                            )}
+                            onClick={() => {
+                              const opening = regionSel !== r.id;
+                              setRegionSel((x) => (x === r.id ? null : r.id));
+                              /* A MARK ON THE MAP OPENS THE DRILL BELOW IT.
+                                 The state list and its cities live under the
+                                 map, far enough down on a wide screen that
+                                 clicking a mark looked like it had done
+                                 nothing: the row highlighted somewhere off
+                                 the fold. The click now carries the reader to
+                                 what it opened. The wait lets the row and its
+                                 cities render first, so the scroll lands on
+                                 the finished block rather than on the gap
+                                 where it is about to be. */
+                              if (opening) revealDrill();
+                            }}>
+                            {/* EVERY STATE IS NAMED. The label used to need 10
+                                sessions, which on a real estate left two
+                                thirds of the marks as unexplained dots — the
+                                panel beside the map named them, the map did
+                                not. Now each mark carries its own name: the
+                                full one where the mark is big enough to hang
+                                it on, the two-letter code otherwise, which is
+                                the same identifier the list uses. The count
+                                stays with the big marks only; sixteen numbers
+                                over one country is a wall, and the list is
+                                right there holding all of them. */}
+                            <span className="gpin__lbl">
+                              <b>{sz >= 20 ? r.name : uf(r.id)}</b>
+                              {sz >= 20 && <em>{fmtK(r.sessions)}</em>}
+                            </span>
                           </button>
                         );
                       })}
@@ -767,16 +885,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       onClick={() => {
                         const opening = geoSel !== g.country;
                         setGeoSel((c) => (c === g.country ? null : g.country));
-                        // and take the map there, so the row and the picture agree
-                        const cc = CENTROID[g.country];
-                        if (opening && cc) flyTo(cc[0], cc[1], 3.4);
-                        if (opening) setTimeout(() => {
-                          document.querySelector(".geo")?.scrollIntoView({
-                            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-                              ? "auto" : "smooth",
-                            block: "start",
-                          });
-                        }, 120);
+                        if (opening) revealDrill();
                       }}
                       key={g.country}
                       title={`${fmtN(g.sessions)} sessions from ${g.country} — ${fmtN(g.hit)} met an error (${(rate * 100).toFixed(1)}%, application average ${(base * 100).toFixed(1)}%) · ${WORD[tone]}: ${because(g)}`}>
@@ -829,7 +938,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       onClick={() => {
                         const opening = regionSel !== r.id;
                         setRegionSel((x) => (x === r.id ? null : r.id));
-                        if (opening && c) flyTo(c[0], c[1], 5.2);
+                        if (opening) revealDrill();
                       }}>
                       <i className="geo__dot" style={{ background: TOK[t] }} />
                       <b className="geo__cc">{r.id.slice(3)}</b>
@@ -866,7 +975,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   <span>{geoDetail === null ? "reading this country's sessions…"
                     : `top screens · ${data.tf.label}`}</span>
                   <button className="geo__drill-x" aria-label="Close"
-                    onClick={() => setGeoSel(null)}>✕</button>
+                    onClick={() => setGeoSel(null)}><XmarkIcon /></button>
                 </div>
 
                 {/* STATES, AND THE SESSIONS THAT HAVE NONE.
@@ -1195,7 +1304,14 @@ const Module = React.forwardRef<HTMLElement, {
   const pick = metric && onPick ? () => onPick(metric) : undefined;
   return (
     <section ref={ref}
+      /* A CARD WITH NO VERDICT GETS NO VERDICT COLOUR. tone "info" means this
+         card was never judged — there is no threshold behind "10.4k web
+         requests" the way there is behind an error rate. It used to borrow
+         the accent and breathe like the judged ones, which is a card looking
+         as though it had an opinion it does not hold. Muted: neutral border,
+         no breath. */
       className={`tk-block cc-mod${pulse ? " cc-mod--pulse" : ""}`
+        + (tone === "info" ? " cc-mod--mute" : "")
         + (pick ? " cc-mod--pick" : "") + (active ? " cc-mod--on" : "")}
       {...(pick ? {
         role: "button", tabIndex: 0, onClick: pick,
@@ -1206,7 +1322,7 @@ const Module = React.forwardRef<HTMLElement, {
         title: `${active ? "Hide" : "Show"} the breakdown for `
           + (metric === "services" ? "the called services" : METRIC_LABEL[metric as Metric]),
       } : {})}
-      style={{ ["--c" as string]: tone === "info" ? "var(--accent)" : TVAR[tone],
+      style={{ ["--c" as string]: FVAR[tone],
                ["--breath" as string]: BREATH[tone] }}>
       <i className="tk-block__wm" aria-hidden="true"><Icon /></i>
       <header className="tk-block__hd">
@@ -1487,8 +1603,10 @@ function CleanCard(p: CardProps) {
           own wave on this ring. */}
       {/* the score in plain words, built from the same bands the number is, so
           the two can never disagree — it is the verdict word's tooltip now */}
-      <div className="tk-core cc-core" ref={coreRef}
-        style={{ ["--t" as string]: TVAR[apdexTone(p.apdex)],
+      <div className={`tk-core cc-core${p.apdex === null ? " cc-core--mute" : ""}`}
+        ref={coreRef}
+        style={{ ["--t" as string]: p.apdex === null
+            ? "var(--border-2)" : FVAR[apdexTone(p.apdex)],
           ["--breath" as string]: BREATH[apdexTone(p.apdex)] }}>
         <div className="cc-corewrap" ref={ringRef}>
         <CoreRing host={ringRef} value={p.apdex} tone={apdexTone(p.apdex)}
@@ -1667,7 +1785,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
         <span className="mch__fc">
           {rows === null ? "measuring…" : `${rows.length} shown`}
         </span>
-        <button className="mch__x" onClick={onClose} aria-label="Close">✕</button>
+        <button className="mch__x" onClick={onClose} aria-label="Close"><XmarkIcon /></button>
       </div>
 
       {rows !== null && rows.length === 0 && (
@@ -1837,7 +1955,7 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
         <span className="mch__fc">
           {rows.length} of {total} shown{total > rows.length ? " · busiest first" : ""}
         </span>
-        <button className="mch__x" onClick={onClose} aria-label="Close">✕</button>
+        <button className="mch__x" onClick={onClose} aria-label="Close"><XmarkIcon /></button>
       </div>
 
       <div className="svcf__rows">

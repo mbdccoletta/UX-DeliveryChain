@@ -43,6 +43,7 @@ import { Button } from "@dynatrace/strato-components/buttons";
 import { Intelligence } from "./Intelligence";
 import { JOURNEY_STARTERS } from "../utils/starters";
 import { HIT_BAD, HIT_WARN, SAMPLE_MIN} from "../utils/verdict";
+import { XmarkIcon } from "@dynatrace/strato-icons";
 
 type Tone = "good" | "warn" | "bad" | "info";
 interface Node {
@@ -59,7 +60,16 @@ interface Link {
   losing?: boolean;
 }
 
-const TONE: Record<Tone, string> = { good: "--good", warn: "--warn", bad: "--bad", info: "--info" };
+/* THE FLOW PAINTS MARKS, NOT WORDS. Every ribbon and every bar here is a
+ * solid fill, and they were reading Strato's TEXT colours — which in light
+ * theme are #2d6761, #855400, #bb0731: a dark teal, a dark olive-brown and a
+ * dark crimson, tuned for reading at 12px. At ribbon scale and ribbon alpha
+ * they came out as khaki and beige, which is why this chart looked earthy
+ * next to the rest of the product. The container accents are the saturated
+ * members of the same families, meant for exactly this. */
+const TONE: Record<Tone, string> = {
+  good: "--good-fill", warn: "--warn-fill", bad: "--bad-fill", info: "--info-fill",
+};
 const cssVar = (n: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
 
 type Stage = { id: string; nm: string; tone: Tone; sub: string };
@@ -917,7 +927,7 @@ export function FlowSankey({
         if (n.ab) {
           ctx.save();
           ctx.setLineDash([4, 3]);
-          ctx.strokeStyle = cssVar("--bad"); ctx.lineWidth = 1.5;
+          ctx.strokeStyle = cssVar("--bad-fill"); ctx.lineWidth = 1.5;
           ctx.strokeRect(n.x - 8.5, n.y - 3, 17, n.h + 6);
           ctx.restore();
         }
@@ -1605,10 +1615,10 @@ export function FlowSankey({
         )}
         <div className="spacer" />
         <span className="flow-hd__k">
-          <i style={{ background: "var(--good)" }} />finished
-          <i style={{ background: "var(--warn)" }} />stopped
-          <i style={{ background: "var(--bad)" }} />lost
-          <i style={{ background: "var(--info)" }} />other
+          <i style={{ background: "var(--good-fill)" }} />finished
+          <i style={{ background: "var(--warn-fill)" }} />stopped
+          <i style={{ background: "var(--bad-fill)" }} />lost
+          <i style={{ background: "var(--info-fill)" }} />other
         </span>
       </div>
 
@@ -1654,7 +1664,7 @@ export function FlowSankey({
                 <button key={id} className="flow-pick"
                   title="Remove this waypoint"
                   onClick={() => setPicks((cur) => cur.filter((x) => x !== id))}>
-                  {word(id)} ✕
+                  {word(id)} <XmarkIcon />
                 </button>
               ))}
               {stepHint && (
@@ -1725,7 +1735,7 @@ export function FlowSankey({
               })()}
               {picks.length > 0 && (
                 <button className="flow-sel__b" onClick={() => setPicks([])}>
-                  {mode === "steps" ? "clear path" : "clear selection"} ✕
+                  {mode === "steps" ? "clear path" : "clear selection"} <XmarkIcon />
                 </button>
               )}
             </div>
@@ -1755,7 +1765,7 @@ export function FlowSankey({
                     <span>sessions without a recorded view in this window</span>
                   </div>
                 )}
-                <button className="drawer__x" onClick={() => setNtel(null)} aria-label="Close">✕</button>
+                <button className="drawer__x" onClick={() => setNtel(null)} aria-label="Close"><XmarkIcon /></button>
               </header>
               {!d ? <div className="rinfo__loading">unpacking…</div> : (
                 <>
@@ -1818,7 +1828,7 @@ export function FlowSankey({
               try again
             </Button>
             <button className="drawer__x" aria-label="Close"
-              onClick={() => { setInfo(null); cohortRef.current = null; }}>✕</button>
+              onClick={() => { setInfo(null); cohortRef.current = null; }}><XmarkIcon /></button>
           </div>
         </div>
       )}
