@@ -677,7 +677,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
             <div className="panel__hd"><span className="lbl">Where they connect from</span>
               <span className="hint">sessions and health by country · {data.tf.label}</span></div>
             <div className="pad geo__wrap">
-              <div className="geo__map">
+              {/* THE MAP ITSELF WAITS TOO. Holding only the marks back was
+                  half the fix: the map still painted its default view and
+                  then panned to the frame, and a map that moves on its own
+                  the moment you arrive reads as a mistake being corrected.
+                  Nothing in this tile is visible until the map reports where
+                  it is; the same timer that backs the marks backs this, so a
+                  map that never reports still appears. */}
+              <div className={`geo__map${geoView ? " geo__map--on" : ""}`}>
                 {/* UNCONTROLLED, and that is the correction.
                     Driving latitude/longitude/zoom from state bought one thing
                     — a click that re-centres the map — and cost two defects:
