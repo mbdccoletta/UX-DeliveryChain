@@ -60,6 +60,17 @@ const uf = (id: string) => (id.includes("-") ? id.split("-").pop() ?? id : id);
 const TVAR: Record<Tone, string> = {
   good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", info: "var(--info)",
 };
+/* THE VIVID HALF OF THE SAME PALETTE. Strato ships each status in two
+ * strengths: a TEXT colour, tuned to be read as words, and a CONTAINER ACCENT
+ * — the saturated member of the family, meant for solid marks. Borders, rings
+ * and icons were reading the text one, which is why the page looked washed
+ * beside the platform's own screens. Text keeps TVAR; everything that is a
+ * mark rather than a sentence takes this. "info" is not a verdict and stays
+ * neutral, by the rule that an unjudged box may not look judged. */
+const FVAR: Record<Tone, string> = {
+  good: "var(--good-fill)", warn: "var(--warn-fill)", bad: "var(--bad-fill)",
+  info: "var(--border-2)",
+};
 
 /** A number that climbs to its value — the page arrives moving. */
 function useCountUp(target: number, ms = 1100): number {
@@ -459,7 +470,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           caught the contradiction. */}
 
       <div className="tk-hd">
-        <i className="tk-hd__ic" style={{ ["--t" as string]: TVAR[tone] }}>
+        <i className="tk-hd__ic" style={{ ["--t" as string]: FVAR[tone] }}>
           {isMobile ? <MobileIcon /> : <DesktopIcon />}
         </i>
         <div className="tk-hd__t">
@@ -1275,7 +1286,14 @@ const Module = React.forwardRef<HTMLElement, {
   const pick = metric && onPick ? () => onPick(metric) : undefined;
   return (
     <section ref={ref}
+      /* A CARD WITH NO VERDICT GETS NO VERDICT COLOUR. tone "info" means this
+         card was never judged — there is no threshold behind "10.4k web
+         requests" the way there is behind an error rate. It used to borrow
+         the accent and breathe like the judged ones, which is a card looking
+         as though it had an opinion it does not hold. Muted: neutral border,
+         no breath. */
       className={`tk-block cc-mod${pulse ? " cc-mod--pulse" : ""}`
+        + (tone === "info" ? " cc-mod--mute" : "")
         + (pick ? " cc-mod--pick" : "") + (active ? " cc-mod--on" : "")}
       {...(pick ? {
         role: "button", tabIndex: 0, onClick: pick,
@@ -1286,7 +1304,7 @@ const Module = React.forwardRef<HTMLElement, {
         title: `${active ? "Hide" : "Show"} the breakdown for `
           + (metric === "services" ? "the called services" : METRIC_LABEL[metric as Metric]),
       } : {})}
-      style={{ ["--c" as string]: tone === "info" ? "var(--accent)" : TVAR[tone],
+      style={{ ["--c" as string]: FVAR[tone],
                ["--breath" as string]: BREATH[tone] }}>
       <i className="tk-block__wm" aria-hidden="true"><Icon /></i>
       <header className="tk-block__hd">
@@ -1567,8 +1585,10 @@ function CleanCard(p: CardProps) {
           own wave on this ring. */}
       {/* the score in plain words, built from the same bands the number is, so
           the two can never disagree — it is the verdict word's tooltip now */}
-      <div className="tk-core cc-core" ref={coreRef}
-        style={{ ["--t" as string]: TVAR[apdexTone(p.apdex)],
+      <div className={`tk-core cc-core${p.apdex === null ? " cc-core--mute" : ""}`}
+        ref={coreRef}
+        style={{ ["--t" as string]: p.apdex === null
+            ? "var(--border-2)" : FVAR[apdexTone(p.apdex)],
           ["--breath" as string]: BREATH[apdexTone(p.apdex)] }}>
         <div className="cc-corewrap" ref={ringRef}>
         <CoreRing host={ringRef} value={p.apdex} tone={apdexTone(p.apdex)}
