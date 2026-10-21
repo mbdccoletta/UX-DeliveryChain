@@ -586,7 +586,11 @@ body.col-resizing .gutter span { background: var(--accent); height: 100%; border
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 3%, transparent)); }
 .dcf-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
 .dcf-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.dcf-svg .e-base { filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 55%, transparent)); }
+/* The ribbons used to carry a 6px halo of their own colour. With ribbons
+   this thick and this many of them, the halos overlapped into a wash that
+   tinted the entire panel — the gold the reader saw was as much the glow as
+   the stroke. The stroke is the signal; it needs no aura. */
+.dcf-svg .e-base { filter: none; }
 /* one luminous packet per trace; the gap is long so a single pulse travels */
 .dcf-svg .e-pulse { stroke-dasharray: 16 178; animation: gpulse 2s linear infinite; }
 @keyframes gpulse { to { stroke-dashoffset: -194; } }
@@ -1566,15 +1570,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
         padding: 12px 12px 18px; border-radius: 14px;
         background: linear-gradient(180deg, var(--panel-2), transparent 65%);
         border: 1px solid var(--border); }
-.gcol--warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent);
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--warn) 8%, transparent),
-          color-mix(in srgb, var(--warn) 2%, transparent) 60%, transparent); }
-.gcol--bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent);
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--bad) 9%, transparent),
-          color-mix(in srgb, var(--bad) 2%, transparent) 60%, transparent);
-        box-shadow: 0 0 18px color-mix(in srgb, var(--bad) 18%, transparent); }
+/* The column's verdict is a MARK, so it reads the saturated member of the
+   family rather than the text one — the text colour resolves to a dark olive
+   in light theme, which is what painted this whole panel gold. No wash and
+   no bloom either: the border says it, the way it does on every other card
+   in the product. */
+.gcol--warn { border-color: color-mix(in srgb, var(--warn-fill) 55%, transparent); }
+.gcol--bad { border-color: color-mix(in srgb, var(--bad-fill) 65%, transparent); }
 .gcol__hd { display: flex; align-items: center; gap: 7px; justify-content: center;
             background: none; border: none; cursor: pointer; padding: 4px 6px;
             color: var(--ink-3); }
@@ -1583,8 +1585,8 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .gcol__hd b { font: 700 calc(15px * var(--gs, 1)) var(--mono); letter-spacing: 0.2em;
               text-transform: uppercase; color: var(--ink); }
 .gcol__hd:hover b, .gcol__hd--on b { color: var(--accent); }
-.gcol--warn .gcol__hd { border-bottom-color: color-mix(in srgb, var(--warn) 55%, transparent); }
-.gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad) 60%, transparent); }
+.gcol--warn .gcol__hd { border-bottom-color: color-mix(in srgb, var(--warn-fill) 65%, transparent); }
+.gcol--bad .gcol__hd { border-bottom-color: color-mix(in srgb, var(--bad-fill) 70%, transparent); }
 /* the reader asked for legible column captions — up from 10px ink-2 the
    layer names were furniture, not labels */
 .gcol__name { text-align: center; font: 600 12px var(--sans); color: var(--ink);
