@@ -16,7 +16,7 @@ import { fmtK, fmtMs, fmtN } from "../utils/dql";
 import * as Q from "../utils/dql";
 import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
-import { GEO_ABS_BAD, GEO_ABS_WARN, GEO_COL, GEO_MIN_SESSIONS, GEO_WORD,
+import { GEO_ABS_BAD, GEO_ABS_WARN, geoCol, GEO_MIN_SESSIONS, GEO_WORD,
   geoArms, geoBecause, geoEnName, geoJudge, geoName,
   type GeoArm } from "../utils/geoVerdict";
 import type { ChainData } from "../hooks/useChainData";
@@ -584,11 +584,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const judge = (g: GeoArm) => geoJudge(g, base);
         /* The reader's own semantics, stated as a rule: satisfied = green,
          * tolerating = yellow, frustrated = red. Blue was the odd one out.
-         * COL's literals are for the CANVAS layer only (it paints outside
-         * CSS and cannot read a var); everything rendered as HTML uses the
-         * theme tokens, so the map follows light mode like every other
-         * verdict on screen. */
-        const COL = GEO_COL;
+         * The canvas layer paints outside CSS and cannot read a var, so it
+         * RESOLVES the three verdict tokens instead of carrying literals of
+         * its own — the map's marks are the platform's success, warning and
+         * critical, and they follow light mode like every other verdict. */
+        const COL = geoCol();
         const TOK = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" } as const;
         const WORD = GEO_WORD;
         const because = (g: GeoArm) => geoBecause(g, base);

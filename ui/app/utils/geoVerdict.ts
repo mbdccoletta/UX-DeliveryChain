@@ -29,7 +29,45 @@ export interface GeoArm {
 /** The reader's own semantics: satisfied green, tolerating yellow,
  *  frustrated red — everywhere a location is judged. */
 export const GEO_WORD = { bad: "frustrated", warn: "tolerating", good: "satisfied" } as const;
-export const GEO_COL = { bad: "#ff7a8a", warn: "#e8c34a", good: "#4cc38a" } as const;
+
+/* THE MAP WAS THE ONE PLACE STILL PAINTING ITS OWN STATUS COLOURS.
+ * Everything else in this app reads --good / --warn / --bad, which bind to
+ * Strato's text-success, text-warning and text-critical tokens — so the whole
+ * screen flips with the shell and uses the platform's three families. The map
+ * paints on a canvas, which cannot read a CSS variable, and so had three
+ * literals of its own: #4cc38a, #e8c34a, #ff7a8a. The middle one is a plain
+ * yellow and belongs to no Dynatrace family at all; next to a warning pill
+ * drawn from the token it is simply a different colour for the same verdict.
+ *
+ * So the canvas resolves the tokens instead of guessing them. The fallback
+ * hexes below are Strato's own dark-theme values, kept for standalone dev
+ * where no shell injects anything. */
+export const GEO_COL = { bad: "#ff999c", warn: "#eea83f", good: "#6fc3ba" } as const;
+
+/** The three verdict tones as the live theme resolves them, for the canvas.
+ *  Reading them off a probe rather than the custom property keeps the result
+ *  an rgb() string whatever the token happens to contain. */
+export function geoCol(): { bad: string; warn: string; good: string } {
+  if (typeof document === "undefined" || !document.body) return { ...GEO_COL };
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+  document.body.appendChild(probe);
+  const read = (name: string, fb: string) => {
+    probe.style.color = "";
+    probe.style.color = `var(${name})`;
+    const c = getComputedStyle(probe).color;
+    /* an unresolved var leaves the colour at its initial value, and a fully
+       transparent mark would silently erase the location from the map */
+    return c && c !== "rgba(0, 0, 0, 0)" ? c : fb;
+  };
+  const out = {
+    bad: read("--bad", GEO_COL.bad),
+    warn: read("--warn", GEO_COL.warn),
+    good: read("--good", GEO_COL.good),
+  };
+  probe.remove();
+  return out;
+}
 
 export interface GeoArms {
   rate: number; lift: number; apx: number | null;
