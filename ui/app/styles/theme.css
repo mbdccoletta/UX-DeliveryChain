@@ -1830,9 +1830,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 @keyframes tkbreathe {
   0%,100% { box-shadow: 0 0 20px color-mix(in srgb, var(--t) 25%, transparent); }
   50% { box-shadow: 0 0 30px color-mix(in srgb, var(--t) 45%, transparent); } }
-.tk-core__ic { color: var(--ink-hi); width: 30px; height: 30px; }
-.tk-core__ic svg { width: 30px; height: 30px;
-  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--ink-hi) 55%, transparent)); }
+/* THE DEVICE CARRIES THE VERDICT. It was --ink-hi with a glow behind it: the
+   one mark on the hero that said nothing, lit as if it did. It is the same
+   verdict the number and the word already carry, so it reads it from --t and
+   drops the halo — a glow around a shape that is now coloured would only
+   argue with it. */
+.tk-core__ic { color: var(--t); width: 30px; height: 30px; }
+.tk-core__ic svg { width: 30px; height: 30px; }
 .tk-core__pct--word, .cc .tk-core__pct--word { font-size: 30px; letter-spacing: 0.02em;
   text-transform: uppercase; }
 .tk-core__pct { font-size: 40px; color: var(--ink-hi); line-height: 1;
@@ -3248,6 +3252,22 @@ div:has(> header):has(main) > div {
     color-mix(in srgb, var(--t) 20%, var(--tint)),
     color-mix(in srgb, var(--t) 10%, var(--tint)) 80%);
   border-color: color-mix(in srgb, var(--t) 45%, var(--border));
+  /* AND THE HALO GOES. The hero breathes by animating a 18→40px glow of its
+     verdict tone. On near-black that reads as a lit module; on white it is a
+     coloured cloud around the card, which at Poor meant a red smear across
+     the middle of the page. The motion itself is not lost — the ring around
+     the card is the thing that actually measures, and it animates in both
+     themes. What goes is the decoration on top of it. */
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  animation: none;
+}
+[data-theme="light"] .tk-core__b:hover, [data-theme="light"] .tk-core__b:focus-visible,
+:root:not([data-theme="dark"]) .tk-core__b:hover,
+:root:not([data-theme="dark"]) .tk-core__b:focus-visible {
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  border-color: color-mix(in srgb, var(--t) 70%, var(--border));
 }
 /* and the one caption that the new ground costs: at 60% ink over the hero's
    old white fill "open the delivery chain" measured 4.5:1 with nothing to
