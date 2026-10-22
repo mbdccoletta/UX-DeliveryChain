@@ -55,17 +55,25 @@ export function useServiceForecasts(
     let live = true;
     // seed the list immediately so the panel opens with names and volumes,
     // and each forecast fills its own row when it arrives
+    /* THE GENERATION BELONGS IN THE ENTRY, not only in the effect key.
+       Refresh changed the key, so the effect re-ran — and then every row was
+       served from an entry still stored under the bare service id, so no
+       analyzer was called again. The panel paired refreshed measurements with
+       projections from before the refresh, and a cached null could never be
+       retried at all. */
+    const slot = (id: string) => `${id}|${gen}`;
     setRows(targets.map((t) => ({
-      ...t, thr: memo.get(t.id)?.thr ?? null, fails: memo.get(t.id)?.fails ?? null,
-      done: memo.has(t.id),
+      ...t, thr: memo.get(slot(t.id))?.thr ?? null,
+      fails: memo.get(slot(t.id))?.fails ?? null,
+      done: memo.has(slot(t.id)),
     })));
 
-    targets.filter((t) => !memo.has(t.id)).forEach(async (t) => {
+    targets.filter((t) => !memo.has(slot(t.id))).forEach(async (t) => {
       const thr = await forecast(expr("dt.service.request.count", t.id), 12);
       // a service with no measured failures gets no failure projection
       const fails = await forecast(expr("dt.service.request.failure_count", t.id), 12);
       const hit = { thr, fails: fails && fails.total >= 1 ? fails : null };
-      memo.set(t.id, hit);
+      memo.set(slot(t.id), hit);
       if (live) {
         setRows((prev) => prev.map((r) =>
           r.id === t.id ? { ...r, ...hit, done: true } : r));

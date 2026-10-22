@@ -121,7 +121,19 @@ export interface ForecastPlan {
 
 export function forecastPlan(windowMinutes: number): ForecastPlan {
   const histMin = Math.max(60, Math.min(Math.round(windowMinutes * 3), FC_HIST_CAP_MIN));
-  const binMin = binMinutesFor(histMin);
+  /* THE BIN IS THE WINDOW'S, NOT THE HISTORY'S — and getting this wrong made
+   * the chart lie. The measured series is binned by binMinutesFor(window);
+   * the plan binned by binMinutesFor(history), which is three times longer.
+   * Measured: 2h → 5-minute bins. Forecast, before this: 15-minute bins. Both
+   * are then plotted against each other in the card bars and in MetricChart,
+   * so a perfectly steady two requests a minute drew measured points of 10
+   * beside predicted points of 30 — an invented tripling, in the one part of
+   * the screen that claims to say what happens next.
+   * Measured across the windows this app offers, the mismatch was 5x at 30
+   * minutes, 3x at 2 hours and 4x at 6; only the 24-hour window agreed by
+   * accident. The history cap stays — it is what keeps a wide window from
+   * billing like one — but the bin now matches what it is drawn beside. */
+  const binMin = binMinutesFor(windowMinutes);
   const points = Math.max(4, Math.floor(histMin / binMin));
   // The future never dwarfs the present: the projection reaches about a third
   // of the visible window, and never further than half the history behind it.
