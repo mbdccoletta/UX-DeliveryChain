@@ -286,6 +286,9 @@ svg { shape-rendering: geometricPrecision; }
 /* panels */
 .panel { background: var(--panel); border: var(--bw) solid var(--border); }
 /* the little kind-tag on a card's sub-line: "host", "service →" */
+/* a host is longer than the column; the cut has to be visible, so CSS makes
+   it and the tooltip carries the whole name */
+.tk-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk-note__k { font-style: normal; font-size: 9px; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-3); margin-left: 6px; }
 .tk-note--go { color: var(--ink-3); }

@@ -410,7 +410,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
        backwards. The host is trimmed to the part that identifies it
        (checkout.playground-dev.internal.example.com is a wall in a
        160px column); the whole name rides the tooltip. */
-    .map(([d, n]) => ({ short: `${fmtK(n)} ${d.split(".").slice(0, 2).join(".")}`,
+    /* THE WHOLE HOST, ELLIPSISED BY CSS. It used to be cut to its first two
+       labels to fit the column, which turned static.neth.bradesco.com.br into
+       "static.neth" — a hostname that does not exist, printed as if it did. A
+       name cut by CSS at least shows that it was cut; a name cut by code
+       looks complete. */
+    .map(([d, n]) => ({ short: `${fmtK(n)} ${d}`,
       full: `${d} · ${fmtK(n)} requests` }));
 
   if (!app) return null;
@@ -2004,8 +2009,12 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
   onClose: () => void;
 }) {
   const KIND = { sessions: "views", errors: "errors", requests: "requests" } as const;
+  /* "Domains" was true until this panel started grouping by endpoint; a
+     title that names the wrong unit turns a correct table into a wrong one,
+     because the reader compares its rows against the card's host totals and
+     finds them short. */
   const TITLE: Record<DetailMetric, string> = {
-    sessions: "Views", errors: "Failures", requests: "Domains",
+    sessions: "Views", errors: "Failures", requests: "Endpoints",
   };
   const UNIT: Record<DetailMetric, string> = {
     sessions: "actions", errors: "errors", requests: "requests",
@@ -2016,7 +2025,10 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
     <div className="svcf">
       <div className="mch__hd">
         <span className="mch__t">{TITLE[metric]}
-          <em>· {tf.label}, busiest first</em></span>
+          <em>· {tf.label}, busiest first
+            {metric === "requests"
+              ? " · one row per endpoint, so these do not add up to a host's total"
+              : ""}</em></span>
         <span className="mch__fc">
           {rows === null ? "measuring…" : `${rows.length} shown`}
         </span>
