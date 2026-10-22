@@ -2064,14 +2064,28 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
            * story /home actually has, which is time. An error rate earns the
            * error page at the same threshold the verdict uses for impact. */
           const errRate = r.vol > 0 ? (r.errors ?? 0) / r.vol : 0;
-          const dd = metric === "sessions" && errRate >= HIT_WARN
-            ? { label: "Errors on this view",
-                proves: `${Math.round(errRate * 100)}% of its actions failed`,
-                href: errorsExplorerHref(tf, appName, r.name) }
-            : rowDrilldown(
-                KIND[metric],
-                { ...r, hasSpans: !!tracedDomains?.has(r.name) },
-                tf, appEntity, metric === "errors" ? "fail" : "time", appName);
+          const errs = { label: "Errors on this view",
+            proves: `${Math.round(errRate * 100)}% of its actions failed`,
+            href: errorsExplorerHref(tf, appName, r.name) };
+          const perf = rowDrilldown(
+            KIND[metric],
+            { ...r, hasSpans: !!tracedDomains?.has(r.name) },
+            tf, appEntity, metric === "errors" ? "fail" : "time", appName);
+          const leadsWithErrors = metric === "sessions" && errRate >= HIT_WARN;
+          const dd = leadsWithErrors ? errs : perf;
+          /* BOTH DOORS, ALWAYS — the row stops choosing for the reader.
+             The rule routed by the DATA: any view past the 10% error line
+             went to the Error Inspector. But the reader arrived here from
+             the User Experience card, and what they followed was a p50 of
+             2.2s — the worst on the page. A single error on that view then
+             sent them to the error page and there was no way back to
+             performance from the row. The route a reader needs depends on
+             the question they came with, which the row cannot know, so it
+             offers the other one beside the first instead of guessing. */
+          const alt = leadsWithErrors
+            ? (perf ? { ...perf, short: "performance" } : null)
+            : ((r.errors ?? 0) > 0 && appName
+                ? { ...errs, short: "errors" } : null);
           /* An anchor, not a button: without an href the click died silently
            * wherever the intent bus is absent. Two kinds of target arrive
            * here — a full intent hand-off, and a plain url built from an app's
@@ -2116,6 +2130,11 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
             </span>
             <span className="svcf__v">
               {fmtK(r.vol)} <em>{UNIT[metric]}</em>
+              {alt && (
+                <a className="svcf__alt" href={alt.href} target="_blank" rel="noreferrer"
+                  title={`${alt.label} — ${alt.proves}`}
+                  onClick={(e) => e.stopPropagation()}>{alt.short} →</a>
+              )}
             </span>
             {metric === "errors" ? (
               <>

@@ -289,6 +289,14 @@ svg { shape-rendering: geometricPrecision; }
 /* a host is longer than the column; the cut has to be visible, so CSS makes
    it and the tooltip carries the whole name */
 .tk-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the row's SECOND door: the lens the row did not lead with, offered rather
+   than chosen. Quiet until the row is under the cursor, because it is the
+   alternative — the primary is the whole row. */
+.svcf__alt { margin-left: 10px; font: 600 10px var(--mono); color: var(--ink-3);
+  text-decoration: none; white-space: nowrap; opacity: 0; transition: opacity 120ms; }
+.svcf__row:hover .svcf__alt, .svcf__row:focus-within .svcf__alt { opacity: 1; }
+.svcf__alt:hover, .svcf__alt:focus-visible { color: var(--ink-hi); outline: none; }
+@media (hover: none) { .svcf__alt { opacity: 1; } }
 .tk-note__k { font-style: normal; font-size: 9px; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-3); margin-left: 6px; }
 .tk-note--go { color: var(--ink-3); }
