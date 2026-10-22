@@ -176,20 +176,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, regionSel, appId, data.tf.from, data.tf.to]);
-  /* THE FRAME THE MAP ACTUALLY MOUNTED ON.
-   * MapView is uncontrolled, which is the right call — see the note at the
-   * component — but uncontrolled means it honours initialViewState ONCE, on
-   * the render that mounts it. The geo rows arrive after that render, so the
-   * map mounted on the empty-estate default (lat 20, lng 0, zoom 1.1) and
-   * stayed there, while the overlay went on projecting against the frame
-   * computed from the data that had since arrived. That is how a country's
-   * mark ended up alone in the Atlantic: the overlay drew it at the centre of
-   * a view the map was never in.
-   * So the frame is captured the first time there is real data to frame, both
-   * the map and the overlay read that one object, and it is also the map's
-   * key — so the arrival of the first rows REMOUNTS the map onto the frame
-   * instead of leaving it behind. Panning does not touch it, so a refresh of
-   * the same application never yanks the view back. */
+  /* WHERE THE MAP STARTS, once per estate.
+   * The view the reader has panned to lives in geoView; this is what the map
+   * opens on before they touch it, computed from the traffic. It is captured
+   * the first time there is real data to frame so that a refresh of the same
+   * application never yanks the view back, and cleared when the application
+   * or the timeframe changes, because a frame describes an estate. */
   const geoFrame = useRef<{ latitude: number; longitude: number; zoom: number } | null>(null);
   /* CLICKING ANYTHING IN THIS TILE PUTS ITS ANSWER ON THE SCREEN.
    * Everything a click opens — a country's screens, a state's cities —
@@ -219,10 +211,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * safety net: if the map never reports — a style that fails to load, a
    * version that does not emit on settle — the marks appear anyway, on the
    * requested frame, rather than never. */
-  useEffect(() => {
-    const t = setTimeout(() => setGeoView((cur) => cur ?? geoFrame.current), 1200);
-    return () => clearTimeout(t);
-  }, [appId, data.tf.from, data.tf.to]);
+  /* The 1.2s reveal timer went with the uncontrolled map: there is
+   * nothing to wait for when the view is ours from the first paint. */
   useEffect(() => {
     setGeoSel(null);
     /* a different estate is a different frame, and a view the reader panned
@@ -621,7 +611,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 
       {/* ── ACCESS AND HEALTH BY LOCATION ──
           Rebuilt to the standard of the platform's own dashboard geo tiles:
-          a LARGE map framed on the data (initialViewState from the traffic's
+          a LARGE map framed on the data (the view comes from the traffic's
           own bounding box), bubbles in volume buckets — shapeSize is per
           layer, so three layers make three sizes — coloured by the health
           judgement, and the ranked list beside the map as its legend. One
@@ -691,6 +681,21 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           geoFrame.current = { latitude: cLat, longitude: cLng, zoom };
         }
         const frame = geoFrame.current ?? { latitude: cLat, longitude: cLng, zoom };
+        /* THE ONE VIEW BOTH SIDES READ. The map is CONTROLLED, which is the
+           only arrangement in which it and the overlay cannot disagree: what
+           we pass is what the map shows, and the overlay projects against
+           that same object.
+           Uncontrolled was tried twice and failed twice, and the reader named
+           the reason without knowing it: "when I zoom, the location corrects
+           itself". MapView neither applied the initialViewState it was given
+           NOR reported a view until something was interacted with — so the
+           map sat on its own world view while the overlay drew against the
+           frame we had asked for, and the heaviest country landed in the
+           Atlantic at the centre of a view the map was never in. The first
+           zoom emitted a real view, the overlay adopted it, and everything
+           snapped into place. There is nothing to wait for when the view is
+           ours to begin with. */
+        const view = geoView ?? frame;
         const COL = geoCol();
         /* dots and bars are MARKS, so they take the saturated half of the
            family — the text half resolves to #855400 in light, which is the
@@ -747,25 +752,36 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   Nothing in this tile is visible until the map reports where
                   it is; the same timer that backs the marks backs this, so a
                   map that never reports still appears. */}
-              <div className={`geo__map${geoView ? " geo__map--on" : ""}`}>
-                {/* UNCONTROLLED, and that is the correction.
-                    Driving latitude/longitude/zoom from state bought one thing
-                    — a click that re-centres the map — and cost two defects:
-                    a render loop (every emitted view wrote state, which
-                    re-rendered the map, which emitted again), and then a view
-                    the overlay and the map disagreed about, which put the pins
-                    in the Atlantic while the land was elsewhere. The map owns
-                    its position again; the overlay reads the same view it
-                    reports, so the marks land where the places are. */}
+              <div className="geo__map geo__map--on">
+                {/* CONTROLLED, and this time for the right reason.
+                    It was controlled once, loosely, and the loop it caused
+                    sent it back to uncontrolled — where it failed twice more,
+                    because uncontrolled here means the map answers to nobody:
+                    measured, MapView neither applied the initialViewState it
+                    was given nor reported a view until the reader touched it.
+                    The overlay therefore drew against a frame the map had
+                    never adopted, and the heaviest country sat in the Atlantic
+                    until the first zoom emitted a real view and everything
+                    snapped into place — which is exactly how the reader
+                    described it.
+                    Controlled, there is one view and both sides read it, so
+                    they cannot disagree. The loop that scared us off is held
+                    by the equality guard below: the view we just rendered
+                    comes straight back from onViewStateChange and is dropped
+                    as a no-op, while a real pan still gets through. */}
                 <MapView height={MAP_H}
-                  key={`${frame.latitude.toFixed(3)},${frame.longitude.toFixed(3)},${frame.zoom}`}
-                  initialViewState={frame}
+                  latitude={view.latitude}
+                  longitude={view.longitude}
+                  zoom={view.zoom}
                   onViewStateChange={(v) => {
                     const next = {
-                      latitude: v.latitude ?? frame.latitude,
-                      longitude: v.longitude ?? frame.longitude,
-                      zoom: v.zoom ?? frame.zoom,
+                      latitude: v.latitude ?? view.latitude,
+                      longitude: v.longitude ?? view.longitude,
+                      zoom: v.zoom ?? view.zoom,
                     };
+                    /* the guard is what keeps a controlled map from looping:
+                       the view we just rendered comes straight back, and
+                       writing it again would render again, forever */
                     setGeoView((cur) => {
                       const same = cur
                         && Math.abs(cur.latitude - next.latitude) < 1e-6
@@ -788,7 +804,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       shaded. */}
                 </MapView>
                 {(() => {
-                  const vs = geoView ?? frame;
+                  const vs = view;
                   const world = 512 * Math.pow(2, vs.zoom);
                   const mx = (lng: number) => ((lng + 180) / 360) * world;
                   const my = (lat: number) => {
@@ -797,8 +813,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   };
                   const cx = mx(vs.longitude), cy = my(vs.latitude);
                   return (
-                    <div className={`geo__ov${geoView ? " geo__ov--on" : ""}`}
-                      aria-hidden="true">
+                    <div className="geo__ov geo__ov--on" aria-hidden="true">
                       {/* ONE LEVEL AT A TIME. With a country open, its own
                           bubble sat on top of the states it had just opened —
                           two readings of the same ground, the bigger one
