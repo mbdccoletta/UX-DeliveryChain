@@ -12,6 +12,7 @@ import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
+import { hasTruncation, subscribeScan } from "./utils/cost";
 /* THE FOUR PAGES ARRIVE WHEN THEY ARE OPENED.
  *
  * They used to arrive together: one bundle, 4.0 MB, every route's code loaded
@@ -72,6 +73,11 @@ const URL_DEFAULTS = {
 } as const;
 
 export function App() {
+  /* THE TRUNCATION GUARDRAIL, CONNECTED. cost.ts has always detected a
+     partial scan; until now nothing read the counter, so the app rendered
+     and cached incomplete figures in silence. */
+  const [truncatedScan, setTruncatedScan] = React.useState(false);
+  React.useEffect(() => subscribeScan(() => setTruncatedScan(hasTruncation())), []);
   const { state, set } = useUrlState<{
     tab: string; from: string; to: string; app: string | null; sel: string | null;
     /** Validation: pin every RUM query to one session. */
@@ -327,6 +333,16 @@ export function App() {
           events. <button className="flow-sel__b" onClick={() => set({ session: null })}>
             show everything
           </button>
+        </div>
+      )}
+
+      {truncatedScan && (
+        <div className="banner">
+          <b>Partial data:</b> at least one query on this screen reached Grail's 500 GB scan
+          limit and answered from part of the window. Grail reports that as a success with a
+          warning, so the figures below are real but <em>incomplete</em> — they can only be
+          lower than the truth. Narrow the window, or pick a single application, and they
+          become whole again.
         </div>
       )}
 

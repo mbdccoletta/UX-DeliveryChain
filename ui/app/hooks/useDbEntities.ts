@@ -8,6 +8,7 @@
 // matching by connection hostname first — the strong arm — then by the name
 // bridge qDbEntity already measured.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qDbEntities, runDql } from "../utils/dql";
 import type { DataStore } from "./useDataStores";
 
@@ -19,7 +20,8 @@ export function useDbEntities(stores: DataStore[] | null): Map<string, DbIds> | 
   const targets = [...new Map((stores ?? []).map((s) => [s.store,
     { addr: s.store, ns: s.ns }])).values()]
     .sort((a, b) => a.addr.localeCompare(b.addr));
-  const key = targets.length ? targets.map((t) => `${t.addr}|${t.ns ?? ""}`).join(",") : "";
+  const gen = useMemoGen();
+  const key = targets.length ? targets.map((t) => `${t.addr}|${t.ns ?? ""}|${gen}`).join(",") : "";
   const [out, setOut] = useState<Map<string, DbIds> | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

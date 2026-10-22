@@ -2,6 +2,7 @@
 // Each query fails in isolation: a missing scope never takes the screen down.
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Q from "../utils/dql";
+import { bumpMemoGen } from "../utils/memo";
 import { normalizeView, num, runDql, type Timeframe } from "../utils/dql";
 import * as cache from "../utils/cache";
 
@@ -200,6 +201,14 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
   const skipCache = useRef(false);
   const refresh = useCallback(() => {
     skipCache.current = true;
+    /* AND EVERY OTHER CACHE ON THE PAGE. This reloaded the shared estate and
+       nothing else: twenty-six hooks keep their own module-level memo keyed
+       by the question, so after a refresh the header said "live" over a page
+       that was part fresh and part cached, with nothing to tell them apart.
+       Clearing those Maps would not help — a hook only re-fetches when its
+       KEY changes — so the generation is part of every key, and bumping it
+       sends the whole page back to Grail together. */
+    bumpMemoGen();
     setTick((t) => t + 1);
   }, []);
 

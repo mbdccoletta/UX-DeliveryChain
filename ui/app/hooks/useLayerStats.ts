@@ -6,6 +6,7 @@
 // click now lands on its most deserving element). Deep links can still open
 // it, so the data is fetched HERE, on first open, memoised per window.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { num, qDevices, qPaths, runDql, type Timeframe } from "../utils/dql";
 import type { DeviceRow, PathRow } from "./useChainData";
 
@@ -14,7 +15,8 @@ export interface LayerStats { devices: DeviceRow[]; paths: PathRow[] }
 const memo = new Map<string, LayerStats>();
 
 export function useLayerStats(tf: Timeframe, active: boolean): LayerStats | null {
-  const key = active ? `${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = active ? `${tf.from}|${tf.to}|${gen}` : "";
   const [out, setOut] = useState<LayerStats | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

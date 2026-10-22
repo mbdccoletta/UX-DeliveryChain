@@ -8,6 +8,7 @@
 // Memoised per timeframe: the overview is the landing page, and landing twice
 // should not scan twice.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qUxByApp, runDql, type Timeframe } from "../utils/dql";
 
 export interface UxRow {
@@ -45,7 +46,8 @@ const memo = new Map<string, Map<string, UxRow>>();
 
 /** Impact per application id, or null while loading / when the query failed. */
 export function useUxOverview(tf: Timeframe): Map<string, UxRow> | null {
-  const key = `${tf.from}|${tf.to}`;
+  const gen = useMemoGen();
+  const key = `${tf.from}|${tf.to}|${gen}`;
   const [map, setMap] = useState<Map<string, UxRow> | null>(memo.get(key) ?? null);
 
   useEffect(() => {

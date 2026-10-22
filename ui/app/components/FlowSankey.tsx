@@ -1589,6 +1589,7 @@ export function FlowSankey({
           its own, so the section still asks about the cohort on screen from
           down here. */}
       <Intelligence subject="the Journeys flow diagram"
+        scope={`${appId}|${tf?.from ?? ""}|${tf?.to ?? ""}|${picks.join(",")}`}
         starters={JOURNEY_STARTERS} facts={journeyFacts} />
 
       {/* One band: what you are asking, and the answer in numbers. */}
