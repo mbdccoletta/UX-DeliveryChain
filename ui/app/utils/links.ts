@@ -249,7 +249,13 @@ export const sessionsLink = (
         perspective: "general",
       },
     }),
-    { appId: SESSIONS_LIST.appId, intentId: SESSIONS_LIST.intentId,
+    /* AS A URL, NOT AS AN INTENT. The payload above is kept because it is the
+       correct description of the request, and because a reader of this file
+       should see what was asked for — but `href` is what the click follows.
+       Measured: the intent opened the explorer on its own default window with
+       no filter at all, for every hand-off this function builds. */
+    { href: sessionsExplorerHref(tf, filterChip("Frontends", appName)
+        + (segmentChip ? ` ${segmentChip}` : "")),
       app: "Users & Sessions", keyProperties: ["explorer.type"],
       proves: segmentChip
         ? "this segment's sessions, one row each"
@@ -1655,6 +1661,42 @@ export function rowDrilldown(
  * Three sibling apps, three filter grammars, no two alike. Each is pinned to
  * an observed url because deducing one from another has failed every time.
  */
+/**
+ * USERS & SESSIONS, AS A URL — because the intent did not carry the window or
+ * the filter.
+ *
+ * Every hand-off to the sessions explorer was built as an intent with
+ * `dt.timeframe` and `explorer.properties.filters` in its payload. Measured on
+ * a live estate: the app opened on its own default window, listing the whole
+ * environment. Both the Overview's "Analyze user sessions" and the geo drill's
+ * "analyze BR sessions with errors" landed unfiltered — and an unfiltered
+ * explorer reads as a working button, which is the worst way for a hand-off
+ * to fail.
+ *
+ * So this follows the Services explorer's precedent: a url pinned to the
+ * grammar the app itself publishes, which is already documented above
+ * filterChip —
+ *
+ *   /ui/apps/dynatrace.users.sessions/explorer/sessions/finished-sessions
+ *     ?tf=<ISO>;<ISO>&perspective=general
+ *     #filtering=Frontends = easytrade
+ *
+ * The chips come in pre-formed from SESSION_CHIP and chips(), exactly as the
+ * intent payload took them, so the quoting rules stay in one place.
+ */
+export function sessionsExplorerHref(tf: Timeframe, filters: string): string {
+  const q = new URLSearchParams({
+    tf: `${tfIso(tf.from)};${tfIso(tf.to)}`,
+    perspective: "general",
+  });
+  const path = `/ui/apps/${SESSIONS_LIST.appId}/explorer/sessions/finished-sessions?${q}`
+    + (filters ? `#filtering=${encodeURIComponent(filters)}` : "");
+  try {
+    const base = getEnvironmentUrl();
+    return base ? new URL(path, base).toString() : path;
+  } catch { return path; }
+}
+
 export function servicesExplorerHref(tf: Timeframe, serviceName: string): string {
   const q = new URLSearchParams({
     tf: `${tfIso(tf.from)};${tfIso(tf.to)}`,

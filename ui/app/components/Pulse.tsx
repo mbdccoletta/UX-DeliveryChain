@@ -272,6 +272,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     setGeoView(null);
   }, [appId, data.tf.from, data.tf.to]);
   useEffect(() => { setGeoViewSel(null); setRegionSel(null); }, [geoSel]);
+  /* AND THE SCREEN GOES WITH THE STATE. Opening a state replaces the list of
+   * screens underneath it, so a screen picked in the previous one is a
+   * selection in a list that is no longer on the page. */
+  useEffect(() => { setGeoViewSel(null); }, [regionSel]);
   /* The map draws into a CANVAS: ReactNode shapes do not paint and CSS cannot
    * animate there — measured, zero dots rendered. So the animated pins are an
    * HTML OVERLAY, projected with the same Web-Mercator maths the map uses and
@@ -630,6 +634,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
         services={scopeCount} svcNames={svcNames} domNames={domNames}
+        onOpenService={(n) => window.open(servicesExplorerHref(data.tf, n), "_blank", "noopener")}
         fc={heroFc} fcMetric={heroMetric} onOpen={() => onOpenChain()}
         /* Always open. Clicking the open box used to collapse it, which left
            the page with no chart at all and the default box looking broken.
@@ -1371,8 +1376,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   </div>
                 )}
                 {app && (() => {
+                  /* THE SAME LIST THE READER CLICKED. Since the drill began
+                     scoping its screens to the open STATE, the list on screen
+                     comes from regionDetail — and this lookup went on reading
+                     geoDetail, the COUNTRY's. So a screen with no errors in
+                     the chosen state but errors elsewhere in the country kept
+                     offering "inspect its errors", and changing locality
+                     could not take the offer away: the locality was never
+                     part of the question being asked. */
+                  const selList = regionSel ? regionDetail : geoDetail;
                   const selRow = geoViewSel
-                    ? geoDetail?.find((d) => d.view === geoViewSel) : undefined;
+                    ? selList?.find((d) => d.view === geoViewSel) : undefined;
                   const chasing = !!selRow && selRow.hit > 0;
                   const realScreen = !!geoViewSel && geoViewSel !== Q.NO_SCREEN;
                   return (<>
@@ -1412,7 +1426,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     <a className="geo__drill-go geo__drill-go--err"
                       href={errorsExplorerHref(data.tf, app.name, geoViewSel!)}
                       target="_blank" rel="noreferrer"
-                      title={`${fmtN(selRow!.hit)} ${geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all countries' hits on this view.`}>
+                      title={`${fmtN(selRow!.hit)} ${regionSel ? (regions?.find((r) => r.id === regionSel)?.name ?? geoSel) : geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all countries' hits on this view.`}>
                       inspect {geoViewSel} errors in Error Inspector →
                     </a>
                   )}
@@ -1471,6 +1485,8 @@ interface CardProps {
   /** Sessions hit by an error — keeps the verdict from rounding up to perfect. */
   hitSessions: number;
   services: number | null; svcNames: string[];
+  /** Opens one service's own page in the platform's Services app. */
+  onOpenService?: (name: string) => void;
   /** The domains this application contacts, busiest first, with their volume. */
   domNames: Array<{ short: string; full: string }>;
   fc: Forecast | null;
@@ -1878,9 +1894,19 @@ error series, read at the same width the window is drawn in.`}>
               l="calls failed" tone={p.reqFail > 0 ? "bad" : undefined} />
           </div>
           <div className="tk-note">{fmtMs(p.loadP50)} load <em>(p50)</em></div>
+          {/* HOSTS, AND LABELLED AS HOSTS. These read exactly like the
+              service names on the card beside this one, so the two cards
+              looked like they were saying the same thing twice. They are
+              the busiest HOSTS this application calls; the busiest
+              ENDPOINTS are a click away, in the drill. */}
           {p.domNames.slice(0, 2).map((n) => (
-            <div key={n.full} className="tk-note" title={n.full}>{n.short}</div>
+            <div key={n.full} className="tk-note" title={n.full}>
+              {n.short}<em className="tk-note__k"> host</em>
+            </div>
           ))}
+          {p.domNames.length > 0 && (
+            <div className="tk-note tk-note--go">open for its endpoints →</div>
+          )}
 
         </Module>
         <Module Icon={ServicesIcon} title="Called services"
@@ -1894,8 +1920,17 @@ error series, read at the same width the window is drawn in.`}>
             <Stat v={p.services === null ? "…" : String(p.services)}
               l={`service${(p.services ?? 0) === 1 ? "" : "s"}`} />
           </div>
+          {/* EACH NAME IS THE DOOR TO ITS OWN SERVICE. A service's overview
+              is a page the platform already owns and this app has no business
+              rebuilding — so the name opens it, filtered to that service, in
+              the Services app. The click is stopped from reaching the card,
+              whose own job is the projections panel below. */}
           {p.svcNames.slice(0, 2).map((n) => (
-            <div key={n} className="tk-note" title={p.svcNames.join("\n")}>{n}</div>
+            <button key={n} type="button" className="tk-note tk-note--link"
+              title={`Open ${n} in the Services app`}
+              onClick={(e) => { e.stopPropagation(); p.onOpenService?.(n); }}>
+              {n}<em className="tk-note__k"> service →</em>
+            </button>
           ))}
           {/* Not the browser's request series relabelled: this is
               dt.service.request.count summed over the services this
@@ -2187,9 +2222,19 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
               </span>
               <span className="svcf__v">
                 {!r.done ? <em className="dim">measuring…</em>
+                  /* "≈ 0 requests" beside a card counting 23.4k service calls
+                     was the app contradicting itself. The two read different
+                     sources — the card counts TRACES, this projects
+                     dt.service.request.count from the metric store — and for
+                     a service with no such metric published the analyzer
+                     forecasts zero and calls it VALID, correctly. Zero is
+                     coming and this is not measured here are different
+                     sentences, and only the second one is true. */
+                  : r.thr?.emptyInput
+                    ? <em className="dim">no request metric for this service</em>
                   : r.thr ? <>≈ {fmtK(Math.round(r.thr.total))} <em>requests</em></>
                   : <em className="dim">no sound forecast</em>}
-                {r.thr && <em className={rising ? "svcf__tr--up" : "dim"}>
+                {r.thr && !r.thr.emptyInput && <em className={rising ? "svcf__tr--up" : "dim"}>
                   {" "}{rising ? "↗" : "↘"}</em>}
               </span>
               {/* Where it is now, beside where it is heading. The panel used to

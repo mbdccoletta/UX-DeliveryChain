@@ -21,6 +21,15 @@ export interface Forecast {
   /** How many intervals ahead, and how long each is. */
   horizon: number;
   intervalMs: number;
+  /** TRUE when the series handed to the analyzer carried no measurement at
+   *  all — every point null or zero. A forecast of nothing is still a
+   *  forecast, and it comes back VALID: the analyzer is right that the next
+   *  points are zero. But "zero is coming" and "this metric is not published
+   *  for this entity" are different sentences, and only the second one is
+   *  true when a service shows thousands of calls in traces and an empty
+   *  series in the metric store. The caller decides what to say; it cannot
+   *  decide without being told. */
+  emptyInput: boolean;
 }
 
 /** Polls until the analysis completes, per the documented execution contract. */
@@ -74,12 +83,22 @@ export async function forecast(expression: string, horizon = 12): Promise<Foreca
     const upper = (rec["dt.davis.forecast:upper"] as number[]) ?? [];
     if (!point.length) return null;
 
+    /* the record echoes the series it was given, under the alias the
+       expression named; find it by shape rather than by guessing the name */
+    const inputs = Object.entries(rec)
+      .filter(([k, v]) => Array.isArray(v) && !k.startsWith("dt.davis.forecast:"))
+      .map(([, v]) => v as Array<number | null>);
+    const measured = inputs.find((a) => a.length >= point.length) ?? inputs[0] ?? [];
+    const emptyInput = measured.length > 0
+      && !measured.some((n) => typeof n === "number" && n !== 0);
+
     return {
       point, lower, upper,
       total: point.reduce((a, b) => a + b, 0),
       slope: point[point.length - 1] - point[0],
       horizon: point.length,
       intervalMs: Number(rec.interval ?? 0) / 1e6,
+      emptyInput,
     };
   } catch {
     // no scope, analyzer unavailable, or the query returned nothing usable
