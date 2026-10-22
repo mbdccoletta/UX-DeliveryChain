@@ -1303,6 +1303,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           ? `judged against ${rgName}'s own error rate, not the country's`
                           : "judged against this country's own error rate"}</em>
                       </span>
+                      {/* the columns, named — same grid as the rows */}
+                      <div className="geo__dr geo__dr--hd" aria-hidden="true">
+                        <span>screen</span><span>share</span>
+                        <span>sessions</span><span>met an error</span>
+                      </div>
                       {scoped.map((d) => {
                         const t = toneOf(d);
                         const noScreen = d.view === Q.NO_SCREEN;
@@ -2106,6 +2111,17 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
       )}
 
       <div className="svcf__rows">
+      {/* EVERY TABLE NAMES ITS COLUMNS. These rows carried five values and
+          not one label: a reader had to infer the schema from the data, and
+          the units differ per metric. The header rides the rows' own grid, so
+          the names sit over the numbers they belong to. */}
+      <div className="svcf__row svcf__hd" aria-hidden="true">
+        <span>{TITLE[metric].toLowerCase()}</span>
+        <span>share</span>
+        <span>{UNIT[metric]}</span>
+        <span>{metric === "errors" ? "reached a user" : "response time"}</span>
+        <span>{metric === "errors" ? "kind" : "failures"}</span>
+      </div>
         {(rows ?? []).map((r) => {
           /* ONE destination per row, chosen by what the row is evidence of.
            * Three separate cell targets meant the same line led to three
@@ -2316,6 +2332,13 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
       </div>
 
       <div className="svcf__rows">
+      <div className="svcf__row svcf__hd" aria-hidden="true">
+        <span>service</span>
+        <span>share</span>
+        <span>projected</span>
+        <span>measured now</span>
+        <span>failures</span>
+      </div>
         {sorted.map((r) => {
           const rising = !!r.thr && r.thr.slope > 0;
           const failRising = !!r.fails && r.fails.slope > 0;

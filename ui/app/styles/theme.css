@@ -2756,6 +2756,11 @@ a.svcf__bar:hover, a.svcf__bar:focus-visible {
    old per-cell highlight is gone: a row-wide hover promised one destination
    where there were three, which is exactly what it now delivers. */
 a.svcf__row { text-decoration: none; color: inherit; }
+/* the column names: the rows' own grid, so they cannot drift from the values */
+.svcf__hd { font: 700 9px var(--mono); letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--ink-3); padding-bottom: 5px;
+  border-bottom: 1px solid var(--border); }
+.svcf__hd > span:nth-child(n+3) { text-align: right; }
 
 /* What Davis detected, under the application's name in the core. Quiet when
    there is nothing — the line still prints, because an absent line reads as
@@ -2946,6 +2951,16 @@ div:has(> header):has(main) > div {
 .geo__drill-rows { display: flex; flex-direction: column; gap: 4px; }
 .geo__dr { display: grid; grid-template-columns: minmax(0, 18rem) 1fr auto minmax(5rem, auto);
   align-items: center; gap: 10px; }
+/* one header style for every table in the product */
+.bc__out-r--hd, .bc__seg-r--hd { font: 700 9px var(--mono); letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--ink-3); padding-bottom: 4px;
+  border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.bc__out-r--hd > span:nth-child(n+2),
+.bc__seg-r--hd > span:nth-child(n+2) { text-align: right; }
+.geo__dr--hd { font: 700 9px var(--mono); letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--ink-3); padding-bottom: 4px;
+  border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+.geo__dr--hd > span:nth-child(n+3) { text-align: right; }
 .geo__dr-v { font: 500 11px var(--mono); color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .geo__dr b.num { font: 700 11px var(--mono); font-variant-numeric: tabular-nums; }

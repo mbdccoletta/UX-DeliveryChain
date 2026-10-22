@@ -1375,6 +1375,10 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
         <section className="bc__front" style={{ ["--fh" as string]: "var(--t-violet, var(--accent))" }}>
           <h2 className="bc__ftitle">What stands out as slow</h2>
           <div className="bc__out">
+            {/* the columns, named: three bare values read as a mystery */}
+            <div className="bc__out-r bc__out-r--hd" aria-hidden="true">
+              <span>screen</span><span>p50</span><span>vs the app</span>
+            </div>
             {outliers.list.map((v) => (
               <div className="bc__out-r" key={v.view}>
                 <span className="bc__out-n">{v.view}</span>
@@ -1520,6 +1524,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               .map(([title, rows, tone]) => rows.length > 0 && (
                 <div className="bc__seg" key={title}>
                   <h3 className={`bc__seg-h bc__seg-h--${tone}`}>{title}</h3>
+                  <div className="bc__seg-r bc__seg-r--hd" aria-hidden="true">
+                    <span>segment</span><span>error rate</span><span>vs average</span><span />
+                  </div>
                   {rows.map((r) => (
                     <div className="bc__seg-r" key={`${r.d}${r.bucket}`}>
                       <span className="bc__seg-b">{r.bucket}<em>{r.d}</em></span>
