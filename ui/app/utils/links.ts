@@ -240,14 +240,23 @@ export const sessionsLink = (
   segmentLabel?: string,
 ): DeepLink =>
   link(segmentLabel ?? "Analyze user sessions",
-    /* FEWER ROWS THAN THE NUMBER, AND THAT IS CORRECT. This opens the
-       FINISHED sessions list, which is the only one of the app's views that
-       accepts a Frontends filter — and a session only finishes after its
-       inactivity timeout. So a 2-hour window whose card counts 148 opens on
-       27: the other 121 are still running. Measured on a live estate, and
-       reported as a contradiction, which it looked like because nothing said
-       the two were counting different things. The meta line says it now, so
-       the reader is told before the click rather than left to discover it. */
+    /* FEWER ROWS THAN THE NUMBER, AND THAT IS CORRECT — but not for the
+       reason first written here. The claim was that the finished-sessions
+       list is the only view accepting a Frontends filter; the reader's own
+       screenshot shows Recent accepting one, so that was wrong and is struck.
+       Measured on a live estate, both views filtered to one frontend over the
+       same two hours: this app counted 250 sessions, Recent listed 92.
+       Finished-versus-running does not explain a gap that size. Two things
+       do, and both are differences in WHAT is counted:
+         · Users & Sessions lists REAL USERS; this card counts everything,
+           robots and synthetic monitors included, because the error-free
+           figure beside it has to share its base
+         · it lists sessions that STARTED in the window; this counts every
+           session that was ACTIVE in it, so a session that began earlier and
+           is still running is here and not there
+       The card's tooltip now states both, and carries the real-user count
+       this app already measures, so the two numbers can be compared instead
+       of merely disagreeing. */
     `Users & Sessions · the finished ones among ${fmtN(sessions)} · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
