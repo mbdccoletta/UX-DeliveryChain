@@ -22,6 +22,25 @@ const TTL: Record<string, string> = {
   "30m": "now+1m", "2h": "now+2m", "24h": "now+5m", "7d": "now+10m",
 };
 
+/**
+ * THE TTL FOLLOWS THE WINDOW'S LENGTH, and it was being asked the wrong
+ * question. Callers pass a composite cache identity — `now()-24h|now()` — and
+ * this map is indexed by duration labels, so every single write missed and
+ * took the two-minute fallback. A 30-minute window was then cached longer
+ * than intended and a 24-hour one expired in two minutes, paying for a fresh
+ * scan of the most expensive window this app offers, over and over.
+ *
+ * Minutes are the honest input: they come from the Timeframe itself and
+ * cannot drift from a label.
+ */
+function ttlFor(minutes?: number): string {
+  if (!minutes || !Number.isFinite(minutes)) return "now+2m";
+  if (minutes <= 30) return TTL["30m"];
+  if (minutes <= 120) return TTL["2h"];
+  if (minutes <= 1440) return TTL["24h"];
+  return TTL["7d"];
+}
+
 export interface Cached<T> {
   value: T;
   /** When it was written, so the screen can show how old it is. */
@@ -44,13 +63,13 @@ export async function read<T>(tf: string): Promise<Cached<T> | null> {
 }
 
 /** Stores a payload. Failure is silent: a cache miss is never worth an error. */
-export async function write<T>(tf: string, value: T): Promise<void> {
+export async function write<T>(tf: string, value: T, minutes?: number): Promise<void> {
   try {
     await stateClient.setUserAppState({
       key: keyFor(tf),
       body: {
         value: JSON.stringify({ version: VERSION, at: Date.now(), value }),
-        validUntilTime: TTL[tf] ?? "now+2m",
+        validUntilTime: ttlFor(minutes),
       },
     });
   } catch {

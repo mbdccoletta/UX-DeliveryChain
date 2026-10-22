@@ -58,7 +58,25 @@ async function poll(requestToken: string) {
  * Returns null whenever the answer would not be trustworthy — analyzer refused,
  * quality not VALID, or no points came back. Callers show nothing in that case.
  */
-export async function forecast(expression: string, horizon = 12): Promise<Forecast | null> {
+/* ONE ANALYSIS PER QUESTION, EVEN WHILE IT IS STILL RUNNING. The completed
+ * results are memoised by the callers, but two subscribers that ask the same
+ * question before either answer lands both miss the cache and both pay for
+ * the same Grail scan. The Overview does exactly that on first render: the
+ * card's projection and the sessions chart ask for the sessions forecast at
+ * the same moment. A pending promise per expression lets the second one wait
+ * on the first instead of buying it twice. */
+const inFlight = new Map<string, Promise<Forecast | null>>();
+
+export function forecast(expression: string, horizon = 12): Promise<Forecast | null> {
+  const key = `${horizon}|${expression}`;
+  const running = inFlight.get(key);
+  if (running) return running;
+  const p = runForecast(expression, horizon).finally(() => { inFlight.delete(key); });
+  inFlight.set(key, p);
+  return p;
+}
+
+async function runForecast(expression: string, horizon = 12): Promise<Forecast | null> {
   try {
     const res = await analyzersClient.executeAnalyzer({
       analyzerName: ANALYZER,
@@ -125,6 +143,31 @@ export async function forecast(expression: string, horizon = 12): Promise<Foreca
  */
 export const FC_HIST_CAP_MIN = 1440;
 
+/**
+ * THE HISTORY ENDS WHERE THE WINDOW ENDS.
+ *
+ * Every forecast here read `from: now()-<history>` and gave the analyzer no
+ * end bound, so on a historical selection it trained on the traffic of RIGHT
+ * NOW and the result was then presented as that selection's next window — the
+ * chain used it in that window's verdict, the Overview appended it to that
+ * window's chart, and Business Control called it "next". A projection of the
+ * wrong hours, labelled with the right ones.
+ *
+ * A live window is unchanged: the history still runs back from now(). A
+ * shifted one gets absolute bounds computed from tf.to, which is the form
+ * tfFrom already emits for everything else on such a window.
+ */
+export function histWindow(
+  tf: { to: string }, histMin: number,
+): { from: string; to: string } {
+  const live = /^now\(?\)?$/i.test(tf.to.trim());
+  if (live) return { from: `now()-${histMin}m`, to: "now()" };
+  const end = new Date(tf.to.trim().replace(/^"(.*)"$/, "$1"));
+  if (!Number.isFinite(end.getTime())) return { from: `now()-${histMin}m`, to: "now()" };
+  const start = new Date(end.getTime() - histMin * 6e4);
+  return { from: `"${start.toISOString()}"`, to: `"${end.toISOString()}"` };
+}
+
 export interface ForecastPlan {
   /** History to read, as a DQL duration. */
   hist: string;
@@ -136,6 +179,8 @@ export interface ForecastPlan {
   ahead: string;
   /** True when the window wanted more history than the ceiling allows. */
   capped: boolean;
+  /** The history, in minutes — for callers that need to bound it explicitly. */
+  histMin: number;
 }
 
 export function forecastPlan(windowMinutes: number): ForecastPlan {
@@ -169,6 +214,7 @@ export function forecastPlan(windowMinutes: number): ForecastPlan {
     horizon,
     ahead: durStr(binMin * horizon),
     capped: windowMinutes * 3 > FC_HIST_CAP_MIN,
+    histMin,
   };
 }
 
