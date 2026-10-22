@@ -97,7 +97,7 @@ function useCountUp(target: number, ms = 1100): number {
  *  the one place on this page where SPACE is the information. */
 const MAP_H = 520;
 /** Stamped from app.config.json at build time — see the summary line. */
-export const APP_VERSION = "0.9.23";
+export const APP_VERSION = "0.9.24";
 
 export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;
@@ -1797,18 +1797,10 @@ error series, read at the same width the window is drawn in.`}>
           stating the rule is a principle here — it becomes the key you can
           open, closed by default. */}
       <details className="cc-motion">
-        <summary>
-          what the motion and the colours mean
-          {/* THE BUILD SAYS WHICH BUILD IT IS.
-              Several rounds of this app's debugging were spent on code that
-              was not the code on the reader's screen — once because a deploy
-              had gone to a different environment, once because a shell served
-              a cached bundle. A defect report is worth what its version is
-              worth, and until now the screen carried no version at all. It
-              is baked in at build time from the manifest, so it cannot drift
-              from what was actually deployed. */}
-          <em className="cc-motion__v">v{APP_VERSION}</em>
-        </summary>
+        {/* The build stamp lived here for one version and moved to the
+            header, where it is on screen at every scroll position and on
+            every tab. One stamp is enough; two is clutter on a key line. */}
+        <summary>what the motion and the colours mean</summary>
         <span>
           every motion is a measurement · ring and breathing pace = apdex ·
           wave = error rate · icon knock = a failing signal on that box ·
