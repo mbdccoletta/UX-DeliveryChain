@@ -595,7 +595,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
               {fmtN(anomalies)} anomal{anomalies === 1 ? "y" : "ies"}
             </button>
           )}
-          <button className="tk-btn tk-btn--p" onClick={onAnalyze}>Analyze user sessions</button>
+          <button className="tk-btn" onClick={onAnalyze}>Analyze user sessions</button>
           <button className="tk-btn" onClick={() => onOpenChain()}>Open delivery chain</button>
         </div>
       </div>
