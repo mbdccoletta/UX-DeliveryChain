@@ -1807,6 +1807,22 @@ function CleanCard(p: CardProps) {
               title={p.apdex === null ? p.apdexNote
                 : `${apdexBand(p.apdex)} · ${APDEX_LABEL}`} />
           </div>
+          {/* THE OTHER BASE, ON THE SCREEN. A reader comparing this card with
+              Users & Sessions found 427 here and 193 there, twice, and had to
+              ask why — the answer lived in a tooltip, which is where answers
+              go to be missed. The headline counts EVERY session, because the
+              error-free percentage beside it has to share a base; this line
+              carries the base the explorer uses. Two numbers a reader can
+              compare are worth more than one they have to defend. */}
+          {p.realSessions != null && p.realSessions !== p.sessions && (
+            <div className="tk-note"
+              title={`Users & Sessions lists real users and sessions that `
+                + `STARTED in this window; the headline counts every session `
+                + `active in it, robots and synthetic monitors included.`}>
+              {fmtK(p.realSessions)} real users
+              <em className="tk-note__k"> of {fmtK(p.sessions)}</em>
+            </div>
+          )}
 
           {/* THE SCALE IS NOT A HEADLINE. This footnote repeated the band word
               already printed as the biggest thing on the screen, added the
