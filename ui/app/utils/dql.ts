@@ -2265,6 +2265,34 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 
 
 /**
+ * THE SAME LIST, ONE LEVEL DOWN. Opening a state used to change the cities
+ * and nothing else: the screens underneath went on describing the whole
+ * country, so clicking an amber state showed a list in which that state's
+ * traffic was a rounding error. This is qGeoCountry with the region added to
+ * the filter — NOT to the grain, because a session that moves between states
+ * is counted in each and summing those rows back up would overstate the
+ * country. One more scan, and only when a reader opens a state, which is the
+ * same bargain the cities leg already makes.
+ */
+export const qGeoRegion = (tf: Timeframe, rumAppId: string, iso: string,
+  region: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter geo.country.iso_code == "${iso.replace(/["\\]/g, "")}"
+| filter geo.region.iso_code == "${region.replace(/["\\]/g, "")}"
+| fieldsAdd vn = ${VIEW_NAME}
+| filter isNotNull(vn) or characteristics.classifier == "error"
+| fieldsAdd vn = if(isNull(vn), "${NO_SCREEN}", else: vn)
+| summarize
+    sessions = countDistinct(dt.rum.session.id),
+    hit = countDistinct(if(characteristics.classifier == "error",
+      dt.rum.session.id, else: null)),
+  by: { view = vn }
+| sort sessions desc
+| limit 8`;
+
+
+/**
  * WHO a region's sessions are, against everyone else — the geo drill's
  * characteristics leg. Per-session rows (one scan), pivoted in the client:
  * the flag says in/out of the country, `hit` says whether the session met an
