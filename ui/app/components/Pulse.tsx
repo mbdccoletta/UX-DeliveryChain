@@ -612,6 +612,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 
       <CleanCard
         sessions={impacted?.sessions ?? app.sessions}
+        realSessions={impacted?.realSessions ?? null}
         clean={clean} tone={tone} name={app.name} isMobile={!!isMobile}
         series={pulse?.series ?? []}
         actionsPerMin={perMin(pulse?.actions ?? 0)}
@@ -1490,6 +1491,11 @@ interface CardProps {
   /** Sessions hit by an error — keeps the verdict from rounding up to perfect. */
   hitSessions: number;
   services: number | null; svcNames: string[];
+  /** Of those sessions, the ones belonging to real people — null until the
+   *  per-session leg has answered. The headline counts EVERYTHING, which is
+   *  what makes it comparable to error-free beside it; this is what makes it
+   *  comparable to Users & Sessions, which lists real users. */
+  realSessions?: number | null;
   /** Opens one service's own page in the platform's Services app. */
   onOpenService?: (name: string) => void;
   /** The domains this application contacts, busiest first, with their volume. */
@@ -1728,7 +1734,17 @@ function CleanCard(p: CardProps) {
             <em className="tk-block__sparkv">{p.actionsPerMin}/min<br />user actions</em></>}>
           <div className="tk-row2">
             <Stat v={fmtK(p.sessions)} l="sessions"
-              title="All sessions in the window — robots and synthetic included; the error-free figure beside it uses the same base. Analyze user sessions opens the FINISHED ones among these: a session only finishes after its inactivity timeout, so that list is shorter, and the difference is the sessions still running." />
+              title={`All sessions with any event in the window — robots and `
+                + `synthetic included, because the error-free figure beside it `
+                + `uses the same base.`
+                + (p.realSessions != null
+                  ? ` ${fmtN(p.realSessions)} of them belong to real people.` : "")
+                + ` Users & Sessions will show fewer for two reasons, and both `
+                + `are differences in WHAT is counted rather than in the `
+                + `counting: it lists real users, and it lists sessions that `
+                + `STARTED in the window, while this counts every session that `
+                + `was active in it — a session that began earlier and is still `
+                + `running is here and not there.`} />
             <Stat v={pct} l="error-free" tone={p.tone === "info" ? undefined : p.tone} />
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
