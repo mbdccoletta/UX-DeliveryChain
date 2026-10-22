@@ -272,6 +272,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     setGeoView(null);
   }, [appId, data.tf.from, data.tf.to]);
   useEffect(() => { setGeoViewSel(null); setRegionSel(null); }, [geoSel]);
+  /* AND THE SCREEN GOES WITH THE STATE. Opening a state replaces the list of
+   * screens underneath it, so a screen picked in the previous one is a
+   * selection in a list that is no longer on the page. */
+  useEffect(() => { setGeoViewSel(null); }, [regionSel]);
   /* The map draws into a CANVAS: ReactNode shapes do not paint and CSS cannot
    * animate there — measured, zero dots rendered. So the animated pins are an
    * HTML OVERLAY, projected with the same Web-Mercator maths the map uses and
@@ -1372,8 +1376,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   </div>
                 )}
                 {app && (() => {
+                  /* THE SAME LIST THE READER CLICKED. Since the drill began
+                     scoping its screens to the open STATE, the list on screen
+                     comes from regionDetail — and this lookup went on reading
+                     geoDetail, the COUNTRY's. So a screen with no errors in
+                     the chosen state but errors elsewhere in the country kept
+                     offering "inspect its errors", and changing locality
+                     could not take the offer away: the locality was never
+                     part of the question being asked. */
+                  const selList = regionSel ? regionDetail : geoDetail;
                   const selRow = geoViewSel
-                    ? geoDetail?.find((d) => d.view === geoViewSel) : undefined;
+                    ? selList?.find((d) => d.view === geoViewSel) : undefined;
                   const chasing = !!selRow && selRow.hit > 0;
                   const realScreen = !!geoViewSel && geoViewSel !== Q.NO_SCREEN;
                   return (<>
@@ -1413,7 +1426,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     <a className="geo__drill-go geo__drill-go--err"
                       href={errorsExplorerHref(data.tf, app.name, geoViewSel!)}
                       target="_blank" rel="noreferrer"
-                      title={`${fmtN(selRow!.hit)} ${geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all countries' hits on this view.`}>
+                      title={`${fmtN(selRow!.hit)} ${regionSel ? (regions?.find((r) => r.id === regionSel)?.name ?? geoSel) : geoSel} sessions met an error on ${geoViewSel} — the Error Inspector filters by screen (the Sessions list cannot), and every error there opens its session. The screen filter is exact; the country is not carried, so expect all countries' hits on this view.`}>
                       inspect {geoViewSel} errors in Error Inspector →
                     </a>
                   )}
