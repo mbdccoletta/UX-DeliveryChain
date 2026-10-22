@@ -30,11 +30,18 @@ const SLOW_INP_SHARE = 0.2;
 export function edgeHealth(t: TransitionRow): EdgeHealth {
   const lost = t.abandoned + t.timeouts;
   if (lost > 0) {
-    const what = t.abandoned >= t.timeouts ? "closed the tab mid-action" : "the action timed out";
+    /* BOTH REASONS, OR NEITHER NAMED. This used to pick whichever count was
+       larger and attribute the WHOLE total to it, so three tab closures and
+       two timeouts were reported as "5 closed the tab mid-action" — two of
+       which did no such thing. Each cause now carries its own measured
+       number, and when only one of them happened only that one is named. */
+    const parts: string[] = [];
+    if (t.abandoned > 0) parts.push(`${fmtN(t.abandoned)} closed the tab mid-action`);
+    if (t.timeouts > 0) parts.push(`${fmtN(t.timeouts)} timed out`);
     return {
       health: "losing",
-      // "8 of 3" was possible: lost counts ACTIONS, sessions counts SESSIONS
-      note: `${fmtN(lost)} ${what} · ${fmtN(t.sessions)} sessions on this move`,
+      // "8 of 3" was possible: these count ACTIONS, sessions counts SESSIONS
+      note: `${parts.join(" · ")} · ${fmtN(t.sessions)} sessions on this move`,
     };
   }
   const inpShare = t.actions ? t.slowInp / t.actions : 0;
