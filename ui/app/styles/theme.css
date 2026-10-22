@@ -292,7 +292,13 @@ svg { shape-rendering: geometricPrecision; }
 /* the row's SECOND door: the lens the row did not lead with, offered rather
    than chosen. Quiet until the row is under the cursor, because it is the
    alternative — the primary is the whole row. */
-.svcf__alt { margin-left: 10px; font: 600 10px var(--mono); color: var(--ink-3);
+/* the primary target, covering the row without containing anything: the
+   secondary link then sits BESIDE it in the DOM instead of inside it, which
+   is what stops an anchor nesting in an anchor. */
+.svcf__row { position: relative; }
+.svcf__hit { position: absolute; inset: 0; z-index: 0; border-radius: inherit; }
+.svcf__row > :not(.svcf__hit) { position: relative; z-index: 1; }
+.svcf__alt { pointer-events: auto; margin-left: 10px; font: 600 10px var(--mono); color: var(--ink-3);
   text-decoration: none; white-space: nowrap; opacity: 0; transition: opacity 120ms; }
 .svcf__row:hover .svcf__alt, .svcf__row:focus-within .svcf__alt { opacity: 1; }
 .svcf__alt:hover, .svcf__alt:focus-visible { color: var(--ink-hi); outline: none; }

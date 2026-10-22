@@ -121,6 +121,16 @@ export function binFor(minutes: number): string {
 export async function runDql<T = Record<string, unknown>>(
   query: string,
   maxResultRecords = 200,
+  /**
+   * Called when THIS query came back from a partial scan.
+   *
+   * cost.ts keeps a page-wide counter for the banner, which is right for a
+   * banner and wrong for anything that needs to know about its OWN data: it
+   * is sticky, it includes every unrelated drill-down, and a cached payload
+   * stamped from it inherits somebody else's truncation. A caller that stores
+   * or caches a result needs the fact for that result, so it can ask for it.
+   */
+  onTruncated?: () => void,
 ): Promise<T[]> {
   noteScanStart();
   let res = await queryExecutionClient.queryExecute({
@@ -140,7 +150,9 @@ export async function runDql<T = Record<string, unknown>>(
       notifications?: Array<{ message?: string; severity?: string }> } } })
     ?.metadata?.grail;
   const notes = grail?.notifications ?? [];
-  noteScan(Number(grail?.scannedBytes ?? 0), notes.some((n) => isScanLimit(n?.message)));
+  const cut = notes.some((n) => isScanLimit(n?.message));
+  noteScan(Number(grail?.scannedBytes ?? 0), cut);
+  if (cut) onTruncated?.();
   const rows = (res.result?.records ?? []) as T[];
   /* A WARNING PLUS AN EMPTY ANSWER IS NOT AN ANSWER.
    *
@@ -1724,6 +1736,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
    a path, grouped under their host rather than dropped. */
 | fieldsAdd ep = concat(url.domain, coalesce(url.path, ""))
 | summarize vol = countIf(characteristics.classifier == "request"),
+    /* THE HOST SURVIVES THE REGROUPING. Pulse hands each row's name to
+       useDomainTraces, which matches it against a span's server address — so
+       the moment the name became an endpoint, every row stopped matching and
+       the trace hand-off went quiet. The host is still one value per row
+       (the endpoint contains it), so it rides along as its own field. */
+    domain = takeAny(url.domain),
     failures = countIf(characteristics.classifier == "error"),
     sessions = countDistinct(dt.rum.session.id),
     p50 = percentile(if(characteristics.classifier == "request", toLong(duration)), 50),

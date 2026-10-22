@@ -18,6 +18,9 @@ export type DetailMetric = Extract<Metric, "sessions" | "errors" | "requests">;
 
 export interface DetailRow {
   name: string;
+  /** Requests only: the HOST this endpoint belongs to. The name is the whole
+   *  endpoint now, and the trace lookup keys on the host. */
+  domain?: string;
   /** What sizes the bar: actions, errors or requests, depending on the card. */
   vol: number;
   sessions: number;
@@ -77,6 +80,7 @@ export function useCardDetail(
         const raw = await runDql<Record<string, unknown>>(QUERY[metric](tf, appId), 20);
         const out: DetailRow[] = raw.map((r) => ({
           name: String(r.name ?? "—"),
+          domain: r.domain == null ? undefined : String(r.domain),
           vol: Number(r.vol) || 0,
           sessions: Number(r.sessions) || 0,
           p50: r.p50 == null ? undefined : Number(r.p50),

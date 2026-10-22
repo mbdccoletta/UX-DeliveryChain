@@ -1949,6 +1949,17 @@ error series, read at the same width the window is drawn in.`}>
           {p.svcNames.slice(0, 2).map((n) => (
             <button key={n} type="button" className="tk-note tk-note--link"
               title={`Open ${n} in the Services app`}
+              /* THE CARD EATS ENTER AND SPACE. Module is itself a button: it
+                 handles bubbled keydowns with preventDefault and opens its
+                 own panel, so a keyboard user focusing this link could never
+                 fire it — the card opened instead, every time. The key stops
+                 here, and the card keeps the keys it is not given. */
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.stopPropagation();
+                e.preventDefault();
+                p.onOpenService?.(n);
+              }}
               onClick={(e) => { e.stopPropagation(); p.onOpenService?.(n); }}>
               {n}<em className="tk-note__k"> service →</em>
             </button>
@@ -2085,7 +2096,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
             href: errorsExplorerHref(tf, appName, r.name) };
           const perf = rowDrilldown(
             KIND[metric],
-            { ...r, hasSpans: !!tracedDomains?.has(r.name) },
+            { ...r, hasSpans: !!tracedDomains?.has(r.domain ?? r.name) },
             tf, appEntity, metric === "errors" ? "fail" : "time", appName);
           const leadsWithErrors = metric === "sessions" && errRate >= HIT_WARN;
           const dd = leadsWithErrors ? errs : perf;
@@ -2123,12 +2134,21 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
               }
             },
           } : {};
-          return React.createElement(dd ? "a" : "div", {
+          /* NOT AN ANCHOR AROUND AN ANCHOR. The row was an <a>, and 0.9.39
+             put the second lens inside it — interactive content nested in a
+             link, which is invalid and which browsers resolve by ignoring one
+             of them. The row is a container now: the primary is a link that
+             covers it, the secondary sits beside that link rather than within
+             it, and both are reachable by keyboard in the order they read. */
+          return React.createElement("div", {
             key: r.name,
             className: `svcf__row${r.failures || r.real ? " svcf__row--warn" : ""}`
               + (dd ? " svcf__row--go" : ""),
-            ...rowProps,
           }, <>
+            {dd && (
+              <a className="svcf__hit" aria-label={`${dd.label} — ${dd.proves}`}
+                {...rowProps} />
+            )}
             {/* The tag lives INSIDE the name cell. As a sibling it became a
                 sixth child of a five-column positional grid — every cell
                 slid one column over, the name landed centred in the bar's
