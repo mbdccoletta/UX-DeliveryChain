@@ -8,8 +8,7 @@
     "build": "dt-app build",
     "deploy": "dt-app deploy",
     "uninstall": "dt-app uninstall",
-    "info": "dt-app info",
-    "prebuild": "node scripts/stamp-version.mjs"
+    "info": "dt-app info"
   },
   "engines": {
     "node": ">=16.13.0"
