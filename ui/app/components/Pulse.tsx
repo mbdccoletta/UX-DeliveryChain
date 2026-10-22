@@ -95,6 +95,8 @@ function useCountUp(target: number, ms = 1100): number {
 /** The map's height. 380px left it a strip under a tall legend; the tile is
  *  the one place on this page where SPACE is the information. */
 const MAP_H = 520;
+/** Stamped from app.config.json at build time — see the summary line. */
+export const APP_VERSION = "0.9.21";
 
 export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;
@@ -1777,7 +1779,18 @@ error series, read at the same width the window is drawn in.`}>
           stating the rule is a principle here — it becomes the key you can
           open, closed by default. */}
       <details className="cc-motion">
-        <summary>what the motion and the colours mean</summary>
+        <summary>
+          what the motion and the colours mean
+          {/* THE BUILD SAYS WHICH BUILD IT IS.
+              Several rounds of this app's debugging were spent on code that
+              was not the code on the reader's screen — once because a deploy
+              had gone to a different environment, once because a shell served
+              a cached bundle. A defect report is worth what its version is
+              worth, and until now the screen carried no version at all. It
+              is baked in at build time from the manifest, so it cannot drift
+              from what was actually deployed. */}
+          <em className="cc-motion__v">v{APP_VERSION}</em>
+        </summary>
         <span>
           every motion is a measurement · ring and breathing pace = apdex ·
           wave = error rate · icon knock = a failing signal on that box ·
