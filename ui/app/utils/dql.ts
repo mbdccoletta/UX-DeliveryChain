@@ -1,7 +1,7 @@
 // Data layer — every query here was validated against a live estate
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
-import { FC_HIST_CAP_MIN } from "./forecast";
+import { FC_HIST_CAP_MIN, histWindow } from "./forecast";
 import { isScanLimit, noteScan, noteScanStart } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
@@ -728,12 +728,15 @@ export const qBizSeries = (
    * app respects, and the one bound that keeps a wide window from billing
    * like a wide window. FC_HIST_CAP_MIN is 24 hours. */
   const histMin = Math.min(span * 3, FC_HIST_CAP_MIN);
-  const history = `now()-${histMin}m`;
+  /* and it ends where the SELECTED window ends — on a historical selection
+     this trained on the traffic of right now and the board then called the
+     result "next". See histWindow. */
+  const win = histWindow(tf, histMin);
   const interval = Math.max(5, Math.round(histMin / 24));
   const appFilter = rumAppId
     ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
   const agg = metric === "sessions" ? "sessions = count()" : "conversions = sum(reached)";
-  return `fetch user.events, from: ${history}${appFilter}
+  return `fetch user.events, from: ${win.from}, to: ${win.to}${appFilter}
 | fieldsAdd _vn = lower(coalesce(view.name, view.detected_name, ""))
 | fieldsAdd _done = if(${rumAppId ? outcomeDqlForApp("_vn", rumAppId, defs) : outcomeDqlByApp("_vn", "dt.rum.application.id", defs)}, 1, else: 0)
 | summarize reached = max(_done), t = takeMin(start_time), by: { sid = dt.rum.session.id }
