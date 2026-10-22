@@ -73,8 +73,9 @@ export function useRegions(tf: Timeframe, appId?: string | null,
 /** The cities of one state. */
 export function useCities(tf: Timeframe, appId?: string | null,
   iso?: string | null, region?: string | null): PlaceRow[] | null {
+  const gen = useMemoGen();
   const key = appId && iso && region
-    ? `c|${tf.from}|${tf.to}|${appId}|${iso}|${region}` : "";
+    ? `c|${tf.from}|${tf.to}|${appId}|${iso}|${region}|${gen}` : "";
   return usePlaces(key, async () => {
     const rows = await runDql<Record<string, unknown>>(
       qGeoCities(tf, appId as string, iso as string, region as string), 20);
