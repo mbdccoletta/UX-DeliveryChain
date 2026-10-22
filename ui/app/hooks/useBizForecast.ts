@@ -41,7 +41,15 @@ async function forecastOne(
     }
     const out = ((res.result as Record<string, unknown> | undefined)
       ?.output as Array<Record<string, unknown>> | undefined)?.[0];
+    /* OK IS NOT VALID. analysisStatus says the analyzer ran; it says nothing
+       about whether the projection is sound. Every other forecast in this
+       app is gated on forecastQualityAssessment === "VALID" — see
+       utils/forecast.ts — and this one read the field, stored it, and showed
+       the numbers regardless. An unreliable projection in front of a
+       business owner is worse than none, which is the rule this path was
+       quietly exempt from. */
     if (!out || out.analysisStatus !== "OK") return null;
+    if (out.forecastQualityAssessment !== "VALID") return null;
     const rec = (out.timeSeriesDataWithPredictions as
       { records?: Array<Record<string, unknown>> })?.records?.[0];
     if (!rec) return null;
