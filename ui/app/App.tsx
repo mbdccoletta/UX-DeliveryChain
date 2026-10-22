@@ -162,7 +162,7 @@ export function App() {
      changes what is scanned. */
   const d = useChainData(tf, state.session, state.app);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
-  const uxMap = useUxOverview(tf);
+  const uxMap = useUxOverview(tf, state.app);
   /* Users & Sessions filters by frontend.name, not the inventory name —
    * see useFrontendNames for the measured mismatch. */
   const feNames = useFrontendNames();
