@@ -1733,7 +1733,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
    panel. The path is what distinguishes one endpoint from another; the
    domain stays in front of it because the same path on two hosts is two
    endpoints. coalesce keeps the fetch-error rows, which do not always carry
-   a path, grouped under their host rather than dropped. */
+   a path, grouped under their host rather than dropped — and the ranking
+   below counts requests AND failures, because that host-only bucket can
+   hold failures with no requests of its own, and ranking it by request
+   volume alone sorted it off the end of the list. The panel then showed
+   eight rows of "no failures" while the card above it counted failed
+   calls. */
 | fieldsAdd ep = concat(url.domain, coalesce(url.path, ""))
 | summarize vol = countIf(characteristics.classifier == "request"),
     /* THE HOST SURVIVES THE REGROUPING. Pulse hands each row's name to
@@ -1749,7 +1754,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     p95 = percentile(if(characteristics.classifier == "request", toLong(duration)), 95),
   by: { name = ep }
 | filter isNotNull(name) and name != ""
-| sort vol desc | limit 8`;
+| fieldsAdd weight = vol + failures
+| sort weight desc | limit 8`;
 
 /**
  * Response time and failures for a set of services, in one metric-store read.
