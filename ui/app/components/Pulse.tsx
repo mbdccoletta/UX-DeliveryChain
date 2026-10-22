@@ -27,7 +27,8 @@ import { useGeo } from "../hooks/useGeo";
 import { useCities, useRegions } from "../hooks/useGeoDetail";
 import { Intelligence } from "./Intelligence";
 import { OVERVIEW_STARTERS } from "../utils/starters";
-import { ChoroplethLayer, DotLayer, MapView } from "@dynatrace/strato-geo";
+import { ChoroplethLayer, DotLayer, MapView,
+  type MapViewRef } from "@dynatrace/strato-geo";
 import { CENTROID, REGION_CENTROID } from "../utils/geoCentroids";
 import { usePulse } from "../hooks/usePulse";
 import { useAppScope } from "../hooks/useAppScope";
@@ -96,7 +97,7 @@ function useCountUp(target: number, ms = 1100): number {
  *  the one place on this page where SPACE is the information. */
 const MAP_H = 520;
 /** Stamped from app.config.json at build time — see the summary line. */
-export const APP_VERSION = "0.9.21";
+export const APP_VERSION = "0.9.22";
 
 export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;
@@ -185,6 +186,37 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * application never yanks the view back, and cleared when the application
    * or the timeframe changes, because a frame describes an estate. */
   const geoFrame = useRef<{ latitude: number; longitude: number; zoom: number } | null>(null);
+  /* MAKING THE MAP SPEAK.
+   * Three builds assumed MapView would adopt a view we handed it — as
+   * initialViewState, then as a keyed remount, then as controlled
+   * latitude/longitude/zoom. It adopted none of them, and it reported
+   * nothing, so the overlay projected against a frame the map had never
+   * taken and the heaviest country sat in the Atlantic until the reader
+   * zoomed and the map finally emitted a real view.
+   * The one thing it does do is zoomToFit(), from its own ref: it frames the
+   * layers' data and, in doing so, emits. So we stop telling the map where to
+   * be and ask it where it IS. Nothing is drawn over the map until it has
+   * answered — a mark we cannot place correctly is worse than no mark.
+   * Two calls because the first can land before the style is ready, and a
+   * zoom in/out round trip as the last resort, which has to move the view
+   * twice and therefore has to report. */
+  const mapRef = useRef<MapViewRef>(null);
+  const reported = useRef(false);
+  useEffect(() => {
+    if (!geo || geo.length === 0) return;
+    reported.current = false;
+    const fit = () => { try { mapRef.current?.zoomToFit(); } catch { /* not mounted yet */ } };
+    const t1 = setTimeout(fit, 80);
+    const t2 = setTimeout(fit, 600);
+    const t3 = setTimeout(() => {
+      if (reported.current) return;
+      try {
+        mapRef.current?.zoomIn();
+        setTimeout(() => { try { mapRef.current?.zoomOut(); } catch { /* gone */ } }, 140);
+      } catch { /* gone */ }
+    }, 1100);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [geo, appId, data.tf.from, data.tf.to]);
   /* CLICKING ANYTHING IN THIS TILE PUTS ITS ANSWER ON THE SCREEN.
    * Everything a click opens — a country's screens, a state's cities —
    * renders in the drill panel UNDER the map, which on a wide screen is
@@ -683,21 +715,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           geoFrame.current = { latitude: cLat, longitude: cLng, zoom };
         }
         const frame = geoFrame.current ?? { latitude: cLat, longitude: cLng, zoom };
-        /* THE ONE VIEW BOTH SIDES READ. The map is CONTROLLED, which is the
-           only arrangement in which it and the overlay cannot disagree: what
-           we pass is what the map shows, and the overlay projects against
-           that same object.
-           Uncontrolled was tried twice and failed twice, and the reader named
-           the reason without knowing it: "when I zoom, the location corrects
-           itself". MapView neither applied the initialViewState it was given
-           NOR reported a view until something was interacted with — so the
-           map sat on its own world view while the overlay drew against the
-           frame we had asked for, and the heaviest country landed in the
-           Atlantic at the centre of a view the map was never in. The first
-           zoom emitted a real view, the overlay adopted it, and everything
-           snapped into place. There is nothing to wait for when the view is
-           ours to begin with. */
-        const view = geoView ?? frame;
+        /* `frame` is a HINT now, not a claim — it is handed to the map as
+           initialViewState and nothing is projected against it. What the
+           overlay projects against is geoView, which only ever holds a view
+           the MAP reported. See the note at mapRef for why. */
         const COL = geoCol();
         /* dots and bars are MARKS, so they take the saturated half of the
            family — the text half resolves to #855400 in light, which is the
@@ -754,7 +775,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   Nothing in this tile is visible until the map reports where
                   it is; the same timer that backs the marks backs this, so a
                   map that never reports still appears. */}
-              <div className="geo__map geo__map--on">
+              <div className={`geo__map${geoView ? " geo__map--on" : ""}`}>
                 {/* CONTROLLED, and this time for the right reason.
                     It was controlled once, loosely, and the loop it caused
                     sent it back to uncontrolled — where it failed twice more,
@@ -772,18 +793,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     comes straight back from onViewStateChange and is dropped
                     as a no-op, while a real pan still gets through. */}
                 <MapView height={MAP_H}
-                  latitude={view.latitude}
-                  longitude={view.longitude}
-                  zoom={view.zoom}
+                  ref={mapRef}
+                  initialViewState={frame}
                   onViewStateChange={(v) => {
-                    const next = {
-                      latitude: v.latitude ?? view.latitude,
-                      longitude: v.longitude ?? view.longitude,
-                      zoom: v.zoom ?? view.zoom,
-                    };
-                    /* the guard is what keeps a controlled map from looping:
-                       the view we just rendered comes straight back, and
-                       writing it again would render again, forever */
+                    /* THE MAP'S OWN ANSWER, and the only view the overlay
+                       will project against. It is a hint we hand back to
+                       ourselves, never a view we impose. */
+                    if (v.latitude == null || v.longitude == null || v.zoom == null) return;
+                    reported.current = true;
+                    const next = { latitude: v.latitude, longitude: v.longitude, zoom: v.zoom };
                     setGeoView((cur) => {
                       const same = cur
                         && Math.abs(cur.latitude - next.latitude) < 1e-6
@@ -805,8 +823,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       states live in the panel below, counted rather than
                       shaded. */}
                 </MapView>
-                {(() => {
-                  const vs = view;
+                {geoView && (() => {
+                  const vs = geoView;
                   const world = 512 * Math.pow(2, vs.zoom);
                   const mx = (lng: number) => ((lng + 180) / 360) * world;
                   const my = (lat: number) => {
