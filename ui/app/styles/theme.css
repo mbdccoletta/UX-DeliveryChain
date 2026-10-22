@@ -288,6 +288,15 @@ svg { shape-rendering: geometricPrecision; }
 /* the little kind-tag on a card's sub-line: "host", "service →" */
 /* a host is longer than the column; the cut has to be visible, so CSS makes
    it and the tooltip carries the whole name */
+/* the card's own action, covering it without containing anything — the same
+   arrangement the drill rows use, so the service links beside it are siblings
+   rather than controls nested in a control */
+.tk-block__hit { position: absolute; inset: 0; z-index: 0; border: none;
+  background: none; padding: 0; cursor: pointer; border-radius: inherit; }
+.tk-block__hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cc-mod--pick > :not(.tk-block__hit) { position: relative; z-index: 1;
+  pointer-events: none; }
+.cc-mod--pick .tk-note--link { pointer-events: auto; }
 .tk-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the row's SECOND door: the lens the row did not lead with, offered rather
    than chosen. Quiet until the row is under the cursor, because it is the
