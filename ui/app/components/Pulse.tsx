@@ -1587,7 +1587,15 @@ const Module = React.forwardRef<HTMLElement, {
       style={{ ["--c" as string]: FVAR[tone],
                ["--breath" as string]: BREATH[tone] }}>
       {pick && (
-        <button type="button" className="tk-block__hit" onClick={pick}
+        <button type="button" className="tk-block__hit"
+          /* AND IT MUST NOT TOGGLE TWICE. The section still handles clicks,
+             which is what lets the card's CONTENT stay hoverable and still
+             open the breakdown. This button therefore has to keep its click
+             to itself: without that, one press ran pick() here and again on
+             the way up, and onMetric toggles — so selecting a card cleared
+             the selection and re-selecting it cleared and restored it. The
+             breakdown could not be opened at all. */
+          onClick={(e) => { e.stopPropagation(); pick(); }}
           aria-pressed={!!active}
           title={`${active ? "Hide" : "Show"} the breakdown for `
             + (metric === "services" ? "the called services" : METRIC_LABEL[metric as Metric])}
@@ -2216,7 +2224,11 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
                  — "Where the time goes — where this view spends its time" —
                  and a reader moving between links could not tell which view
                  each one opened. */
+              /* the cells above this are transparent to the pointer, so a
+                 truncated name can only be read from HERE — the title has to
+                 carry it, not just the accessible name */
               <a className="svcf__hit" aria-label={`${r.name} — ${dd.label}: ${dd.proves}`}
+                title={`${r.name}\n${dd.label} — ${dd.proves}`}
                 {...rowProps} />
             )}
             {/* The tag lives INSIDE the name cell. As a sibling it became a

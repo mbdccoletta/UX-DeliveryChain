@@ -294,9 +294,19 @@ svg { shape-rendering: geometricPrecision; }
 .tk-block__hit { position: absolute; inset: 0; z-index: 0; border: none;
   background: none; padding: 0; cursor: pointer; border-radius: inherit; }
 .tk-block__hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.cc-mod--pick > :not(.tk-block__hit) { position: relative; z-index: 1;
-  pointer-events: none; }
-.cc-mod--pick .tk-note--link { pointer-events: auto; }
+/* The content stays HOVERABLE and clickable. Making it pointer-transparent
+   killed every native title on the card — the sessions tooltip that explains
+   real-versus-all, the whole host names, the Apdex band — because the hover
+   landed on the covering button instead. Content clicks bubble to the
+   section, which still calls pick, so nothing is lost by letting them
+   through; the button only catches the gaps.
+   And the watermark is excluded: it is absolutely positioned decoration, and
+   a `position: relative` applied to it with higher specificity dragged a
+   92px icon into the card's flow, pushing the heading and the figures aside.
+   A layout rule that matches "every child" matches the one child that was
+   never in the layout. */
+.cc-mod--pick > :not(.tk-block__hit):not(.tk-block__wm) {
+  position: relative; z-index: 1; }
 .tk-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the row's SECOND door: the lens the row did not lead with, offered rather
    than chosen. Quiet until the row is under the cursor, because it is the
