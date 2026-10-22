@@ -297,7 +297,17 @@ svg { shape-rendering: geometricPrecision; }
    is what stops an anchor nesting in an anchor. */
 .svcf__row { position: relative; }
 .svcf__hit { position: absolute; inset: 0; z-index: 0; border-radius: inherit; }
-.svcf__row > :not(.svcf__hit) { position: relative; z-index: 1; }
+/* The cells draw ABOVE the covering link — they have to, or the overlay would
+   sit on top of the text — but drawing above it also meant catching its
+   clicks: the name, the bar and the count all swallowed the drill-down, and
+   the row only worked in the gaps between cells. So they are painted above
+   and are transparent to the pointer; only the link itself and the secondary
+   lens take a click. Scoped to rows that HAVE a covering link, so the service
+   rows, which carry their own anchors, are untouched. */
+.svcf__row:has(.svcf__hit) > :not(.svcf__hit) {
+  position: relative; z-index: 1; pointer-events: none; }
+.svcf__row:has(.svcf__hit) .svcf__alt { pointer-events: auto; }
+.svcf__row:not(:has(.svcf__hit)) > * { position: relative; z-index: 1; }
 .svcf__alt { pointer-events: auto; margin-left: 10px; font: 600 10px var(--mono); color: var(--ink-3);
   text-decoration: none; white-space: nowrap; opacity: 0; transition: opacity 120ms; }
 .svcf__row:hover .svcf__alt, .svcf__row:focus-within .svcf__alt { opacity: 1; }
