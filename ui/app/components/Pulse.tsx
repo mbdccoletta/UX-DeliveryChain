@@ -222,6 +222,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     }, 1100);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [geo, appId, data.tf.from, data.tf.to]);
+  /* AND AGAIN WHENEVER THE SELECTION CHANGES. The layer's data narrows to the
+   * selected country and its states (see layerData), so re-fitting is what
+   * carries the map into it — and back out when the selection clears. The
+   * delay lets the layer re-render first; fitting the old data would frame
+   * the place the reader just left. */
+  useEffect(() => {
+    if (!geo || geo.length === 0) return;
+    const t = setTimeout(() => {
+      try { mapRef.current?.zoomToFit(); } catch { /* not mounted */ }
+    }, 160);
+    return () => clearTimeout(t);
+  }, [geoSel, regions, geo]);
   /* CLICKING ANYTHING IN THIS TILE PUTS ITS ANSWER ON THE SCREEN.
    * Everything a click opens — a country's screens, a state's cities —
    * renders in the drill panel UNDER the map, which on a wide screen is
@@ -761,6 +773,38 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           color: COL[judge(g)], country: nameOf(g.country),
           sessions: g.sessions, hitByErrors: g.hit,
         });
+        /* THE MAP DRILLS WITH THE SELECTION.
+         * MapView takes no "fly to" — its ref offers zoomToFit, zoomIn,
+         * zoomOut and reset, and nothing that accepts a coordinate. But
+         * zoomToFit frames THE LAYERS' DATA, so narrowing the data IS the
+         * drill: select Japan and the layer holds Japan and its prefectures,
+         * so the fit lands on Japan. Deselect and it holds the world again.
+         * It is also the only way to move this map that does not depend on
+         * it honouring a view prop, which it does not.
+         * A single point would fit to street level, so a country with no
+         * sub-national rows gets two transparent anchors about six degrees
+         * out — they frame a country-sized box and draw nothing. */
+        const ANCHOR = 6;
+        const layerData = (() => {
+          if (!geoSel || !CENTROID[geoSel]) return located.map(dot);
+          const rs = (regions ?? [])
+            .filter((r) => REGION_CENTROID[r.id])
+            .map((r) => ({
+              latitude: REGION_CENTROID[r.id][0], longitude: REGION_CENTROID[r.id][1],
+              color: COL[r.sessions < GEO_MIN_SESSIONS ? "good"
+                : r.hit / Math.max(r.sessions, 1) >= GEO_ABS_BAD ? "bad"
+                : r.hit / Math.max(r.sessions, 1) >= GEO_ABS_WARN ? "warn" : "good"],
+              country: r.name, sessions: r.sessions, hitByErrors: r.hit,
+            }));
+          if (rs.length >= 2) return rs;
+          const [la, lo] = CENTROID[geoSel];
+          const home = located.filter((g) => g.country === geoSel).map(dot);
+          const anchor = (dla: number, dlo: number) => ({
+            latitude: la + dla, longitude: lo + dlo, color: "rgba(0,0,0,0)",
+            country: "", sessions: 0, hitByErrors: 0,
+          });
+          return [...home, anchor(-ANCHOR, -ANCHOR), anchor(ANCHOR, ANCHOR)];
+        })();
         /* Nine layers, because shape and shapeSize are PER LAYER: three volume
          * buckets × three health tones. The shape is a ReactNode, which is
          * what lets the map itself ANIMATE — problem countries pulse a sonar
@@ -816,7 +860,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     });
                   }}>
                   {/* a faint native layer keeps the map's own tooltip */}
-                  <DotLayer shape="circle" shapeSize={6} data={located.map(dot)} />
+                  <DotLayer shape="circle" shapeSize={6} data={layerData} />
                   {/* NO STATE CHOROPLETH, and the reason is the component, not
                       the data. Strato's ChoroplethLayer takes an ISO 3166-2
                       code — which geo.region.iso_code supplies once the country
