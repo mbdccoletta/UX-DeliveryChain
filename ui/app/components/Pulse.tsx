@@ -830,6 +830,56 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     return ((1 - Math.log(Math.tan(p) + 1 / Math.cos(p)) / Math.PI) / 2) * world;
                   };
                   const cx = mx(vs.longitude), cy = my(vs.latitude);
+                  /* NO LABEL ON TOP OF ANOTHER LABEL.
+                     Marks are placed by coordinate, so on a world view the
+                     crowded parts of the map — western Europe, east Asia —
+                     stack their names on each other and none of them can be
+                     read. Measured on a live estate: IE over GB, JP over KR,
+                     MX over the United States.
+                     So labels are PLACED, biggest first: each one claims a
+                     box, and a label whose box would touch a claimed one is
+                     not drawn. The mark stays, with its tone, its size, its
+                     tooltip and its row in the list beside the map — what it
+                     loses is a name it could not have been read anyway. The
+                     box is estimated from the text, in the mono face the
+                     label actually uses, which is near enough for a test
+                     that only has to answer "do these touch". */
+                  const claimed: Array<[number, number, number, number]> = [];
+                  const claim = (dx: number, dy: number, text: string, size: number) => {
+                    const w = text.length * 6.4 + 18, h = 16;
+                    const x0 = dx - w / 2, y0 = dy + size / 2 + 3;
+                    const x1 = x0 + w, y1 = y0 + h;
+                    const hits = claimed.some(([a, b, c, d]) =>
+                      !(x1 < a || x0 > c || y1 < b || y0 > d));
+                    if (hits) return false;
+                    claimed.push([x0, y0, x1, y1]);
+                    return true;
+                  };
+                  /* the order IS the priority: the heaviest place keeps its
+                     name, and the ones that cannot have one are the small */
+                  const labelled = new Set<string>();
+                  [...located]
+                    .sort((a, b) => b.sessions - a.sessions)
+                    .forEach((g) => {
+                      const [la, lo] = CENTROID[g.country];
+                      const sz = sizeOf(g);
+                      if (!(sz >= 26 || judge(g) !== "good")) return;
+                      const txt = (sz === 44 ? nameOf(g.country) : g.country)
+                        + ` ${fmtK(g.sessions)}`;
+                      if (claim(mx(lo) - cx, my(la) - cy, txt, sz)) labelled.add(g.country);
+                    });
+                  const rLabelled = new Set<string>();
+                  if (geoSel && regions) {
+                    [...regions]
+                      .sort((a, b) => b.sessions - a.sessions)
+                      .forEach((r) => {
+                        const c = REGION_CENTROID[r.id];
+                        if (!c) return;
+                        const sz = r.sessions >= 100 ? 20 : r.sessions >= 10 ? 15 : 11;
+                        const txt = (sz >= 20 ? `${r.name} ${fmtK(r.sessions)}` : uf(r.id));
+                        if (claim(mx(c[1]) - cx, my(c[0]) - cy, txt, sz)) rLabelled.add(r.id);
+                      });
+                  }
                   return (
                     <div className="geo__ov geo__ov--on" aria-hidden="true">
                       {/* ONE LEVEL AT A TIME. With a country open, its own
@@ -857,7 +907,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                               if (opening) revealDrill();
                             }}>
                             {(sz >= 26 || tone !== "good") && (
-                              <span className="gpin__lbl">
+                              <span className={`gpin__lbl${
+                                labelled.has(g.country) ? "" : " gpin__lbl--off"}`}>
                                 {sz === 44 ? nameOf(g.country) : g.country}
                                 <em>{fmtK(g.sessions)}</em>
                               </span>
@@ -921,7 +972,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 stays with the big marks only; sixteen numbers
                                 over one country is a wall, and the list is
                                 right there holding all of them. */}
-                            <span className="gpin__lbl">
+                            <span className={`gpin__lbl${
+                              rLabelled.has(r.id) ? "" : " gpin__lbl--off"}`}>
                               <b>{sz >= 20 ? r.name : uf(r.id)}</b>
                               {sz >= 20 && <em>{fmtK(r.sessions)}</em>}
                             </span>

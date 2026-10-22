@@ -3028,6 +3028,14 @@ div:has(> header):has(main) > div {
    the selected one — comes to the front so its name can be read whole. */
 .gpin__lbl { pointer-events: none; }
 .gpin:hover, .gpin:focus-visible, .gpin--sel { z-index: 6; }
+/* A label the placer could not fit is not deleted, only withheld: the mark
+   keeps it for the moment the reader asks, which is what a hover is. At rest
+   nothing overlaps; on hover the one being pointed at wins, because it also
+   takes the z-index above. */
+.gpin__lbl--off { display: none; }
+.gpin:hover .gpin__lbl--off,
+.gpin:focus-visible .gpin__lbl--off,
+.gpin--sel .gpin__lbl--off { display: flex; }
 .gpin--sel { outline: 2px solid var(--ink-hi); outline-offset: 2px; }
 .gpin__lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   margin-top: 3px; display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
