@@ -146,6 +146,36 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, appId, data.tf.from, data.tf.to]);
+  /* THE SAME LIST, ONE LEVEL DOWN. Opening a state changed the cities and
+   * nothing else — the screens below went on describing the whole country,
+   * so clicking an amber state showed a list in which that state's traffic
+   * was a rounding error, and the click looked like it had found nothing.
+   * One leg, asked only when a state is actually opened. */
+  const [regionDetail, setRegionDetail] = useState<
+    Array<{ view: string; sessions: number; hit: number }> | null>(null);
+  const regionMemo = React.useRef(new Map<string,
+    Array<{ view: string; sessions: number; hit: number }>>());
+  useEffect(() => {
+    if (!geoSel || !regionSel || !appId) { setRegionDetail(null); return; }
+    const uf = regionSel.slice(geoSel.length + 1);
+    const k = `${data.tf.from}|${data.tf.to}|${appId}|${regionSel}`;
+    const hit = regionMemo.current.get(k);
+    if (hit) { setRegionDetail(hit); return; }
+    setRegionDetail(null);
+    let live = true;
+    (async () => {
+      try {
+        const rows = await Q.runDql<Record<string, unknown>>(
+          Q.qGeoRegion(data.tf, appId, geoSel, uf), 8);
+        const res = rows.map((r) => ({ view: String(r.view ?? "?"),
+          sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0 }));
+        regionMemo.current.set(k, res);
+        if (live) setRegionDetail(res);
+      } catch { if (live) setRegionDetail([]); }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geoSel, regionSel, appId, data.tf.from, data.tf.to]);
   /* THE FRAME THE MAP ACTUALLY MOUNTED ON.
    * MapView is uncontrolled, which is the right call — see the note at the
    * component — but uncontrolled means it honours initialViewState ONCE, on
@@ -1049,15 +1079,25 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     </div>
                   );
                 })()}
-                {geoDetail && geoDetail.length > 0 && (() => {
-                  const dmax = Math.max(...geoDetail.map((d) => d.sessions), 1);
+                {(() => {
+                  /* WHOSE SCREENS THESE ARE. With a state open the list is
+                     that state's, read from its own leg; with none open it
+                     is the country's. The caption says which, because two
+                     lists that look identical and count different things is
+                     the one confusion this panel cannot afford. */
+                  const rgName = regionSel
+                    ? regions?.find((r) => r.id === regionSel)?.name ?? regionSel
+                    : null;
+                  const scoped = regionSel ? regionDetail : geoDetail;
+                  if (!scoped || scoped.length === 0) return null;
+                  const dmax = Math.max(...scoped.map((d) => d.sessions), 1);
                   /* The drill speaks the same traffic light as the map: each
                    * screen judged against the COUNTRY's own error rate —
                    * green satisfied, yellow tolerating, red where the errors
                    * concentrate (≥2× the country). Bar and word carry the
                    * same colour, so the eye needs no second read. */
-                  const cTot = geoDetail.reduce((a, d) => a + d.sessions, 0) || 1;
-                  const cRate = geoDetail.reduce((a, d) => a + d.hit, 0) / cTot;
+                  const cTot = scoped.reduce((a, d) => a + d.sessions, 0) || 1;
+                  const cRate = scoped.reduce((a, d) => a + d.hit, 0) / cTot;
                   /* THE MAP'S OWN FLOORS, imported — this drill once had a
                    * fourth rule (any hit = tolerating, no substance gates)
                    * that called one error in a thousand "tolerating" while
@@ -1069,12 +1109,19 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     if (d.sessions >= GEO_MIN_SESSIONS && r >= GEO_ABS_WARN) return "warn";
                     return "good";
                   };
-                  // theme tokens — these bars are HTML, not canvas
-                  const BAR = { good: "var(--good)", warn: "var(--warn)",
-                    bad: "var(--bad)" } as const;
+                  /* bars are MARKS: the saturated half of the family, like
+                     every other mark in the product */
+                  const BAR = { good: "var(--good-fill)", warn: "var(--warn-fill)",
+                    bad: "var(--bad-fill)" } as const;
                   return (
                     <div className="geo__drill-rows">
-                      {geoDetail.map((d) => {
+                      <span className="geo__sub-l">
+                        {rgName ? <>top screens in {rgName}</> : <>top screens across {geoSel}</>}
+                        <em>{rgName
+                          ? `judged against ${rgName}'s own error rate, not the country's`
+                          : "judged against this country's own error rate"}</em>
+                      </span>
+                      {scoped.map((d) => {
                         const t = toneOf(d);
                         const noScreen = d.view === Q.NO_SCREEN;
                         return (
@@ -1099,8 +1146,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     </div>
                   );
                 })()}
-                {geoDetail && geoDetail.length === 0 && (
-                  <span className="geo__drill-none">no screens recorded for this country in the window</span>
+                {(regionSel ? regionDetail : geoDetail)?.length === 0 && (
+                  <span className="geo__drill-none">
+                    no screens recorded for {regionSel ? "this state" : "this country"} in the window
+                  </span>
                 )}
                 {/* WHAT SETS THIS REGION APART — presence lifts vs the rest,
                     and inside the region, the characteristic that carries the
