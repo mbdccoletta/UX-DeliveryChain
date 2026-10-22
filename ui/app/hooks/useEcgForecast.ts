@@ -10,7 +10,7 @@
 // about a third of the visible span, so the future never dwarfs the present.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { forecast, forecastPlan, type Forecast } from "../utils/forecast";
+import { forecast, forecastPlan, type Forecast , histWindow } from "../utils/forecast";
 import type { Timeframe } from "../utils/dql";
 
 /** The metrics that have a real per-bin series behind them. */
@@ -55,7 +55,9 @@ export function useMetricForecast(
     let live = true;
     setFc(null);
     const plan = forecastPlan(tf!.minutes);
-    forecast(`fetch user.events, from: now()-${plan.hist}
+    /* bounded by the SELECTED window, not by now() — see histWindow */
+    const win = histWindow(tf!, plan.histMin);
+    forecast(`fetch user.events, from: ${win.from}, to: ${win.to}
 | filter dt.rum.application.id == "${rumAppId!.replace(/"/g, "")}"
 | makeTimeseries ${AGG[metric!]}, interval: ${plan.bin}`, plan.horizon)
       .then((f) => { memo.set(key, f); if (live) setFc(f); });

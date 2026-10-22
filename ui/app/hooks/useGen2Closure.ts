@@ -72,12 +72,21 @@ export function useGen2Closure(serviceIds: string[], active = true): Gen2Service
           for (const r of rows) {
             const id = String(r.id ?? "");
             const src = String(r.src ?? "");
-            if (!id || known.has(id)) continue;
+            if (!id) continue;
+            /* MERGE THE CALLER BEFORE SKIPPING. The known-set guard stops the
+               traversal from walking a service twice, which is right — but it
+               ran BEFORE the merge, so a service discovered in an earlier
+               round never learned about the callers found in a later one.
+               With A→B, A→C and B→C, round one adds B and C to `known` and
+               round two skips C before recording B as another caller: C's
+               "Called by" count is short by a real relationship. The merge is
+               cheap and it is the whole point of walking the next round. */
             const seen = found.get(id);
             if (seen) {
               if (src && !seen.callers.includes(src)) seen.callers.push(src);
               continue;
             }
+            if (known.has(id)) continue;
             // `host` arrives as the classic model's array, which is one entry
             // in every case observed; the card shows one host, so take one.
             const host = Array.isArray(r.host) ? String(r.host[0] ?? "")

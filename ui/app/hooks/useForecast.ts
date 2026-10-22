@@ -15,7 +15,7 @@
 // own answer rather than typed into the markup.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { forecast, forecastPlan, type Forecast } from "../utils/forecast";
+import { forecast, forecastPlan, type Forecast , histWindow } from "../utils/forecast";
 import type { Timeframe } from "../utils/dql";
 
 const memo = new Map<string, Forecast | null>();
@@ -31,8 +31,10 @@ export function useAppForecast(appId?: string, tf?: Timeframe): Forecast | null 
     let live = true;
     setAhead(null);
     const plan = forecastPlan(tf.minutes);
+    /* bounded by the SELECTED window, not by now() — see histWindow */
+    const win = histWindow(tf!, plan.histMin);
     forecast(
-      `fetch user.events, from: now()-${plan.hist}
+      `fetch user.events, from: ${win.from}, to: ${win.to}
        | filter dt.rum.application.id == "${appId.replace(/"/g, "")}"
        | makeTimeseries errors = countIf(characteristics.classifier == "error"), interval: ${plan.bin}`,
       plan.horizon,

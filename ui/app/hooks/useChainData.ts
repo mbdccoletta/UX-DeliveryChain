@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Q from "../utils/dql";
 import { bumpMemoGen } from "../utils/memo";
+import { hasTruncation, noteCachedTruncation } from "../utils/cost";
 import { normalizeView, num, runDql, type Timeframe } from "../utils/dql";
 import * as cache from "../utils/cache";
 
@@ -227,8 +228,16 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
       // A hit skips all 16 queries. The age travels with it so the screen can
       // say how old the numbers are rather than passing them off as live.
       if (!bypass) {
-        const hit = await cache.read<Omit<ChainData, "refresh" | "cachedAt">>(cacheKey);
+        const hit = await cache.read<Omit<ChainData, "refresh" | "cachedAt">
+          & { truncated?: boolean }>(cacheKey);
         if (hit && !cancelled) {
+          /* COMPLETENESS TRAVELS WITH THE PAYLOAD. The partial-data banner
+             reads a counter in cost.ts, which only knows about queries this
+             page has just run. Restore a cached window and the counter is
+             clean, so figures that came back from a truncated scan lose the
+             warning that was their whole point. The flag is stored with the
+             result and re-raised when it comes back. */
+          if (hit.value.truncated) noteCachedTruncation();
           setState({ ...hit.value, loading: false, cachedAt: hit.at });
           return;
         }
@@ -431,7 +440,9 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
       setState(fresh);
       // store what was just measured; failure here never reaches the user
       const { loading: _l, cachedAt: _c, ...payload } = fresh;
-      void cache.write(cacheKey, payload);
+      /* the window's LENGTH decides how long this keeps — the cache key is
+         its identity, which is a different question (see ttlFor) */
+      void cache.write(cacheKey, { ...payload, truncated: hasTruncation() }, tf.minutes);
     })();
 
     return () => { cancelled = true; };
