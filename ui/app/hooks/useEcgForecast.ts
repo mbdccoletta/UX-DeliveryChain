@@ -40,12 +40,26 @@ const AGG: Record<Metric, string> = {
 const memo = new Map<string, Forecast | null>();
 
 /** Forecast for one metric, or null while loading / when it is not sound. */
+/**
+ * `frontendName` moves the SESSIONS forecast onto `user.sessions`.
+ *
+ * Without it the projection trained on a different population from the chart
+ * it is drawn over: the series counted every session with an event in a bin
+ * while the chart, the headline and the hand-off had all moved to the store
+ * the platform lists. The screen said "peak 13" under "forecast ~258 next
+ * 40m" — two true numbers about two different things, which is the whole
+ * class of defect this app has spent the week removing.
+ *
+ * The other three metrics are event counts and stay where events live.
+ */
 export function useMetricForecast(
   rumAppId?: string, tf?: Timeframe, metric?: Metric | null,
+  frontendName?: string,
 ): Forecast | null {
   const gen = useMemoGen();
+  const fe = frontendName || "";
   const key = rumAppId && tf && metric
-    ? `${rumAppId}|${tf.from}|${tf.to}|${metric}|${gen}` : "";
+    ? `${rumAppId}|${tf.from}|${tf.to}|${metric}|${fe}|${gen}` : "";
   const [fc, setFc] = useState<Forecast | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -57,13 +71,23 @@ export function useMetricForecast(
     const plan = forecastPlan(tf!.minutes);
     /* bounded by the SELECTED window, not by now() — see histWindow */
     const win = histWindow(tf!, plan.histMin);
-    forecast(`fetch user.events, from: ${win.from}, to: ${win.to}
+    /* `time: start_time` because a row of `user.sessions` IS a session: it
+       belongs to the bin it began in, not to every bin it spanned. The same
+       anchor qSessionSeries uses, so the drawn series and the forecast's
+       training series are the one series. */
+    const expr = metric === "sessions" && fe
+      ? `fetch user.sessions, from: ${win.from}, to: ${win.to}
+| expand fe = frontend.name
+| filter fe == "${fe.replace(/["\\]/g, "")}"
+| makeTimeseries sessions = countDistinct(dt.rum.session.id), time: start_time, interval: ${plan.bin}`
+      : `fetch user.events, from: ${win.from}, to: ${win.to}
 | filter dt.rum.application.id == "${rumAppId!.replace(/"/g, "")}"
-| makeTimeseries ${AGG[metric!]}, interval: ${plan.bin}`, plan.horizon)
+| makeTimeseries ${AGG[metric!]}, interval: ${plan.bin}`;
+    forecast(expr, plan.horizon)
       .then((f) => { memo.set(key, f); if (live) setFc(f); });
 
     return () => { live = false; };
-  }, [key, rumAppId, tf, metric]);
+  }, [key, rumAppId, tf, metric, fe]);
 
   return fc;
 }

@@ -408,12 +408,11 @@ export function App() {
                    * filled the bar with a name the store never uses and the
                    * list read "no sessions" (documented failure) */
                   if (intentsAvailable() && a && fe) {
-                    /* No count in the meta line here: the card's figure and
-                       the list's are two different populations, and quoting
-                       the wrong one in the hand-off is what made a reader
-                       compare them and find a defect. The Overview prints
-                       both, side by side, which is where that comparison
-                       belongs. */
+                    /* No count in the meta line here — not because the two
+                       would disagree (the card counts this same store now),
+                       but because this header button is outside the scan
+                       that measures it, and a figure re-derived here would
+                       be a second measurement of one fact. */
                     openIntent(sessionsLink(tf, fe, 0));
                   } else { setAppId(current); set({ tab: "flow", sel: null }); }
                 }} />

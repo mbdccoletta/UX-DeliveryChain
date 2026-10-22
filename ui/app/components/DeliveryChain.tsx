@@ -889,11 +889,19 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   for (const r of domains) {
     const oi = idxIn(0, (e) => e.nm === originOf(r.agent, r.utype));
     if (oi === null) continue;
-    if (r.provider === "first_party") {
-      // first-party requests skip the third-party column visually — they are
-      // the app talking to its own ingress, drawn app→ingress below
-      continue;
-    }
+    /* ONLY THE PROMOTED INGRESS SKIPS THIS COLUMN.
+     *
+     * The rule used to skip EVERY first-party row, on the reasoning that
+     * first-party traffic is the app talking to its own ingress and is drawn
+     * as app→ingress further down. True of ONE domain: the one promoted to
+     * the ingress card. An estate with several of its own API hosts puts the
+     * rest in this column like any other domain — and they arrived with no
+     * edge from the browser at all, which on a chain diagram reads as "the
+     * browser never calls this API". It does; the browser's own request rows
+     * are where the number came from.
+     *
+     * So the skip is now by identity, not by category. */
+    if (firstParty && r.domain === firstParty.domain) continue;
     const di = idxIn(1, (e) => e.nm === r.domain);
     if (di !== null) edges.push({ s: [0, oi], t: [1, di], v: r.reqs, label: "requests",
       bad: r.err, blind: unattribErr > 0, p50: r.p50, p90: r.p90, late: r.late ?? null });
@@ -1114,7 +1122,14 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // Not lazy any more: measured impact now decides colour, so it has to be
   // here before the first paint. Memoised per application and window, and the
   // landing page asks for the same key — arriving from the overview is free.
-  const impacted = useImpacted(appId, data.tf, true);
+  /* frontend.name per entity — resolved HERE, above the impact scan, because
+     it decides which store that scan reads: with a name the figures come from
+     user.sessions, the same population the Overview card counts and the
+     sessions hand-off opens. One fact, one number, on both screens. */
+  const feNames = useFrontendNames();
+  const impacted = useImpacted(appId, data.tf, true,
+    feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "")
+      || undefined);
   // The provider behind the machines AND the serverless placements: a
   // lambda-backed service produces no HOST, and the Provider column born
   // only from hosts never existed for it — the chain ended at Run while the
@@ -1134,8 +1149,6 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // same key, so an application whose two models agree pays for one query and
   // draws nothing extra
   const gen2 = useGen2Closure([...scope.services], scope.resolved);
-  /* frontend.name per entity — the sessions hand-off's vocabulary */
-  const feNames = useFrontendNames();
     /* FIRST-PARTY BY TRACES. RUM's provider tag failed the audit: the Android
    * app's only contacted domain is its own backend, tagged third_party —
    * firstParty = 0 and the Route layer read "No coverage" forever. When no
@@ -1301,8 +1314,23 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         const own: Tone = rate == null ? "info"
           : rate >= HIT_BAD ? "bad" : rate >= HIT_WARN ? "warn" : "info";
         const RANK: Record<Tone, number> = { info: 0, good: 0, warn: 1, bad: 2 };
-        const endp: Tone = src.tone === "bad" || dst.tone === "bad" ? "bad"
-          : src.tone === "warn" || dst.tone === "warn" ? "warn" : "info";
+        /* RED FLOWS INTO A PROBLEM, NEVER BACK OUT OF IT.
+         *
+         * This took the worse of BOTH endpoints, so one bad card painted
+         * every leg that touched it — in both directions. With the browser
+         * card critical (half its sessions meet an error) every
+         * browser→domain leg turned red, and the Transport tier, which had
+         * nothing wrong with it, sat in the middle of a red fan. The reader
+         * read the colour as a statement about the tier it crossed, which is
+         * exactly what a chain diagram invites them to do, and it was not
+         * one.
+         *
+         * A leg is coloured by what it DELIVERS INTO, plus its own measured
+         * failure rate. So the red reaches the tier that owns the problem
+         * and stops there, and a healthy tier is never painted by its
+         * neighbours. */
+        const endp: Tone = dst.tone === "bad" ? "bad"
+          : dst.tone === "warn" ? "warn" : "info";
         const worse: Tone = RANK[own] > RANK[endp] ? own : endp;
         const w = 1.4 + 8.6 * (Math.log10(e.v + 1) / Math.log10(vmax + 1));
         const dur = Math.max(1.1, 8 - 1.6 * Math.log10(e.v + 1));
@@ -1525,7 +1553,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     if (selElo.domain) return { kind: "domain", appId, domain: selElo.domain };
     return null;
   }, [selElo, selTier, appId]);
-  const met = useNodeMetrics(metTarget);
+  const met = useNodeMetrics(metTarget, data.tf);
   /* The Databases app's entity behind the selected store, resolved only
    * while its drawer is open. The namespace rides along because the measured
    * exact match was on it (TradeManagement), not on the address. */
@@ -2387,13 +2415,15 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 const fc = metTarget?.kind === "app" ? ahead : met.fc;
                 const fcRising = !!fc && fc.slope > 0;
                 return (<>
-                  {/* The window is part of the number. These come from the
-                      metric store's last 30 minutes while the ledger below
-                      counts the selected timeframe — which is why "failures 1"
-                      could sit above "errors 10" and read as a contradiction.
-                      Both windows are now stated where their numbers are. */}
-                  <div className="dd__h">How it is answering right now
-                    <em>live · last 30 min</em></div>
+                  {/* ONE WINDOW IN THIS DRAWER. These used to be a fixed last
+                      30 minutes beside a ledger counting the selected
+                      timeframe — "failures 1" above "errors 10", and a reader
+                      asking why the chain says 2h and the drill-down says
+                      30m. Stating both windows had already been tried; it
+                      left the contradiction and merely labelled it. The probe
+                      follows the selection now. */}
+                  <div className="dd__h">How it is answering
+                    <em>{data.tf.label}</em></div>
                   <div className="dd" style={{ marginBottom: 6 }}>
                     {/* The metric store keeps an average, not percentiles.
                         Printing it under p50, p90 and p95 would be the same
@@ -2424,7 +2454,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                       <div className="trf">
                         <div className="trf__top">
                           <b className="num">{fmtK(met.thr)}</b>
-                          <span>calls · last 30 min</span>
+                          <span>calls · {data.tf.label}</span>
                           <em style={{ color: col }}>
                             {met.fails === 0 ? "none failed"
                               : `${fmtN(met.fails)} failed · ${(rate * 100).toFixed(rate < 0.001 ? 3 : 2)}%`}
@@ -2511,7 +2541,9 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 14,
                     fontSize: 12, padding: "5px 0", borderTop: "1px solid var(--border)" }}>
                     <span className="dim">Users impacted <em style={{ fontStyle: "normal" }}>
-                      (errors · last {data.tf.label})</em></span>
+                      {/* tf.label already begins with "last" — the extra word
+                          printed "last last 2h" */}
+                      (errors · {data.tf.label})</em></span>
                     <b className="num" style={{ fontSize: 12, color: "var(--bad)", textAlign: "right" }}>
                       {fmtN(impacted.hit)} of {fmtN(impacted.sessions)} sessions
                       {split ? ` — ${split}` : ""}

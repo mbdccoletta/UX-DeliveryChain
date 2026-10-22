@@ -387,6 +387,25 @@ export const errorsExplorerHref = (
    * val() below applies it. Only values from that list may be passed here.
    */
   errorType?: string,
+  /**
+   * The bar's "Error Name" facet value — the error's OWN name, verbatim from
+   * `error.name`. Observed (decoded) on this estate:
+   *
+   *   #filtering="Error Name" = "Unexpected end of JSON input"
+   *              Frontend = "PDPJ - Mobile PJ - Web"
+   *
+   * Two chips, name first, both sides quoted — the same grammar every other
+   * facet here follows, which is why it composes with the ones above.
+   *
+   * ONLY A RAW NAME MAY BE PASSED. This app's failure rows are labelled by a
+   * name whose ids have been collapsed (`/orders/{id}/status`), and that
+   * label exists nowhere in the platform: sent as a filter it matches zero
+   * errors and the Explorer opens empty, which looks exactly like a working
+   * filter over a quiet application. The caller sends a value only when the
+   * row stands for one distinct `error.name`; otherwise it sends none and the
+   * hand-off stays at the frontend, narrower by nothing but honest.
+   */
+  errorName?: string,
 ): string => {
   const q = new URLSearchParams({
     perspective: "impact", sort: "affected_users:descending",
@@ -402,6 +421,8 @@ export const errorsExplorerHref = (
    * one that never has to decide. */
   const val = (v: string) => `"${v.replace(/["\\]/g, "")}"`;
   const filter = [
+    // Name first, as the observed url writes it.
+    ...(errorName ? [`"Error Name" = ${val(errorName)}`] : []),
     ...(viewName ? [`"View Name" = ${val(viewName)}`] : []),
     `"Frontend" = ${val(appName)}`,
     ...(errorType ? [`"Error Type" = ${val(errorType)}`] : []),
@@ -414,6 +435,119 @@ export const errorsExplorerHref = (
   // Absolute, because this app runs in an iframe: a relative href would
   // resolve against the app's own origin and go nowhere. Outside the shell
   // getEnvironmentUrl has nothing to report, and the caller degrades.
+  try {
+    const base = getEnvironmentUrl();
+    return base ? new URL(path, base).toString() : path;
+  } catch {
+    return path;
+  }
+};
+
+/**
+ * ONE VIEW, IN THE PLATFORM'S OWN VITALS APP — the page that owns a view's
+ * performance, rather than a filtered list that merely mentions it.
+ *
+ * Read off the app's address bar, not deduced (the reader supplied it):
+ *
+ *   /ui/apps/dynatrace.experience.vitals/performance/web/FRONTEND-4EF4FC0F976D0ED3
+ *     /views/L3NjYXBfbW9uaXRvci9jb250ZW50L2NvbnRyb2xsZXIueGh0bWw%3D
+ *     ?to=now%28%29&from=now%28%29-2h
+ *
+ * Three things that url settles and no amount of reasoning would have:
+ *   · the view travels BASE64-ENCODED in the path — that blob decodes to
+ *     `/scap_monitor/content/controller.xhtml`, a row of this app's own table
+ *   · the frontend is the FRONTEND- entity id, in the path, not a filter
+ *   · the window is `from`/`to` carrying now() EXPRESSIONS, not the
+ *     `tf=from;to` pair every sibling app here uses. Fourth grammar, fourth
+ *     app.
+ *
+ * `web` is the only segment observed. A mobile frontend presumably has its
+ * own and this does not guess one: without a FRONTEND- id the caller gets
+ * null and keeps whatever hand-off it had.
+ */
+const VITALS_TIME = (e: string): string | null => {
+  const v = e.trim().replace(/^"(.*)"$/, "$1");
+  if (/^now\(\)$/.test(v)) return "now()";
+  if (/^now\(\)\s*[+-]\s*\d+[smhdwMy]$/.test(v)) return v.replace(/\s+/g, "");
+  if (/^[+-]\d+[smhdwMy]$/.test(v)) return `now()${v}`;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return v;
+  return null;
+};
+
+/** The view's id in that url: base64 of its name, then percent-encoded. */
+const viewKey = (name: string): string | null => {
+  try {
+    // btoa is Latin-1 only; a view name with an accent throws, and a thrown
+    // link is a dead row. UTF-8 first, so those names survive.
+    const b = btoa(String.fromCharCode(...new TextEncoder().encode(name)));
+    return encodeURIComponent(b);
+  } catch { return null; }
+};
+
+export const viewVitalsHref = (
+  tf: Timeframe, frontendEntity: string | undefined, viewName: string,
+): string | null => {
+  if (!frontendEntity || !/^FRONTEND-[0-9A-Fa-f]+$/.test(frontendEntity)) return null;
+  const key = viewKey(viewName);
+  if (!key) return null;
+  const from = VITALS_TIME(tf.from), to = VITALS_TIME(tf.to);
+  // The observed url writes `to` before `from`; keep its order, since the
+  // only thing known about this app's parser is what it writes itself.
+  const q = from && to
+    ? `?to=${encodeURIComponent(to)}&from=${encodeURIComponent(from)}` : "";
+  const path = `/ui/apps/dynatrace.experience.vitals/performance/web/`
+    + `${frontendEntity}/views/${key}${q}`;
+  try {
+    const base = getEnvironmentUrl();
+    return base ? new URL(path, base).toString() : path;
+  } catch {
+    return path;
+  }
+};
+
+/**
+ * THE TRACES EXPLORER, FILTERED — read off its own address bar, not deduced.
+ *
+ *   /ui/apps/dynatrace.distributedtracing/explorer
+ *     ?filter=server.address = internal.example.com
+ *             endpoint.name = "POST /\*.jsf"
+ *     &tf=now-2h;now&v=requests
+ *
+ * What that one url settles, after this drill spent two versions guessing:
+ *   · the explorer takes a `filter` QUERY PARAM; the intent's `dt.filter`
+ *     carried a single condition and nothing else could be added to it
+ *   · TWO CONDITIONS JOIN WITH A SPACE — the same grammar the Error
+ *     Inspector and the sessions bar use, so three sibling apps agree after
+ *     all. The earlier belief that only one condition was possible was an
+ *     absence of evidence read as evidence of absence.
+ *   · the host rides UNQUOTED and the endpoint QUOTED, because it contains a
+ *     space. Quoting only what needs it is this family's habit.
+ *   · `tf=now-2h;now`, the Error Inspector's window grammar exactly, and
+ *     `v=requests` for the view.
+ *
+ * `endpoint.name` is the span field behind the "Endpoint" row of the
+ * platform's span details. Its value can be a ROUTE PATTERN — that url's own
+ * example is `POST /\*.jsf`, a servlet mapping, not a url anyone typed. The
+ * endpoint this app sends is the concrete one the browser called, which is
+ * what the OUTER server span of that trace is named by; the pattern belongs
+ * to a deeper span. So the host condition stays beside it: together they
+ * reach the service that answered the browser, and if the endpoint matches
+ * nothing the host still narrows the list to something true.
+ */
+export const tracesExplorerHref = (
+  tf: Timeframe, host: string, endpoint?: string,
+): string => {
+  const h = host.replace(/["\\]/g, "");
+  const ep = (endpoint ?? "").replace(/["\\]/g, "").trim();
+  const filter = [
+    `server.address = ${h}`,
+    ...(ep && ep !== h ? [`endpoint.name = "${ep}"`] : []),
+  ].join(" ");
+  const q = new URLSearchParams({ filter });
+  const t = tfParam(tf);
+  if (t) q.set("tf", t);
+  q.set("v", "requests");
+  const path = `/ui/apps/dynatrace.distributedtracing/explorer?${q}`;
   try {
     const base = getEnvironmentUrl();
     return base ? new URL(path, base).toString() : path;
@@ -1493,6 +1627,24 @@ export const appEntityOf = (entity?: string | null, rumAppId?: string) =>
     ? `APPLICATION-${rumAppId.toUpperCase()}` : undefined);
 
 /**
+ * The row's error name, when there is exactly one to send.
+ *
+ * Three conditions, and all three are necessary:
+ *   · the row carries a raw `error.name` at all — rows this app had to name
+ *     itself (an HTTP status, "unnamed error") have nothing to filter on
+ *   · it stands for ONE distinct raw name — a row whose ids were collapsed
+ *     speaks for hundreds of names and no single value represents it
+ *   · every record behind it was named — otherwise the row counts more than
+ *     the filter can ever show, and the drill contradicts the number it was
+ *     clicked from
+ * Anything else returns undefined and the hand-off stays at the frontend.
+ */
+const exactErrorName = (row: { raw?: string; rawNames?: number;
+  named?: number; vol?: number }): string | undefined =>
+  (row.raw && row.rawNames === 1
+    && (row.vol == null || row.named === row.vol) ? row.raw : undefined);
+
+/**
  * The drill-down behind one row of a card's breakdown.
  *
  * Each panel hands off to the app that owns its subject, with the row's own
@@ -1508,7 +1660,12 @@ export const appEntityOf = (entity?: string | null, rumAppId?: string) =>
 export function rowDrilldown(
   kind: "views" | "errors" | "requests" | "services",
   row: { name: string; type?: string; src?: string; id?: string;
-         fails?: number; errors?: number; named?: number;
+         fails?: number; errors?: number; named?: number; vol?: number;
+         /** Errors only: the raw error.name, and how many distinct raw names
+          *  the row's collapsed label stands for. */
+         raw?: string; rawNames?: number;
+         /** Requests only: the endpoint as a span names it — `GET /path`. */
+         ep?: string;
          /** Domains only: whether any span was served by this address. */
          hasSpans?: boolean },
   tf: Timeframe, appEntity?: string,
@@ -1546,8 +1703,12 @@ export function rowDrilldown(
     }
     if (kind === "errors" && appName) {
       return link("Every occurrence", row.name, {},
-        { app: "Error Inspector", href: errorsExplorerHref(tf, appName),
-          proves: "each time this failure happened" });
+        { app: "Error Inspector",
+          href: errorsExplorerHref(tf, appName, undefined, undefined,
+            exactErrorName(row)),
+          proves: exactErrorName(row)
+            ? "each time this error happened, by name"
+            : "each time this failure happened" });
     }
     return null;
   }
@@ -1610,12 +1771,28 @@ export function rowDrilldown(
      * The DQL form is accepted by the url and silently ignored, which opens
      * the app unfiltered and reads as working. */
     if (row.hasSpans) {
-      return link("Follow these requests", `${d} · in traces`,
-        withTf(tf, { "dt.filter": `server.address = ${d}` }),
-        { keyProperties: ["dt.filter"],
-          appId: "dynatrace.distributedtracing", intentId: TRACES_LIST.intentId,
-          app: "Distributed Tracing",
-          proves: "the server-side traces behind what the browser asked for" });
+      /* THE ENDPOINT TRAVELS WITH THE ROW.
+       *
+       * Every row of this panel is served by the same hostname, so a filter
+       * on `server.address` alone opened the identical trace list from all
+       * eight of them — the reader picked an endpoint and arrived at the
+       * host. Both conditions go now, in the explorer's own url: see
+       * tracesExplorerHref, which is pinned to one the reader produced by
+       * hand after this drill had guessed twice.
+       *
+       * A row with no method and no path (a fetch error grouped under its
+       * host) has no endpoint to send, and the helper drops the condition
+       * rather than sending an empty one.
+       */
+      const ep = (row.ep ?? "").replace(/["\\]/g, "").trim();
+      const byEndpoint = !!ep && ep !== d;
+      return link("Follow these requests",
+        `${byEndpoint ? ep : d} · in traces`, {},
+        { app: "Distributed Tracing",
+          href: tracesExplorerHref(tf, d, byEndpoint ? ep : undefined),
+          proves: byEndpoint
+            ? "the server-side traces of this endpoint"
+            : "the server-side traces behind what the browser asked for" });
     }
     /* No spans, no destination. The Notebook query that used to fill this
      * slot was dropped by request — the row offers no drill-down, which is
@@ -1650,12 +1827,21 @@ export function rowDrilldown(
      * vocabulary shift the sessions bar already taught us (robot → Bots). */
     const et = row.type === "crash" ? "Crash"
       : row.type === "anr" ? "Application not responding" : undefined;
+    /* THE ERROR'S OWN NAME TRAVELS WITH IT, when the row has one to send.
+       Until now every failure row opened the same screen — this application's
+       errors, all of them — and the reader had to find the row again at the
+       far end. The reader asked for the name to be carried, and the platform
+       has the facet for it; what it does NOT have is this app's collapsed
+       label, so the value goes only when it is the raw one. */
+    const en = exactErrorName(row);
     return link(
       row.type === "crash" ? "Inspect these crashes"
         : row.type === "anr" ? "Inspect these ANRs" : "Inspect this failure",
       row.name, {},
-      { app: "Error Inspector", href: errorsExplorerHref(tf, appName, undefined, et),
-        proves: et ? "every occurrence of this fatal type, ranked by users affected"
+      { app: "Error Inspector",
+        href: errorsExplorerHref(tf, appName, undefined, et, en),
+        proves: en ? "every occurrence of this error, by name, ranked by users affected"
+          : et ? "every occurrence of this fatal type, ranked by users affected"
           : "every occurrence of this failure" });
   }
   return null;
