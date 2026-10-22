@@ -97,7 +97,7 @@ function useCountUp(target: number, ms = 1100): number {
  *  the one place on this page where SPACE is the information. */
 const MAP_H = 520;
 /** Stamped from app.config.json at build time — see the summary line. */
-export const APP_VERSION = "0.9.22";
+export const APP_VERSION = "0.9.23";
 
 export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;

@@ -38,7 +38,6 @@ const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic";
 import type { AppRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
-import { ExplainButton } from "./ExplainButton";
 import { Button } from "@dynatrace/strato-components/buttons";
 import { Intelligence } from "./Intelligence";
 import { JOURNEY_STARTERS } from "../utils/starters";
@@ -1701,12 +1700,9 @@ export function FlowSankey({
                   : <>{fmtN(all)} sessions on screen · click {mode === "steps" ? "views" : "routes or stages"} to narrow</>}
               </span>
               <div className="spacer" />
-              {/* THE PAGE, READ BACK IN WORDS. The facts are built at click
-                  time from what is on screen right now — the narrowed cohort if
-                  the reader narrowed it — so Assist explains the diagram they
-                  are actually looking at. */}
-              <ExplainButton subject="journey diagram" className="flow-sel__b"
-                facts={journeyFacts} />
+              {/* "Explain this page" lived here and is gone — the
+                  Intelligence section above answers the same question with
+                  questions written for this page. */}
               {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
                   narrowed one; the reader's rule: characteristics refer to
                   everything the screen currently shows */}

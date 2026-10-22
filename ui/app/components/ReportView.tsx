@@ -26,7 +26,6 @@ import { fmtMs, fmtN, fmtPct, type OutcomeDefs } from "../utils/dql";
 import { useGeo } from "../hooks/useGeo";
 import { GEO_WORD, geoBecause, geoJudge, geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
-import { ExplainButton } from "./ExplainButton";
 import { useFrontendNames } from "../hooks/useFrontendNames";
 import { SESSION_CHIP, chips, intentsAvailable, open as openIntent,
   sessionsLink } from "../utils/links";
@@ -996,8 +995,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   return (
     <div className="stack bc" ref={bcRef}>
       {/* INTELLIGENCE — the board's own questions, asked against the board's
-          own numbers. boardFacts is the same builder the Explain button uses,
-          so the two can never cite different figures for the same screen. */}
+          own numbers. boardFacts builds them at ask time from the figures the
+          tiles are rendering, including the ones that could NOT be measured,
+          stated as such, so nothing fills a gap with a plausible number. */}
       <Intelligence subject="the Business Control board" className="bc__intel"
         starters={BOARD_STARTERS} facts={boardFacts} />
 
@@ -1025,12 +1025,11 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           }}>
           {exporting ? "rendering…" : "export image ↓"}
         </Button>
-        {/* THE BOARD, READ BACK IN WORDS. Built at click time from the same
-            figures the tiles render — including the ones that could NOT be
-            measured, stated as such, so Assist never fills a gap with a
-            plausible number. */}
-        <ExplainButton subject="board" className="export-btn noexport"
-          facts={boardFacts} />
+        {/* "Explain this page" lived here and is gone. It offered a generic
+            reading of the board in a side panel, next to an Intelligence
+            section at the top of this very page whose questions are written
+            against what the board can actually prove. Two doors to the same
+            room, and the narrower one was the better one. */}
       </div>
 
       {/* WHAT CHANGED — first, because it is the first question. */}
