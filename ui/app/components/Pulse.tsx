@@ -646,8 +646,16 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
            application that records no user action at all it printed 0.0 next
            to bars that plainly were not zero. Read off the series the bars
            draw, so the two can never drift apart. */
-        sessionsPerMin={perMin((pulse?.series ?? [])
-          .reduce((a, b) => a + b.sessions, 0))}
+        /* A RATE OVER THE SPAN THE SERIES ACTUALLY COVERS. The session store
+           is only complete up to about an hour ago, so the drawn series stops
+           there — dividing its total by the whole window would under-report
+           the rate by half on a two-hour view. */
+        sessionsPerMin={(() => {
+          const pts = pulse?.series ?? [];
+          const span = Math.max(1, pts.length * Q.binMinutesFor(data.tf.minutes));
+          const n = pts.reduce((a, b) => a + b.sessions, 0);
+          return (n / span).toFixed(n / span >= 10 ? 0 : 1);
+        })()}
         errors={app.errors} errorsPerMin={perMin(app.errors)}
         crashes={app.crashes} anrs={app.anrs}
 

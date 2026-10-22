@@ -198,7 +198,17 @@ async function safe<T>(
   }
 }
 
-export function useChainData(tf: Timeframe, session?: string | null): ChainData {
+/**
+ * `appId` scopes the two per-application RUM scans (origins, domains) to the
+ * application on screen. Every consumer of those rows filters by it anyway,
+ * so the estate-wide form was scanning and paying for rows it then dropped —
+ * which is what pushed a production tenant's landing page past Grail's scan
+ * limit. Null until an application is chosen, and the scans stay estate-wide
+ * then, which is correct: the picker has to see the estate to offer it.
+ */
+export function useChainData(
+  tf: Timeframe, session?: string | null, appId?: string | null,
+): ChainData {
   const [state, setState] = useState<Omit<ChainData, "refresh">>({
     loading: true, errors: [], tf, cachedAt: null, apps: [], views: [], sequences: [],
     transitions: [], friction: [], devices: [], origins: [],
@@ -224,7 +234,12 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
   useEffect(() => {
     // the cache is keyed by window AND session: a one-session view must never
     // read back the whole environment's numbers
-    const cacheKey = `${tf.from}|${tf.to}` + (session ? `:s:${session}` : "");
+    /* The scope is part of the key. Without it a cached estate-wide payload
+       would answer a scoped request — and, worse, a payload scoped to one
+       application would answer for the next one, which looks like data and
+       is another application's. */
+    const cacheKey = `${tf.from}|${tf.to}` + (session ? `:s:${session}` : "")
+      + (appId ? `:a:${appId}` : "");
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, errors: [] }));
     const bag: string[] = [];
@@ -259,10 +274,13 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
       ] = await Promise.all([
         safe<Record<string, unknown>>("applications", Q.qApps(tf, session), bag, 200, cut),
         safe<{ id: string; name: string; rumId?: string; kind?: string }>(
-          "names", Q.qAppNames(), bag, 200, cut),
+          // names, not measurements: the 200-row cap that protects the
+          // scanning queries was silently truncating the INVENTORY, which
+          // costs nothing to read and is what every picker label depends on
+          "names", Q.qAppNames(), bag, 2000, cut),
         safe<Record<string, unknown>>("classic applications", Q.qAppsGen2(), bag, 200, cut),
-        safe<Record<string, unknown>>("origins", Q.qOrigins(tf, session), bag, 200, cut),
-        safe<Record<string, unknown>>("domains", Q.qDomains(tf), bag, 200, cut),
+        safe<Record<string, unknown>>("origins", Q.qOrigins(tf, session, appId), bag, 200, cut),
+        safe<Record<string, unknown>>("domains", Q.qDomains(tf, appId), bag, 200, cut),
         safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, 200, cut),
         safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
         safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
@@ -455,7 +473,7 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
     })();
 
     return () => { cancelled = true; };
-  }, [tf, tick, session]);
+  }, [tf, tick, session, appId]);
 
   return { ...state, refresh };
 }
