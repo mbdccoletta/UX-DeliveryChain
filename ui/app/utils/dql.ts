@@ -136,9 +136,36 @@ export async function runDql<T = Record<string, unknown>>(
   let res = await queryExecutionClient.queryExecute({
     body: { query, requestTimeoutMilliseconds: 30000, maxResultRecords },
   });
-  while (res.state === "RUNNING" || res.state === "NOT_STARTED") {
+  /* THE TOKEN COMES FROM THE EXECUTE, AND ONLY FROM IT.
+   *
+   * This polled with `res.requestToken` — the token off the LATEST response.
+   * The execute carries one; a poll response does not have to, and on a busy
+   * estate it does not. So the first poll worked and the second sent
+   * undefined, and the platform answered:
+   *
+   *   Constraint Violations. errorMessage: "request-token: Required request
+   *   parameter 'request-token' for method parameter type String is not
+   *   present"
+   *
+   * Every environment this app was built against answered inside the first
+   * poll, so the loop never ran twice and the bug could not appear. A
+   * production estate is the first place where a query takes long enough —
+   * and there it kills whichever query is slowest, which reads as "that
+   * query needs a scope" rather than as a defect in the runner.
+   *
+   * The token is captured once. The poll count is bounded too: an unbounded
+   * wait on a query that never finishes is a page that never loads, which is
+   * exactly what a large estate was showing. */
+  const token = res.requestToken;
+  const MAX_POLLS = 150; // 400ms apart — a minute of patience, then an answer
+  for (let i = 0; res.state === "RUNNING" || res.state === "NOT_STARTED"; i++) {
+    if (!token) { noteScan(0); throw new Error("DQL started with no request token"); }
+    if (i >= MAX_POLLS) {
+      noteScan(0);
+      throw new Error("DQL still running after 60s — narrow the window or the scope");
+    }
     await new Promise((r) => setTimeout(r, 400));
-    res = await queryExecutionClient.queryPoll({ requestToken: res.requestToken! });
+    res = await queryExecutionClient.queryPoll({ requestToken: token });
   }
   if (res.state !== "SUCCEEDED") { noteScan(0); throw new Error(`DQL ${res.state}`); }
   /* What this query cost — and whether Grail finished it. A fetch stopped at
