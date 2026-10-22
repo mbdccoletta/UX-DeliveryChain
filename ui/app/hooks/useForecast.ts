@@ -14,13 +14,15 @@
 // forecast in this app obeys, and the label is read back off the analyzer's
 // own answer rather than typed into the markup.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { forecast, forecastPlan, type Forecast } from "../utils/forecast";
 import type { Timeframe } from "../utils/dql";
 
 const memo = new Map<string, Forecast | null>();
 
 export function useAppForecast(appId?: string, tf?: Timeframe): Forecast | null {
-  const key = appId && tf ? `${appId}|${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = appId && tf ? `${appId}|${tf.from}|${tf.to}|${gen}` : "";
   const [ahead, setAhead] = useState<Forecast | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

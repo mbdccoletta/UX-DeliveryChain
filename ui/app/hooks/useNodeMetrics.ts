@@ -6,6 +6,7 @@
 // asked about. The service forecast rides the metric store (timeseries), which
 // is orders cheaper than re-scanning spans for 24 hours.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql } from "../utils/dql";
 import { forecast, type Forecast } from "../utils/forecast";
 
@@ -36,13 +37,14 @@ const keyOf = (t: MetricTarget) =>
   t.kind === "domain" ? `d:${t.appId}:${t.domain}` : `${t.kind}:${t.id}`;
 
 export function useNodeMetrics(target: MetricTarget | null): NodeMetrics | null {
+  const gen = useMemoGen();
   const [m, setM] = useState<NodeMetrics | null>(
-    target ? memo.get(keyOf(target)) ?? EMPTY : null,
+    target ? memo.get(`${keyOf(target)}|${gen}`) ?? EMPTY : null,
   );
 
   useEffect(() => {
     if (!target) { setM(null); return; }
-    const k = keyOf(target);
+    const k = `${keyOf(target)}|${gen}`;
     const hit = memo.get(k);
     if (hit?.ready) { setM(hit); return; }
 
@@ -93,7 +95,7 @@ export function useNodeMetrics(target: MetricTarget | null): NodeMetrics | null 
     })();
 
     return () => { live = false; };
-  }, [target ? keyOf(target) : null]);
+  }, [target ? keyOf(target) : null, gen]);
 
   return m;
 }

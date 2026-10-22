@@ -8,6 +8,7 @@
 // validation session), shared module-wide: opening Journeys after Business
 // Control costs nothing new.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { num, qFriction, qSequences, qTransitions, qViews, runDql,
   type Timeframe } from "../utils/dql";
 import { mergeJourneys, type FrictionRow, type SeqRow, type TransitionRow,
@@ -23,7 +24,8 @@ const memo = new Map<string, JourneysData>();
 export function useJourneys(
   tf: Timeframe, active: boolean, session?: string | null,
 ): JourneysData | null {
-  const key = active ? `${tf.from}|${tf.to}|${session ?? ""}` : "";
+  const gen = useMemoGen();
+  const key = active ? `${tf.from}|${tf.to}|${session ?? ""}|${gen}` : "";
   const [out, setOut] = useState<JourneysData | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

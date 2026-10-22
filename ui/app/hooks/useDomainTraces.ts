@@ -14,6 +14,7 @@
 // ONE scan for the whole panel, on the click that opens it, memoised per
 // domain set and window — never per row.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { runDql, type Timeframe } from "../utils/dql";
 
 const memo = new Map<string, Set<string>>();
@@ -23,7 +24,8 @@ export function useDomainTraces(
   domains: string[], tf: Timeframe, active = true,
 ): Set<string> | null {
   const list = [...domains].sort();
-  const key = active && list.length ? `${list.join(",")}|${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = active && list.length ? `${list.join(",")}|${tf.from}|${tf.to}|${gen}` : "";
   const [out, setOut] = useState<Set<string> | null>(
     key ? memo.get(key) ?? null : null);
 

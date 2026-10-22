@@ -11,6 +11,7 @@
 // column would be one more component connected to nothing, which is the defect
 // this whole pass set out to remove.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qCloudPlacement, qLambdaPlacement, runDql } from "../utils/dql";
 
 export interface CloudPlacement {
@@ -46,8 +47,9 @@ export function useCloudScope(
 ): CloudPlacement[] | null {
   const ids = [...hostIds].sort();
   const fns = [...lambdaIds].sort();
+  const gen = useMemoGen();
   const key = active && (ids.length || fns.length)
-    ? `${ids.join(",")}|${fns.join(",")}` : "";
+    ? `${ids.join(",")}|${fns.join(",")}|${gen}` : "";
   const [out, setOut] = useState<CloudPlacement[] | null>(
     key ? memo.get(key) ?? null : null);
 

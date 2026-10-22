@@ -1,6 +1,7 @@
 // Access and health by location, for the Overview tile — one leg, memoised
 // per app and window like every other read in this product.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qGeo, runDql, type Timeframe } from "../utils/dql";
 
 export interface GeoRow {
@@ -13,7 +14,8 @@ export interface GeoRow {
 const memo = new Map<string, GeoRow[]>();
 
 export function useGeo(tf: Timeframe, appId?: string | null): GeoRow[] | null {
-  const key = appId ? `${tf.from}|${tf.to}|${appId}` : "";
+  const gen = useMemoGen();
+  const key = appId ? `${tf.from}|${tf.to}|${appId}|${gen}` : "";
   const [out, setOut] = useState<GeoRow[] | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

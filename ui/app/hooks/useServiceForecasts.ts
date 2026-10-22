@@ -9,6 +9,7 @@
 // Failures are only forecast where failures exist: projecting a flat zero
 // wastes a run to draw a line along the axis.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { forecast, type Forecast } from "../utils/forecast";
 
 export interface ServiceAhead {
@@ -45,7 +46,8 @@ const expr = (metric: string, id: string) =>
 export function useServiceForecasts(
   targets: ServiceTarget[], enabled: boolean,
 ): ServiceAhead[] {
-  const key = targets.map((t) => t.id).join(",");
+  const gen = useMemoGen();
+  const key = `${targets.map((t) => t.id).join(",")}|${gen}`;
   const [rows, setRows] = useState<ServiceAhead[]>([]);
 
   useEffect(() => {

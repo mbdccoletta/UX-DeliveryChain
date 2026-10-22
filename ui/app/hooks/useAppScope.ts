@@ -13,6 +13,7 @@
 // Fetched lazily and memoised: most sessions never switch application, and a
 // scope that has been resolved once does not change while the user looks at it.
 import { useCallback, useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qAppSeedGen2, qAppServices, qAppTraceIds,
   qAppServicesTopo, qAppServicesTopoMobile,
   qServiceRuntime, runDql } from "../utils/dql";
@@ -92,7 +93,8 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
 
   useEffect(() => {
     if (!rumAppId) { setScope(EMPTY); return; }
-    const memoKey = `${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`;
+    const gen = useMemoGen();
+    const memoKey = `${`${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`}|${gen}`;
     const hit = memo.get(memoKey);
     if (hit) { setScope(hit); return; }
 

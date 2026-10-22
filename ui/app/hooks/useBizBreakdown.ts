@@ -6,6 +6,7 @@
 // happens here instead, over rows the scan already returned: same BreakRow
 // shape out, so nothing downstream changed.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qBizBreakdown, runDql, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 /** The dimensions the board offers, and the column each one reads. */
@@ -21,12 +22,25 @@ export interface BreakRow {
   realHit: number;
 }
 
-const memo = new Map<string, BreakRow[]>();
+/** The rows, plus whether the server-side row cap cut them short.
+ *
+ *  This hook aggregates SESSION rows in the client, and the query returns at
+ *  most CAP of them. Past that the totals silently omit sessions and the
+ *  segment ranking comes from an arbitrary subset — which looked exactly like
+ *  a complete answer. The rows are still returned, because a partial ranking
+ *  beats none, but they now carry the fact so the board can say it. */
+export interface BreakRows extends Array<BreakRow> { partial?: boolean }
+
+/** The server-side row limit these are read under. */
+export const BREAKDOWN_CAP = 20000;
+
+const memo = new Map<string, BreakRows>();
 
 export function useBizBreakdown(tf: Timeframe, defs?: OutcomeDefs,
-  appId?: string | null): BreakRow[] | null {
-  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs ?? {})}`;
-  const [out, setOut] = useState<BreakRow[] | null>(memo.get(key) ?? null);
+  appId?: string | null): BreakRows | null {
+  const gen = useMemoGen();
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs ?? {})}|${gen}`;
+  const [out, setOut] = useState<BreakRows | null>(memo.get(key) ?? null);
 
   useEffect(() => {
     const hit = memo.get(key);
@@ -36,7 +50,7 @@ export function useBizBreakdown(tf: Timeframe, defs?: OutcomeDefs,
     (async () => {
       try {
         const rows = await runDql<Record<string, unknown>>(
-          qBizBreakdown(tf, defs, appId), 20000);
+          qBizBreakdown(tf, defs, appId), BREAKDOWN_CAP);
         /* the grouping the six DQL legs used to do — one pass, in memory */
         const acc = new Map<string, BreakRow>();
         const bump = (d: string, bucket: string, app: string, r: Record<string, unknown>) => {
@@ -71,11 +85,14 @@ export function useBizBreakdown(tf: Timeframe, defs?: OutcomeDefs,
           const g = byDim.get(row.d) ?? [];
           g.push(row); byDim.set(row.d, g);
         }
-        const res: BreakRow[] = [];
+        const res: BreakRows = [];
         for (const [, g] of byDim) {
           g.sort((a, b) => b.sessions - a.sessions);
           res.push(...g.slice(0, 40));
         }
+        /* the cap cut the session rows, so everything aggregated from them is
+           a floor rather than a total — said out loud, not inferred */
+        if (rows.length >= BREAKDOWN_CAP) res.partial = true;
         memo.set(key, res);
         if (live) setOut(res);
       } catch { if (live) setOut([]); }
