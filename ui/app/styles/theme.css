@@ -368,9 +368,15 @@ svg { shape-rendering: geometricPrecision; }
 @keyframes blip { 50% { opacity: 0.25; transform: scale(1.6); } }
 
 /* flow (sankey) */
-.flow-shell { height: clamp(360px,
-    max(calc(100vh - 240px), calc(var(--flow-rows, 10) * 30px + 96px)),
-    1500px); padding: 0; overflow: hidden;
+/* ROOM TO READ. 30px a row is the height of ONE line of text, and these rows
+   carry two — a name and its numbers — so sixteen routes arrived stacked
+   tight enough that the labels had to fight each other for a line. The row
+   allowance is a label's own height now, the viewport term gives back the
+   margin the page was hoarding, and the floor is high enough that a flow with
+   three routes still looks like a diagram rather than a strip. */
+.flow-shell { height: clamp(420px,
+    max(calc(100vh - 170px), calc(var(--flow-rows, 10) * 40px + 120px)),
+    1800px); padding: 0; overflow: hidden;
               display: flex; flex-direction: column; }
 .flow-shell canvas { display: block; width: 100%; flex: 1; min-height: 0; }
 
@@ -2950,6 +2956,20 @@ div:has(> header):has(main) > div {
 /* access and health by location — share of traffic as the bar, the judgement
    as the tone, against the application's own error share */
 .geo__rows { display: flex; flex-direction: column; gap: 5px; }
+/* the list's own way down and back up — a row, not a button pretending to be
+   one: it sits in the same column and carries the same quiet weight */
+/* the disclosure sign on a country row: mono, dim, and the same width open
+   or closed so the codes beside it stay in one column */
+.geo__ex { display: inline-block; width: 9px; margin-right: 5px;
+  font-style: normal; color: var(--ink-3); text-align: center; }
+.geo__r--on .geo__ex, .geo__r:hover .geo__ex { color: var(--ink); }
+/* a state row has no sign of its own — it is already under one */
+.geo__r--sub .geo__ex { visibility: hidden; }
+
+.geo__more { align-self: flex-start; background: none; border: none;
+  color: var(--ink-3); cursor: pointer; font: 600 10px var(--mono);
+  letter-spacing: 0.07em; text-transform: uppercase; padding: 4px 2px; }
+.geo__more:hover, .geo__more:focus-visible { color: var(--ink); outline: none; }
 /* the column names, on the rows' own grid so they cannot drift from them */
 .geo__hd { font: 700 9px var(--mono); letter-spacing: 0.09em;
   text-transform: uppercase; color: var(--ink-3); padding-bottom: 4px;

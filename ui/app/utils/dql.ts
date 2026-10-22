@@ -1275,8 +1275,22 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * scan. Per-session first so "a session with errors" is counted once however
  * many errors it took, then per application. Same field caveats as qImpacted.
  */
-export const qUxByApp = (tf: Timeframe) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+/**
+ * `rumAppId` narrows this to ONE application.
+ *
+ * The estate-wide form is what the comparison line needs, and it is also what
+ * silently loses an application on a real tenant: the answer is capped at a
+ * hundred rows, a production estate has more frontends than that, and the row
+ * that falls off the end is the one the reader is looking at. The symptom is
+ * an Apdex printing "—" on an application with hundreds of thousands of user
+ * actions, which reads as "not measurable" when it means "not returned".
+ *
+ * Scoped, the application cannot be crowded out by its neighbours — and the
+ * scan is a fraction of the estate's, which is the same lever that fixed
+ * qOrigins and qDomains.
+ */
+export const qUxByApp = (tf: Timeframe, rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
 | summarize errs = countIf(characteristics.classifier == "error"),
     // Whose code failed. A third party's beacon dying degrades the page; the
     // application's own API returning 404 breaks the feature the user came
