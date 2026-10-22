@@ -11,6 +11,7 @@
 // can position it. Cities are therefore a ranked list rather than a map, and
 // that is a fact about the data, not a shortcut.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qGeoCities, qGeoRegions, runDql, type Timeframe } from "../utils/dql";
 
 export interface PlaceRow {
@@ -51,7 +52,8 @@ function usePlaces(key: string, run: () => Promise<PlaceRow[]>): PlaceRow[] | nu
 /** The states of one country, keyed for the choropleth. */
 export function useRegions(tf: Timeframe, appId?: string | null,
   iso?: string | null): PlaceRow[] | null {
-  const key = appId && iso ? `r|${tf.from}|${tf.to}|${appId}|${iso}` : "";
+  const gen = useMemoGen();
+  const key = appId && iso ? `r|${tf.from}|${tf.to}|${appId}|${iso}|${gen}` : "";
   return usePlaces(key, async () => {
     const rows = await runDql<Record<string, unknown>>(
       qGeoRegions(tf, appId as string, iso as string), 40);

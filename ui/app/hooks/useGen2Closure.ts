@@ -14,6 +14,7 @@
 // Measured on a live estate / easyTravel mainframe: seven services from Smartscape,
 // one — MF easyTravelBusiness — from here, called by three of them.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qServicesGen2Calls, runDql } from "../utils/dql";
 
 export interface Gen2Service {
@@ -45,7 +46,8 @@ const memo = new Map<string, Gen2Service[]>();
 /** Classic-only services reachable from these, or null while loading. */
 export function useGen2Closure(serviceIds: string[], active = true): Gen2Service[] | null {
   const ids = [...serviceIds].sort();
-  const key = active && ids.length ? ids.join(",") : "";
+  const gen = useMemoGen();
+  const key = active && ids.length ? `${ids.join(",")}|${gen}` : "";
   const [out, setOut] = useState<Gen2Service[] | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

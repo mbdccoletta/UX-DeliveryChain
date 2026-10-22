@@ -7,6 +7,7 @@
 // nature: the board labels it Davis forecast, never mixing it with measured
 // figures. Memoised per (window, scope).
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qBizSeries, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 export interface Projection { point: number; lower: number; upper: number; quality: string }
@@ -67,7 +68,8 @@ async function forecastOne(
 
 export function useBizForecast(tf: Timeframe, appId: string | null,
   defs?: OutcomeDefs): BizForecast | null {
-  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs?.[appId ?? ""] ?? null)}`;
+  const gen = useMemoGen();
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs?.[appId ?? ""] ?? null)}|${gen}`;
   const [out, setOut] = useState<BizForecast | null>(memo.get(key) ?? null);
 
   useEffect(() => {

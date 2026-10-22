@@ -9,6 +9,7 @@
 // does not render and the query would be spend without a reader — and memoised
 // per application and timeframe for the life of the session.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qImpacted, runDql, type Timeframe } from "../utils/dql";
 
 export interface Impacted {
@@ -31,7 +32,8 @@ const memo = new Map<string, Impacted | null>();
 export function useImpacted(
   rumAppId?: string, tf?: Timeframe, active = false,
 ): Impacted | null {
-  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${gen}` : "";
   const [imp, setImp] = useState<Impacted | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

@@ -4,6 +4,7 @@
 // does the deltas. Memoised per window — the panel is opened by a click and
 // re-read only when the window changes.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qBizKpis, runDql, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 export interface BizPeriod {
@@ -26,7 +27,8 @@ const memo = new Map<string, BizKpis>();
 
 export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs,
   appId?: string | null): BizKpis | null {
-  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs ?? {})}`;
+  const gen = useMemoGen();
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs ?? {})}|${gen}`;
   const [out, setOut] = useState<BizKpis | null>(memo.get(key) ?? null);
 
   useEffect(() => {

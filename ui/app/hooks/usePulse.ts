@@ -9,6 +9,7 @@
 // Memoised per application and timeframe, like every other landing query: the
 // first page must not bill twice for being looked at twice.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qPulseBreakdown, qPulseSeries, runDql, type Timeframe } from "../utils/dql";
 
 export interface PulsePoint {
@@ -55,7 +56,8 @@ function rollup(
 }
 
 export function usePulse(rumAppId?: string, tf?: Timeframe): PulseData | null {
-  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${gen}` : "";
   const [data, setData] = useState<PulseData | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

@@ -4,6 +4,7 @@
 // memoised. A hit turns the route's dead end into "Open in Databases"; a miss
 // offers nothing, because a guessed id opens a page about something else.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qDbEntity, runDql } from "../utils/dql";
 
 export interface DbEntity { id: string; type: string; name: string }
@@ -13,7 +14,8 @@ const memo = new Map<string, DbEntity | null>();
 export function useDbEntity(
   address?: string | null, ns?: string, active = true,
 ): DbEntity | null {
-  const key = active && address ? `${address}|${ns ?? ""}` : "";
+  const gen = useMemoGen();
+  const key = active && address ? `${address}|${ns ?? ""}|${gen}` : "";
   const [out, setOut] = useState<DbEntity | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

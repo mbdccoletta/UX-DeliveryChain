@@ -9,6 +9,7 @@
 // forecast needs more past than the screen shows — while the horizon stays
 // about a third of the visible span, so the future never dwarfs the present.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { forecast, forecastPlan, type Forecast } from "../utils/forecast";
 import type { Timeframe } from "../utils/dql";
 
@@ -42,8 +43,9 @@ const memo = new Map<string, Forecast | null>();
 export function useMetricForecast(
   rumAppId?: string, tf?: Timeframe, metric?: Metric | null,
 ): Forecast | null {
+  const gen = useMemoGen();
   const key = rumAppId && tf && metric
-    ? `${rumAppId}|${tf.from}|${tf.to}|${metric}` : "";
+    ? `${rumAppId}|${tf.from}|${tf.to}|${metric}|${gen}` : "";
   const [fc, setFc] = useState<Forecast | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

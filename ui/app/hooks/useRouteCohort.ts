@@ -11,6 +11,7 @@
 // cannot: the Davis forecast (an analyzer over a timeseries query) and the
 // per-segment breakdown, which stay whole-application and say so on screen.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import {
   normalizeView, qCohortSessions, qPathSessions, runDql,
   type OutcomeDefs, type Timeframe,
@@ -87,8 +88,9 @@ export function useRouteCohort(
   const ctxKey = ctx
     ? `${ctx.deepest}|${ctx.outcomes}|${[...ctx.top].sort().join(",")}`
       + `|${[...ctx.tailStarts].sort().join(",")}` : "";
+  const gen = useMemoGen();
   const key = picks?.length && appId
-    ? `${tf.from}|${tf.to}|${appId}|${picks.join("\t")}|${ctxKey}`
+    ? `${tf.from}|${tf.to}|${appId}|${picks.join("\t")}|${ctxKey}|${gen}`
       + `|${defs ? JSON.stringify(defs) : ""}` : "";
   const [out, setOut] = useState<RouteCohort | null>(key ? memo.get(key) ?? null : null);
 

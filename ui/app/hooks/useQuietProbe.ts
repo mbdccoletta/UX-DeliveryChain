@@ -6,6 +6,7 @@
 // the day is empty, says THAT — instead of a bare "No coverage" that reads
 // as broken monitoring. Memoised per application entity.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qQuietProbe, runDql } from "../utils/dql";
 
 export interface QuietProbe { sessions: number; last: string | null }
@@ -13,7 +14,8 @@ export interface QuietProbe { sessions: number; last: string | null }
 const memo = new Map<string, QuietProbe>();
 
 export function useQuietProbe(entityId?: string, active = true): QuietProbe | null {
-  const key = active && entityId ? entityId : "";
+  const gen = useMemoGen();
+  const key = active && entityId ? `${entityId}|${gen}` : "";
   const [out, setOut] = useState<QuietProbe | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
