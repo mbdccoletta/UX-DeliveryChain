@@ -4,6 +4,7 @@
 // heading toward, with nothing about where it is now. These are the measured
 // numbers that go beside them.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qServiceVitals, runDql, type Timeframe } from "../utils/dql";
 
 export interface ServiceVitals {
@@ -21,7 +22,8 @@ export function useServiceVitals(
   serviceIds: string[], tf: Timeframe, active = true,
 ): Map<string, ServiceVitals> | null {
   const ids = [...serviceIds].sort();
-  const key = active && ids.length ? `${ids.join(",")}|${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = active && ids.length ? `${ids.join(",")}|${tf.from}|${tf.to}|${gen}` : "";
   const [out, setOut] = useState<Map<string, ServiceVitals> | null>(
     key ? memo.get(key) ?? null : null);
 

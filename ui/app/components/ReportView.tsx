@@ -17,7 +17,7 @@ import React from "react";
 import type { ChainData, SeqRow } from "../hooks/useChainData";
 import { useBizKpis, type BizPeriod } from "../hooks/useBizKpis";
 import { useBizForecast } from "../hooks/useBizForecast";
-import { useBizBreakdown } from "../hooks/useBizBreakdown";
+import { BREAKDOWN_CAP, useBizBreakdown } from "../hooks/useBizBreakdown";
 import { useDifficulty } from "../hooks/useDifficulty";
 import { useAppScope } from "../hooks/useAppScope";
 import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
@@ -181,6 +181,10 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   const geoRows = useGeo(data.tf, scopeApp || null);
   const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs);
   const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
+  /* the segment ranking read a capped number of session rows: past the cap it
+     is built from a subset, and a subset that looks like a total is the one
+     thing this board must not show */
+  const breakdownPartial = breakdown?.partial === true;
   const difficulty = useDifficulty(data.tf, scopeApp || null);
   // the SAME closure the delivery chain resolves — so "incidents in your
   // systems" counts exactly what a click on the button will show lit
@@ -998,7 +1002,18 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           own numbers. boardFacts builds them at ask time from the figures the
           tiles are rendering, including the ones that could NOT be measured,
           stated as such, so nothing fills a gap with a plausible number. */}
+      {breakdownPartial && (
+        <div className="banner">
+          <b>Segments are partial:</b> this application sent more sessions in this window than
+          the breakdown reads ({fmtN(BREAKDOWN_CAP)}), so the figures below the funnel are
+          built from the first {fmtN(BREAKDOWN_CAP)} and are floors, not totals. The funnel
+          and the conversion above are unaffected — they are counted server-side. Narrow the
+          window to make the segments whole.
+        </div>
+      )}
+
       <Intelligence subject="the Business Control board" className="bc__intel"
+        scope={`${scopeApp}|${data.tf.from}|${data.tf.to}`}
         starters={BOARD_STARTERS} facts={boardFacts} />
 
       <div className="bc__bar">

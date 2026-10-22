@@ -9,6 +9,7 @@
 // services call a store; the rest call none, and for them nothing is drawn.
 // A store node appears exactly where a service was measured talking to one.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qServiceDataStores, runDql } from "../utils/dql";
 
 export interface DataStore {
@@ -43,7 +44,8 @@ const memo = new Map<string, DataStore[]>();
 /** Stores these services call, or null while loading / nothing scoped. */
 export function useDataStores(serviceIds: string[], active = true): DataStore[] | null {
   const ids = [...serviceIds].sort();
-  const key = active && ids.length ? ids.join(",") : "";
+  const gen = useMemoGen();
+  const key = active && ids.length ? `${ids.join(",")}|${gen}` : "";
   const [out, setOut] = useState<DataStore[] | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

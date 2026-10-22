@@ -7,6 +7,7 @@
 // from the metric store — the same source the service forecasts use, which was
 // measured at 0 scanned bytes.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { binFor, runDql, type Timeframe } from "../utils/dql";
 import { forecast } from "../utils/forecast";
 
@@ -27,7 +28,8 @@ export function useServiceSeries(
   // sorted so the same set of services is the same cache key whatever order
   // the scope resolved them in
   const ids = [...serviceIds].sort();
-  const key = active && ids.length ? `${ids.join(",")}|${tf.from}|${tf.to}` : "";
+  const gen = useMemoGen();
+  const key = active && ids.length ? `${ids.join(",")}|${tf.from}|${tf.to}|${gen}` : "";
   const [series, setSeries] = useState<ServiceSeries | null>(
     key ? memo.get(key) ?? null : null);
 

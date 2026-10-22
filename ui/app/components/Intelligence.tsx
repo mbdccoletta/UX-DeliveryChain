@@ -47,13 +47,22 @@ const GROUND =
   + "of giving generic advice. Lead with what the reader should act on. Keep "
   + "it to a few short bullets.";
 
-export function Intelligence({ subject, starters, facts, className }: {
+export function Intelligence({ subject, starters, facts, scope, className }: {
   /** What this page IS, in the reader's words — it goes into every prompt. */
   subject: string;
   /** The questions this page can answer, most useful first. */
   starters: Starter[];
   /** The page's measured facts, built by the caller from what it renders. */
   facts: () => string;
+  /** WHAT THE ANSWER IS ABOUT. An answer is only true of the application and
+   *  window whose facts produced it, and this section lives at the top of a
+   *  page the reader keeps re-scoping: switching application left the old
+   *  reply sitting under the new selection, and a request still in flight
+   *  could land after the switch and describe the application the reader had
+   *  just left. Pass anything that identifies the scope — the caller knows
+   *  what it is — and the answer is dropped the moment it changes, along with
+   *  any reply that arrives for a scope that is no longer on screen. */
+  scope?: string;
   className?: string;
 }) {
   const { available, agentic } = useAssistState();
@@ -67,6 +76,14 @@ export function Intelligence({ subject, starters, facts, className }: {
    * opening a question unfolds it, because asking is the one moment you
    * certainly want to see it. */
   const [open, setOpen] = React.useState(true);
+  /* the scope the visible answer belongs to, and the one in flight */
+  const inFlight = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    inFlight.current = null;
+    setAsked(null);
+    setAnswer(null);
+    setState("idle");
+  }, [scope]);
 
   // a conversation starter that cannot run is worse than none at all
   if (!available || !starters.length) return null;
@@ -90,6 +107,8 @@ export function Intelligence({ subject, starters, facts, className }: {
       .slice(0, PROMPT_MAX);
 
   const ask = async (s: Starter) => {
+    const mine = scope ?? "";
+    inFlight.current = mine;
     setOpen(true);
     setAsked(s.label);
     setAnswer(null);
@@ -114,9 +133,13 @@ export function Intelligence({ subject, starters, facts, className }: {
             return typeof d?.text === "string" ? d.text : "";
           }).join("")
         : ((r as { text?: unknown }).text as string | undefined) ?? "";
+      /* the reader may have moved on while this was in flight; an answer
+         about the application they left is worse than no answer */
+      if (inFlight.current !== mine) return;
       setAnswer(text);
       setState(text ? "idle" : "failed");
     } catch {
+      if (inFlight.current !== mine) return;
       setState("failed");
     }
   };

@@ -4,6 +4,7 @@
 // memoised. A hit turns the route's dead end into "Open in Databases"; a miss
 // offers nothing, because a guessed id opens a page about something else.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qDbEntity, runDql } from "../utils/dql";
 
 export interface DbEntity { id: string; type: string; name: string }
@@ -13,12 +14,20 @@ const memo = new Map<string, DbEntity | null>();
 export function useDbEntity(
   address?: string | null, ns?: string, active = true,
 ): DbEntity | null {
-  const key = active && address ? `${address}|${ns ?? ""}` : "";
+  const gen = useMemoGen();
+  const key = active && address ? `${address}|${ns ?? ""}|${gen}` : "";
   const [out, setOut] = useState<DbEntity | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
     if (!key) { setOut(null); return; }
     if (memo.has(key)) { setOut(memo.get(key) ?? null); return; }
+    /* A NEW KEY MEANS THE OLD ANSWER IS NOT THIS ANSWER. Holding the
+       previous result while the new one loads let a screen render the
+       previous application's — or the previous window's — figures under the
+       new selection, and the caller's readiness check (result !== null)
+       could not tell the difference. Cleared before the fetch, so the screen
+       keeps its loading state until data that matches arrives. */
+    setOut(null);
 
     let live = true;
     (async () => {

@@ -66,6 +66,17 @@ export function resetScan(key: string): void {
 
 export const scanTotals = () => ({ bytes: scanned, queries, truncated, trace, inFlight });
 
+/** Has any query on this screen come back from a PARTIAL scan?
+ *
+ *  Grail stops a fetch at its 500 GB scan limit, returns state SUCCEEDED, and
+ *  puts the warning in the metadata — so a wide window quietly answers from
+ *  part of the data. This app detects that and counted it, and the counter
+ *  had no consumer: the figures were rendered and cached exactly as if they
+ *  were complete. Detected and ignored is not a guardrail.
+ *  The rows are still returned — withholding them would leave the reader with
+ *  nothing instead of something partial — but the screen now says so. */
+export const hasTruncation = () => truncated > 0;
+
 export function subscribeScan(f: () => void): () => void {
   subs.add(f);
   return () => { subs.delete(f); };

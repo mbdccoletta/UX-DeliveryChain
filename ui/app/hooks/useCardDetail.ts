@@ -6,6 +6,7 @@
 // that opens it and memoised per application, window and card, so re-opening
 // costs nothing.
 import { useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import {
   qDetailErrors, qDetailExperience, qDetailRequests, runDql, type Timeframe,
 } from "../utils/dql";
@@ -56,7 +57,8 @@ const memo = new Map<string, DetailRow[]>();
 export function useCardDetail(
   appId: string, tf: Timeframe, metric: DetailMetric | null,
 ): DetailRow[] | null {
-  const key = metric ? `${appId}|${tf.from}|${tf.to}|${metric}` : "";
+  const gen = useMemoGen();
+  const key = metric ? `${appId}|${tf.from}|${tf.to}|${metric}|${gen}` : "";
   const [rows, setRows] = useState<DetailRow[] | null>(
     key ? memo.get(key) ?? null : null);
 

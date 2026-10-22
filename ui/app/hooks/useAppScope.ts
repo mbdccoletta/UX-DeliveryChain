@@ -13,6 +13,7 @@
 // Fetched lazily and memoised: most sessions never switch application, and a
 // scope that has been resolved once does not change while the user looks at it.
 import { useCallback, useEffect, useState } from "react";
+import { useMemoGen } from "../utils/memo";
 import { qAppSeedGen2, qAppServices, qAppTraceIds,
   qAppServicesTopo, qAppServicesTopoMobile,
   qServiceRuntime, runDql } from "../utils/dql";
@@ -92,7 +93,8 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
 
   useEffect(() => {
     if (!rumAppId) { setScope(EMPTY); return; }
-    const memoKey = `${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`;
+    const gen = useMemoGen();
+    const memoKey = `${`${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`}|${gen}`;
     const hit = memo.get(memoKey);
     if (hit) { setScope(hit); return; }
 
@@ -144,12 +146,24 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
             .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
             .filter(Boolean);
         let since = "now()-10m";
-        let traceIds = await idsIn(since);
-        if (!traceIds.length) {
-          // the escalation stays on the CHEAP side of the wall
-          since = "now()-30m";
+        /* THE PROBE FAILS ALONE. This shared the outer try with the whole
+           scope construction, so a RUM permission or query failure threw
+           away a topology lookup that had already SUCCEEDED — and the chain
+           fell back to environment-wide services, as if the application's
+           own services were unknown. They were not; only trace-context
+           availability was. Those are different facts and they now fail
+           separately: an empty traceIds says "this application does not
+           propagate trace context, or we could not find out", and the
+           topology-derived scope stands either way. */
+        let traceIds: string[] = [];
+        try {
           traceIds = await idsIn(since);
-        }
+          if (!traceIds.length) {
+            // the escalation stays on the CHEAP side of the wall
+            since = "now()-30m";
+            traceIds = await idsIn(since);
+          }
+        } catch { /* no trace probe; the topology above still stands */ }
 
         /* THE EXPENSIVE READ, and the only one behind a decision. Topology
          * declares what the platform knows; spans measure what actually ran,
