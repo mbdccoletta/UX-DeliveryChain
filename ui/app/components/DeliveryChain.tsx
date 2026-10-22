@@ -1282,7 +1282,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
          </marker>`).join("");
       const vmax = Math.max(1, ...edges.map((e) => e.v));
       const drawn: Array<{ mx: number; my: number; v: number; label: string; op: number;
-        next: number | null; fcArrow: string; gapL: number; gapR: number }> = [];
+        late: number | null; early: number | null; fcArrow: string;
+        gapL: number; gapR: number }> = [];
       for (const e of edges) {
         const a = anchor(`nd-${e.s[0]}-${e.s[1]}`, "r");
         const b = anchor(`nd-${e.t[0]}-${e.t[1]}`, "l");
@@ -1338,20 +1339,28 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
           : ` · ${fmtN(e.bad)} ${hurtWord} (${(rate * 100).toFixed(rate >= 0.1 ? 0 : 1)}%)`;
         const lat = e.p50 && e.p50 > 0 ? ` · p50 ${fmtMs(e.p50)}`
           : e.p90 && e.p90 > 0 ? ` · p90 ${fmtMs(e.p90)} (the median reports 0)` : "";
-        /* THE LEG'S FORECAST: second half of the window against the first,
-         * continued for one FULL window ahead — next = 2·(2·h2 − h1)
-         * = 6·late − 2·v, so steady traffic projects ≈v. The first cut
-         * projected only the next HALF and compared it against the whole,
-         * which read every steady leg as "falling to half". Free — the scan
-         * already paid for the split; small legs (<10) stay quiet because a
-         * two-point line through noise is not a forecast. */
-        const next = e.late != null && e.v >= 10
-          ? Math.max(0, 6 * e.late - 2 * e.v) : null;
-        const fcArrow = next == null ? ""
-          : next > e.v * 1.1 ? "↗" : next < e.v * 0.9 ? "↘" : "→";
-        const pace = next == null ? ""
-          : fcArrow === "→" ? " · steady pace"
-          : ` · heading to ≈${fmtN(next)} at the current pace`;
+        /* THE LEG'S TREND IS MEASURED, NOT PROJECTED.
+         * This used to extrapolate — next = 6·late − 2·v, a straight line
+         * through two points, printed as "heading to ≈N". Every other
+         * forecast in this product comes from the platform's own predictive
+         * analyzer and is shown only when the analyzer calls it VALID; a
+         * hand-rolled line beside them claimed the same authority without
+         * earning it, and the comment above it conceded as much.
+         * Running the analyzer per leg is not the answer either: a chain has
+         * dozens of edges and each run is an execution plus polling.
+         * So the projection goes and the MEASUREMENT stays. The two halves of
+         * the window are already counted — the scan paid for them — and
+         * "more in the second half than the first" is a fact about what
+         * happened, which is what this app is for. Small legs (<10) stay
+         * quiet: a difference of two over a window is not a direction. */
+        const late = e.late != null && e.v >= 10 ? e.late : null;
+        const early = late == null ? null : e.v - late;
+        const fcArrow = late == null || early == null ? ""
+          : late > early * 1.1 ? "↗" : late < early * 0.9 ? "↘" : "→";
+        const pace = late == null || early == null ? ""
+          : fcArrow === "→" ? " · steady across the window"
+          : ` · ${fmtN(late)} in the second half of the window`
+            + ` against ${fmtN(early)} in the first`;
         // circuit-trace routing: straight runs with a 45° bend, like a PCB —
         // the geometry itself reads as technology, no decoration needed
         const mx = (a.x + b.x) / 2;
@@ -1375,7 +1384,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
          * part that disappears. The gap is what the anchors already know:
          * a.x is the source column's right edge, b.x the target's left. */
         drawn.push({ mx, my: (a.y + b.y) / 2, v: e.v, label: e.label, op,
-          next, fcArrow,
+          late, early, fcArrow,
           /* The RIGHT edge of the writable gap is the target COLUMN's border,
            * not the target node: the backend elbow sits deep inside its band,
            * so clamping to the node let "288" slide under the panel and be
@@ -1417,7 +1426,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
        * land on still shows its volume. */
       const byClaim = new Map<string, typeof drawn>();
       for (const dd of drawn.filter((x) => x.op > 0.3)) {
-        if (dd.next == null || dd.fcArrow === "→") continue;
+        if (dd.late == null || dd.fcArrow === "→") continue;
         const claim = `${dd.label}|${dd.fcArrow}`;
         const g = byClaim.get(claim);
         if (g) g.push(dd); else byClaim.set(claim, [dd]);
@@ -1428,18 +1437,18 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         .sort((a, b) => b.v - a.v);
       for (const dd of speakers) {
         // the filter above already proved these, but narrow it for the compiler
-        if (dd.next == null || dd.fcArrow === "→") continue;
-        const next = dd.next;
+        if (dd.late == null || dd.early == null || dd.fcArrow === "→") continue;
+        const late = dd.late, early = Math.max(1, dd.early);
         // one label per distinct figure: consecutive hops carry the same volume
         const k = `${dd.v}|${dd.label}`;
         if (seen.has(k)) continue;
         seen.add(k);
         // ~7.4px per mono glyph at the label's 12px (theme: .dcf-svg text).
-        // A PERCENTAGE, because "↘ ≈24.1k" had to be decoded ("o que quer
-        // dizer?") while "sessions ↘ 21%" reads itself. The absolute
-        // projection moves into the label's own hover, which spells the
-        // whole mechanism out.
-        const pct = Math.round(Math.abs(next / dd.v - 1) * 100);
+        // A PERCENTAGE, because "↘ ≈24.1k" had to be decoded while
+        // "sessions ↘ 21%" reads itself. It is now the measured change
+        // ACROSS the window — second half against first — and the hover
+        // spells out both halves.
+        const pct = Math.round(Math.abs(late / early - 1) * 100);
         const full = `${dd.label} ${dd.fcArrow} ${pct}%`;
         /* the NOUN survives the squeeze, not the percentage: two bare
          * "↘ 17%" labels on neighbouring legs read as the same thing, and
@@ -1480,7 +1489,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         placed.push({ x: lx, y: ly, w: need });
         const word = dd.fcArrow === "↘" ? "slowing" : "growing";
         parts.push(`<text x="${lx}" y="${ly}">${txt}
-          <title>This flow is ${word}: the window's second half ran ${pct}% ${dd.fcArrow === "↘" ? "under" : "over"} the first. At that pace the next window carries ≈${fmtN(next)} ${dd.label} (now: ${fmtN(dd.v)}).</title></text>`);
+          <title>This flow is ${word}: ${fmtN(late)} ${dd.label} in the second half of the window against ${fmtN(early)} in the first — ${pct}% ${dd.fcArrow === "↘" ? "under" : "over"}. Measured across the window, not projected beyond it: the forecasts in this app come from the platform's predictive analyzer, and a leg does not get one.</title></text>`);
       }
       svg.innerHTML = `<defs>${defs}</defs>` + parts.join("");
     };

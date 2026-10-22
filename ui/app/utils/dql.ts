@@ -1057,7 +1057,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 export const qDomains = (tf: Timeframe) => {
   /* On a shifted/absolute window tfMid is null — emit a literal null so the
    * client keeps its "no forecast" contract. The old fallback "now()" turned
-   * unknown into a hard 0 and every leg forecast "heading to ≈0". */
+   * unknown into a hard 0 and every leg's second half reading as empty. */
   const mid = tfMid(tf);
   return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
