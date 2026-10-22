@@ -1,6 +1,7 @@
 // Data layer — every query here was validated against a live estate
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
+import { FC_HIST_CAP_MIN } from "./forecast";
 import { isScanLimit, noteScan, noteScanStart } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
@@ -721,8 +722,14 @@ export const qBizSeries = (
    * 17 GB per call on a live estate (two calls per board load). Merging the
    * two metrics into one call was tried and rejected: the analyzer forecasts
    * only the first series and silently drops the second. */
-  const history = `now()-${span * 3}m`;
-  const interval = Math.max(5, Math.round(span / 8));
+  /* AND THE SAME CEILING THE OTHER FORECASTS OBEY. Three windows of history
+   * with no cap meant the supported 24-hour window asked the analyzer for
+   * SEVENTY-TWO hours of RUM — past the ceiling every other forecast in this
+   * app respects, and the one bound that keeps a wide window from billing
+   * like a wide window. FC_HIST_CAP_MIN is 24 hours. */
+  const histMin = Math.min(span * 3, FC_HIST_CAP_MIN);
+  const history = `now()-${histMin}m`;
+  const interval = Math.max(5, Math.round(histMin / 24));
   const appFilter = rumAppId
     ? `\n| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"` : "";
   const agg = metric === "sessions" ? "sessions = count()" : "conversions = sum(reached)";
