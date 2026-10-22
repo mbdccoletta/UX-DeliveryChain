@@ -250,6 +250,30 @@ smartscapeNodes "FRONTEND"
  * the timeframe, and user.sessions is a small store (134k rows/24h measured
  * on a live estate, 2026-08-25).
  */
+/**
+ * THE NUMBER THE SESSIONS LIST WILL SHOW.
+ *
+ * The card counts sessions from `user.events` — every session with an event
+ * in the window — and the hand-off opens Users & Sessions, which reads
+ * `user.sessions`. Two stores, two populations: 426 against 180 on a live
+ * estate, and a reader comparing them reads a defect, because explaining a
+ * gap is not the same as not having one.
+ *
+ * So the card asks the OTHER store for its own figure and prints it beside
+ * the first. Both numbers are then true, both are on screen, and the one the
+ * button opens is stated before it is pressed. user.sessions is small —
+ * 134k rows per 24h measured on a live estate — so this costs a fraction of
+ * the RUM scans this page already pays for.
+ *
+ * Filtered on `frontend.name`, which is what the explorer's own Frontends
+ * chip matches; the inventory name is a different string and matches nothing.
+ */
+export const qListedSessions = (tf: Timeframe, frontendName: string) => `
+fetch user.sessions, from: ${tf.from}, to: ${tf.to}
+| expand fe = frontend.name
+| filter fe == "${frontendName.replace(/["\\]/g, "")}"
+| summarize sessions = countDistinct(dt.rum.session.id)`;
+
 export const qFrontendNames = () => `
 fetch user.sessions, from: now()-24h
 | expand ent = dt.rum.application.entities

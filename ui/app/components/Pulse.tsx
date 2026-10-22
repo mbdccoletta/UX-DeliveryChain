@@ -39,6 +39,7 @@ import { useServiceSeries } from "../hooks/useServiceSeries";
 import { useServiceVitals, type ServiceVitals } from "../hooks/useServiceVitals";
 import { aheadOf, type Forecast } from "../utils/forecast";
 import { useUxOverview } from "../hooks/useUxOverview";
+import { useListedSessions } from "../hooks/useListedSessions";
 import { originOf } from "./DeliveryChain";
 import { XmarkIcon,
   AnalyticsIcon, DesktopIcon, HttpIcon,
@@ -116,6 +117,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * on it, because the inventory-name fallback re-created the documented
    * empty-list failure while the name scan was still in flight */
   const feName = (app && feNames?.get(app.entity ?? "")) || "";
+  /* What the sessions hand-off will actually list, counted from the store the
+     explorer itself reads — see qListedSessions. */
+  const listedSessions = useListedSessions(data.tf, feName || null);
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
   const [geoSel, setGeoSel] = useState<string | null>(null);
@@ -636,6 +640,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
       <CleanCard
         sessions={impacted?.sessions ?? app.sessions}
         realSessions={impacted?.realSessions ?? null}
+        listedSessions={listedSessions}
         clean={clean} tone={tone} name={app.name} isMobile={!!isMobile}
         series={pulse?.series ?? []}
         actionsPerMin={perMin(pulse?.actions ?? 0)}
@@ -1528,6 +1533,10 @@ interface CardProps {
    *  what makes it comparable to error-free beside it; this is what makes it
    *  comparable to Users & Sessions, which lists real users. */
   realSessions?: number | null;
+  /** What the sessions hand-off will list — counted from user.sessions, the
+   *  store the explorer reads, so the card can state it instead of leaving
+   *  the reader to discover that two stores count two populations. */
+  listedSessions?: number | null;
   /** Opens one service's own page in the platform's Services app. */
   onOpenService?: (name: string) => void;
   /** The domains this application contacts, busiest first, with their volume. */
@@ -1824,19 +1833,23 @@ function CleanCard(p: CardProps) {
               <em className="tk-note__k"> of {fmtK(p.sessions)}</em>
             </div>
           )}
-          {/* WHAT THE BUTTON WILL SHOW, SAID BEFORE IT IS PRESSED. "Analyze
-              user sessions" opens the FINISHED sessions list — the view whose
-              filter grammar this app can write — and a session only finishes
-              after its inactivity timeout. In a two-hour window most of them
-              have not, so that list is always shorter than this count, and a
-              reader who compares them without being told reads a defect. The
-              gap IS the sessions still running. */}
-          <div className="tk-note tk-note--go"
-            title={`A session finishes after its inactivity timeout, so the `
-              + `list shows fewer than the count above. The difference is the `
-              + `sessions still running.`}>
-            the sessions list shows the finished ones
-          </div>
+          {/* THE NUMBER THE BUTTON OPENS, NOT A WARNING ABOUT IT. Saying
+              "the list shows the finished ones" explained a gap; it did not
+              close one, and a reader is entitled to two figures that agree
+              rather than one that has to be defended. This is counted from
+              user.sessions — the store Users & Sessions itself reads — so it
+              is not an estimate of what the list will show, it is what the
+              list will show. */}
+          {p.listedSessions != null && (
+            <div className="tk-note"
+              title={`Counted from user.sessions, the store Users & Sessions `
+                + `reads. The figure above counts every session with an event `
+                + `in the window, from user.events — two stores, two `
+                + `populations, both true.`}>
+              {fmtK(p.listedSessions)} in the sessions list
+              <em className="tk-note__k"> what the button opens</em>
+            </div>
+          )}
 
           {/* THE SCALE IS NOT A HEADLINE. This footnote repeated the band word
               already printed as the biggest thing on the screen, added the

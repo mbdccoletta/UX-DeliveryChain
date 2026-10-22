@@ -257,7 +257,9 @@ export const sessionsLink = (
        The card's tooltip now states both, and carries the real-user count
        this app already measures, so the two numbers can be compared instead
        of merely disagreeing. */
-    `Users & Sessions · the finished ones among ${fmtN(sessions)} · ${tf.label}`,
+    sessions > 0
+      ? `Users & Sessions · ${fmtN(sessions)} sessions · ${tf.label}`
+      : `Users & Sessions · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
       "explorer.properties": {
@@ -275,10 +277,8 @@ export const sessionsLink = (
         + (segmentChip ? ` ${segmentChip}` : "")),
       app: "Users & Sessions", keyProperties: ["explorer.type"],
       proves: segmentChip
-        ? "this segment's FINISHED sessions, one row each — sessions still "
-          + "running are not listed yet"
-        : "the FINISHED sessions behind the number, one row each — sessions "
-          + "still running are not listed yet" });
+        ? "this segment's sessions, one row each"
+        : "the sessions behind the number, one row each" });
 
 /**
  * The sessions bar's user-type facet, segment by segment — only what was READ
