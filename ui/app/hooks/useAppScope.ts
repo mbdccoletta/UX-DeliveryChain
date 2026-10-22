@@ -91,10 +91,15 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
   const [paid, setPaid] = useState<Set<string>>(() => new Set());
   const wantSpans = !!rumAppId && paid.has(rumAppId);
 
+  /* THE GENERATION IS READ IN THE BODY, not in the effect. A hook call
+     inside useEffect is not a hook call — React counts them per render, in
+     order — and putting it there threw invalid-hook-call and took the whole
+     Overview down with it. */
+  const gen = useMemoGen();
+
   useEffect(() => {
     if (!rumAppId) { setScope(EMPTY); return; }
-    const gen = useMemoGen();
-    const memoKey = `${`${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}`}|${gen}`;
+    const memoKey = `${rumAppId}|${appEntity ?? ""}|${wantSpans ? "spans" : "free"}|${gen}`;
     const hit = memo.get(memoKey);
     if (hit) { setScope(hit); return; }
 
