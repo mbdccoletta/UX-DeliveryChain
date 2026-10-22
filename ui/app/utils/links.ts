@@ -1662,35 +1662,52 @@ export function rowDrilldown(
  * an observed url because deducing one from another has failed every time.
  */
 /**
- * USERS & SESSIONS, AS A URL — because the intent did not carry the window or
- * the filter.
+ * USERS & SESSIONS, AS A URL — copied from the app's own address bar.
  *
- * Every hand-off to the sessions explorer was built as an intent with
- * `dt.timeframe` and `explorer.properties.filters` in its payload. Measured on
- * a live estate: the app opened on its own default window, listing the whole
- * environment. Both the Overview's "Analyze user sessions" and the geo drill's
- * "analyze BR sessions with errors" landed unfiltered — and an unfiltered
- * explorer reads as a working button, which is the worst way for a hand-off
- * to fail.
+ * This was first built as an intent carrying `dt.timeframe` and
+ * `explorer.properties.filters`. Measured: the app honoured neither and opened
+ * on its default window listing the whole environment. Then it was built as a
+ * url with a DEDUCED path, which was worse: a path that does not exist lands
+ * on the app's default page, so it still opened unfiltered and now looked
+ * like the fix had worked.
  *
- * So this follows the Services explorer's precedent: a url pinned to the
- * grammar the app itself publishes, which is already documented above
- * filterChip —
+ * Observed, filtering by hand in the app and copying the bar (2026-10-22):
  *
- *   /ui/apps/dynatrace.users.sessions/explorer/sessions/finished-sessions
- *     ?tf=<ISO>;<ISO>&perspective=general
- *     #filtering=Frontends = easytrade
+ *   /ui/apps/dynatrace.users.sessions/sessions/finished-sessions
+ *     ?tf=now-2h%3Bnow&perspective=general&sort=start_time%3Adescending
+ *     #filtering=Frontends+%3D+Intranet_85_-_TI_-_Web
  *
- * The chips come in pre-formed from SESSION_CHIP and chips(), exactly as the
- * intent payload took them, so the quoting rules stay in one place.
+ * Four things that were each wrong in the guess:
+ *   · there is NO `explorer/` segment — the deduction's only real mistake and
+ *     the one that broke it
+ *   · `tf` is the app's own RELATIVE grammar, `now-2h;now`, not ISO bounds,
+ *     and `now` carries no parentheses
+ *   · `sort=start_time:descending` travels with it
+ *   · the fragment is form-encoded: spaces are `+`, not `%20`
+ *
+ * And the value is the FRONTEND name — `Intranet_85_-_TI_-_Web`, underscores
+ * and all — not the display name the picker shows, which is the distinction
+ * useFrontendNames exists to resolve.
  */
+const SESSIONS_PATH = "/ui/apps/dynatrace.users.sessions/sessions/finished-sessions";
+
+/** The app's own time grammar: `now-2h`, not DQL's `now()-2h`. */
+const tfApp = (e: string): string => {
+  const v = e.trim().replace(/^"(.*)"$/, "$1");
+  if (/^now\(\)$/.test(v)) return "now";
+  const rel = /^now\(\)\s*-\s*(\d+[smhdw])$/.exec(v);
+  if (rel) return `now-${rel[1]}`;
+  return tfIso(v);
+};
+
+/** Form encoding, which is what the filtering fragment was observed to use. */
+const formEnc = (v: string) => encodeURIComponent(v).replace(/%20/g, "+");
+
 export function sessionsExplorerHref(tf: Timeframe, filters: string): string {
-  const q = new URLSearchParams({
-    tf: `${tfIso(tf.from)};${tfIso(tf.to)}`,
-    perspective: "general",
-  });
-  const path = `/ui/apps/${SESSIONS_LIST.appId}/explorer/sessions/finished-sessions?${q}`
-    + (filters ? `#filtering=${encodeURIComponent(filters)}` : "");
+  const q = `tf=${encodeURIComponent(`${tfApp(tf.from)};${tfApp(tf.to)}`)}`
+    + `&perspective=general&sort=${encodeURIComponent("start_time:descending")}`;
+  const path = `${SESSIONS_PATH}?${q}`
+    + (filters ? `#filtering=${formEnc(filters)}` : "");
   try {
     const base = getEnvironmentUrl();
     return base ? new URL(path, base).toString() : path;
