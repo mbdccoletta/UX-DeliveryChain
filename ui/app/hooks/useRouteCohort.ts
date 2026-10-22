@@ -27,7 +27,9 @@ export interface CohortFacts {
   /** The failure cost, inside the cohort: conversion with and without errors. */
   cleanN: number; cleanConv: number; hitConv: number;
 }
-export interface RouteCohort { cur: CohortFacts; prev: CohortFacts; sampled: boolean }
+export interface RouteCohort {
+  /** The query did not answer. NOT the same as a cohort with no sessions. */
+  failed?: boolean; cur: CohortFacts; prev: CohortFacts; sampled: boolean }
 
 const ZERO: CohortFacts = { customers: 0, converted: 0, hit: 0, crashed: 0, sessions: 0,
   engaged: 0, waited: 0, cleanN: 0, cleanConv: 0, hitConv: 0 };
@@ -111,7 +113,16 @@ export function useRouteCohort(
         const res: RouteCohort = { cur: a.facts, prev: b.facts, sampled: a.sampled || b.sampled };
         memo.set(key, res);
         if (live) setOut(res);
-      } catch { if (live) setOut({ cur: { ...ZERO }, prev: { ...ZERO }, sampled: false }); }
+      } catch {
+        /* A FAILURE IS NOT AN EMPTY MEASUREMENT. This used to answer a failed
+           query with zeroes, and ReportView reads cur.sessions === 0 as proof
+           that nobody walked the selected routes: it drops the selection,
+           shows whole-application figures and advises widening the window. A
+           permission error or a timeout therefore silently changed what the
+           board was about, and explained it with a reason that was not true.
+           `failed` says which of the two happened. */
+        if (live) setOut({ cur: { ...ZERO }, prev: { ...ZERO }, sampled: false, failed: true });
+      }
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
