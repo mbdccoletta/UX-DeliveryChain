@@ -284,7 +284,26 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * at most four per application, which no limit can truncate. */
   const devices = d.origins.filter((r) => r.appId === appId);
   const domains = d.domains.filter((r) => r.appId === appId);
-  const devSessions = devices.reduce((a, r) => a + r.sessions, 0);
+  const devMined = devices.reduce((a, r) => a + r.sessions, 0);
+  /* ONE TOTAL FOR THIS APPLICATION, ON EVERY SCREEN THAT NAMES IT.
+   *
+   * The origin rows are mined from the EVENT store: every session that fired
+   * an event in the window, grouped by who sent it. The Overview's headline
+   * and this screen's own drawer now count the SESSION store — what Users &
+   * Sessions lists. Both are true and they are not the same population, so a
+   * reader moving from one to the other met "181 sessions" above and "235
+   * SESSIONS" here, in the same word, about the same application.
+   *
+   * The Overview had already solved this shape: the mined rows give the
+   * PROPORTIONS, the session scan gives the TOTAL, and the two are scaled
+   * together. The same rule here keeps both invariants — the layer's KPI is
+   * still exactly the sum of the cards drawn under it, and that sum is now
+   * the number every other screen prints for this application. */
+  const devScale = impacted && impacted.sessions > 0 && devMined > 0
+    ? impacted.sessions / devMined : 1;
+  const originN = (n: number) => Math.round(n * devScale);
+  const devSessions = impacted && impacted.sessions > 0 && devMined > 0
+    ? impacted.sessions : devMined;
 
   /* ── measured harm, per origin ──
    * MEASURED now, per origin row (qOrigins carries max-error-per-session
@@ -293,10 +312,10 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
    * estimate survives only as the fallback for cached payloads written
    * before the column existed. Null while nothing has arrived — a node must
    * never be painted green because the evidence has not come. */
-  const realSessions = devices.reduce((a, r) => {
+  const realSessions = Math.round(devices.reduce((a, r) => {
     const o = originOf(r.agent, r.utype);
     return o === "Browsers" || o === "Mobile" ? a + r.sessions : a;
-  }, 0);
+  }, 0) * devScale);
   const hitPerOrigin = (o: Origin, total: number): number | null => {
     const rows = devices.filter((r) => originOf(r.agent, r.utype) === o);
     if (rows.length > 0 && rows.every((r) => r.hit != null)) {
@@ -618,7 +637,8 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           per.set(o, (per.get(o) ?? 0) + r.sessions);
         }
         const rows = [...per.entries()].sort((a, b) => b[1] - a[1]);
-        return rows.length ? rows.map<Elo>(([o, n]) => {
+        return rows.length ? rows.map<Elo>(([o, mined]) => {
+          const n = originN(mined);
           // The audience layer wears the harm done to that audience. Without
           // this, an application whose every session hit an error drew a calm
           // green chain while the landing page showed 0% error-free.
@@ -910,7 +930,9 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   for (const [oi, o] of layers[0].items.slice(0, NODE_CAP).entries()) {
     if (o.miss) continue;
     const rows = devices.filter((r) => originOf(r.agent, r.utype) === o.nm);
-    const sess = rows.reduce((a, r) => a + r.sessions, 0);
+    // scaled like the card it leaves, or the ribbon would contradict the
+    // number printed on the node it starts from
+    const sess = originN(rows.reduce((a, r) => a + r.sessions, 0));
     const late = rows.reduce<number | null>((a, r) =>
       a == null || r.late == null ? null : a + r.late, 0);
     if (sess) edges.push({ s: [0, oi], t: [2, 0], v: sess, label: "sessions",
