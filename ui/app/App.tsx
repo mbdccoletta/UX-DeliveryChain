@@ -408,8 +408,13 @@ export function App() {
                    * filled the bar with a name the store never uses and the
                    * list read "no sessions" (documented failure) */
                   if (intentsAvailable() && a && fe) {
-                    openIntent(sessionsLink(tf, fe,
-                      uxMap?.get(current)?.sessions ?? a.sessions));
+                    /* No count in the meta line here: the card's figure and
+                       the list's are two different populations, and quoting
+                       the wrong one in the hand-off is what made a reader
+                       compare them and find a defect. The Overview prints
+                       both, side by side, which is where that comparison
+                       belongs. */
+                    openIntent(sessionsLink(tf, fe, 0));
                   } else { setAppId(current); set({ tab: "flow", sel: null }); }
                 }} />
             </Boundary>
