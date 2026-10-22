@@ -29,6 +29,13 @@ export function useJourneys(
   useEffect(() => {
     if (!key) { setOut(null); return; }
     if (memo.has(key)) { setOut(memo.get(key) ?? null); return; }
+    /* A NEW KEY MEANS THE OLD ANSWER IS NOT THIS ANSWER. Holding the
+       previous result while the new one loads let a screen render the
+       previous application's — or the previous window's — figures under the
+       new selection, and the caller's readiness check (result !== null)
+       could not tell the difference. Cleared before the fetch, so the screen
+       keeps its loading state until data that matches arrives. */
+    setOut(null);
     let live = true;
     (async () => {
       try {

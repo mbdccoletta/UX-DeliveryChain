@@ -550,6 +550,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           built from what the page rendered, so an answer can only cite what
           the reader can also see. */}
       <Intelligence subject="the Overview of this application"
+        scope={`${appId}|${data.tf.from}|${data.tf.to}`}
         starters={OVERVIEW_STARTERS} facts={overviewFacts} />
 
       {/* THE ESTATE LINE IS GONE. This page is scoped to ONE application —
