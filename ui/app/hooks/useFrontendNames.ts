@@ -18,7 +18,7 @@ let inflight: Promise<Map<string, string>> | null = null;
 
 function load(): Promise<Map<string, string>> {
   if (!inflight) {
-    inflight = runDql<{ ent: string; fe: string; n: string }>(qFrontendNames(), 100)
+    inflight = runDql<{ ent: string; fe: string; n: string }>(qFrontendNames(), 1000)
       .then((rows) => {
         const m = new Map<string, string>();
         for (const r of rows) {
