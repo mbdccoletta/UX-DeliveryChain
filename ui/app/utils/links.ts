@@ -240,7 +240,15 @@ export const sessionsLink = (
   segmentLabel?: string,
 ): DeepLink =>
   link(segmentLabel ?? "Analyze user sessions",
-    `Users & Sessions · ${fmtN(sessions)} sessions · ${tf.label}`,
+    /* FEWER ROWS THAN THE NUMBER, AND THAT IS CORRECT. This opens the
+       FINISHED sessions list, which is the only one of the app's views that
+       accepts a Frontends filter — and a session only finishes after its
+       inactivity timeout. So a 2-hour window whose card counts 148 opens on
+       27: the other 121 are still running. Measured on a live estate, and
+       reported as a contradiction, which it looked like because nothing said
+       the two were counting different things. The meta line says it now, so
+       the reader is told before the click rather than left to discover it. */
+    `Users & Sessions · the finished ones among ${fmtN(sessions)} · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
       "explorer.properties": {
@@ -258,8 +266,10 @@ export const sessionsLink = (
         + (segmentChip ? ` ${segmentChip}` : "")),
       app: "Users & Sessions", keyProperties: ["explorer.type"],
       proves: segmentChip
-        ? "this segment's sessions, one row each"
-        : "the sessions behind the number, one row each" });
+        ? "this segment's FINISHED sessions, one row each — sessions still "
+          + "running are not listed yet"
+        : "the FINISHED sessions behind the number, one row each — sessions "
+          + "still running are not listed yet" });
 
 /**
  * The sessions bar's user-type facet, segment by segment — only what was READ

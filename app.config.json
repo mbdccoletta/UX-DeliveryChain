@@ -2,7 +2,7 @@
   "environmentUrl": "https://your-environment.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
-    "version": "0.9.40",
+    "version": "0.9.41",
     "description": "Every layer a user request crosses, and what each one costs them.",
     "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",
