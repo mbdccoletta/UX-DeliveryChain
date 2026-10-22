@@ -267,9 +267,8 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
         safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
         safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
         safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 200, cut),
-        safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
-          Q.DAVIS_ROLLUP_CAP),
-        safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf), bag, 300),
+        safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag, Q.DAVIS_ROLLUP_CAP, cut),
+        safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf), bag, 300, cut),
       ]);
       if (cancelled) return;
 
