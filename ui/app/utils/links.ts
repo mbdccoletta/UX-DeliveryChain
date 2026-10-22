@@ -240,7 +240,24 @@ export const sessionsLink = (
   segmentLabel?: string,
 ): DeepLink =>
   link(segmentLabel ?? "Analyze user sessions",
-    `Users & Sessions · ${fmtN(sessions)} sessions · ${tf.label}`,
+    /* FEWER ROWS THAN THE NUMBER, AND THAT IS CORRECT — but not for the
+       reason first written here. The claim was that the finished-sessions
+       list is the only view accepting a Frontends filter; the reader's own
+       screenshot shows Recent accepting one, so that was wrong and is struck.
+       Measured on a live estate, both views filtered to one frontend over the
+       same two hours: this app counted 250 sessions, Recent listed 92.
+       Finished-versus-running does not explain a gap that size. Two things
+       do, and both are differences in WHAT is counted:
+         · Users & Sessions lists REAL USERS; this card counts everything,
+           robots and synthetic monitors included, because the error-free
+           figure beside it has to share its base
+         · it lists sessions that STARTED in the window; this counts every
+           session that was ACTIVE in it, so a session that began earlier and
+           is still running is here and not there
+       The card's tooltip now states both, and carries the real-user count
+       this app already measures, so the two numbers can be compared instead
+       of merely disagreeing. */
+    `Users & Sessions · the finished ones among ${fmtN(sessions)} · ${tf.label}`,
     withTf(tf, {
       "explorer.type": "sessions",
       "explorer.properties": {
@@ -258,8 +275,10 @@ export const sessionsLink = (
         + (segmentChip ? ` ${segmentChip}` : "")),
       app: "Users & Sessions", keyProperties: ["explorer.type"],
       proves: segmentChip
-        ? "this segment's sessions, one row each"
-        : "the sessions behind the number, one row each" });
+        ? "this segment's FINISHED sessions, one row each — sessions still "
+          + "running are not listed yet"
+        : "the FINISHED sessions behind the number, one row each — sessions "
+          + "still running are not listed yet" });
 
 /**
  * The sessions bar's user-type facet, segment by segment — only what was READ
