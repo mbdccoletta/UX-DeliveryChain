@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Q from "../utils/dql";
 import { bumpMemoGen } from "../utils/memo";
-import { hasTruncation, noteCachedTruncation } from "../utils/cost";
+import { noteCachedTruncation } from "../utils/cost";
 import { normalizeView, num, runDql, type Timeframe } from "../utils/dql";
 import * as cache from "../utils/cache";
 
@@ -180,10 +180,18 @@ export function mergeJourneys(rows: Array<Record<string, unknown>>): SeqRow[] {
   return [...byKey.values()].sort((a, b) => b.sessions - a.sessions);
 }
 
-/** Runs a query tolerating failure (returns [] and records the error). */
-async function safe<T>(label: string, q: string, bag: string[], limit = 200): Promise<T[]> {
+/** Runs a query tolerating failure (returns [] and records the error).
+ *
+ *  `cut` collects the truncation of THESE queries. The page-wide counter in
+ *  cost.ts is right for the banner and wrong for the cache: it is sticky, it
+ *  includes every unrelated drill-down, and a payload stamped from it
+ *  inherits somebody else's partial scan — and then re-raises it forever on
+ *  every restore. */
+async function safe<T>(
+  label: string, q: string, bag: string[], limit = 200, cut?: { hit: boolean },
+): Promise<T[]> {
   try {
-    return await runDql<T>(q, limit);
+    return await runDql<T>(q, limit, cut ? () => { cut.hit = true; } : undefined);
   } catch (e: unknown) {
     bag.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
     return [];
@@ -243,20 +251,22 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
         }
       }
 
+      /* collects the truncation of THIS load's own queries — see safe() */
+      const cut = { hit: false };
       const [
         rawApps, appNames, gen2Apps, origins, domains,
         calls, runtime, topology, problems, davis, signals,
       ] = await Promise.all([
-        safe<Record<string, unknown>>("applications", Q.qApps(tf, session), bag),
+        safe<Record<string, unknown>>("applications", Q.qApps(tf, session), bag, 200, cut),
         safe<{ id: string; name: string; rumId?: string; kind?: string }>(
-          "names", Q.qAppNames(), bag),
-        safe<Record<string, unknown>>("classic applications", Q.qAppsGen2(), bag),
-        safe<Record<string, unknown>>("origins", Q.qOrigins(tf, session), bag),
-        safe<Record<string, unknown>>("domains", Q.qDomains(tf), bag),
-        safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag),
-        safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag),
-        safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag),
-        safe<ProblemRow>("davis problems", Q.qProblems(tf), bag),
+          "names", Q.qAppNames(), bag, 200, cut),
+        safe<Record<string, unknown>>("classic applications", Q.qAppsGen2(), bag, 200, cut),
+        safe<Record<string, unknown>>("origins", Q.qOrigins(tf, session), bag, 200, cut),
+        safe<Record<string, unknown>>("domains", Q.qDomains(tf), bag, 200, cut),
+        safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, 200, cut),
+        safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
+        safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
+        safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 200, cut),
         safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
           Q.DAVIS_ROLLUP_CAP),
         safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf), bag, 300),
@@ -442,7 +452,7 @@ export function useChainData(tf: Timeframe, session?: string | null): ChainData 
       const { loading: _l, cachedAt: _c, ...payload } = fresh;
       /* the window's LENGTH decides how long this keeps — the cache key is
          its identity, which is a different question (see ttlFor) */
-      void cache.write(cacheKey, { ...payload, truncated: hasTruncation() }, tf.minutes);
+      void cache.write(cacheKey, { ...payload, truncated: cut.hit }, tf.minutes);
     })();
 
     return () => { cancelled = true; };
