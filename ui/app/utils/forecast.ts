@@ -171,9 +171,20 @@ export function histWindow(
      to a Date constructor that has no idea what they mean. */
   const MIN: Record<string, number> = { s: 1 / 60, m: 1, h: 60, d: 1440, w: 10080 };
   const rel = /^now\(?\)?\s*-\s*(\d+)\s*([smhdw])$/i.exec(v);
-  const endMs = rel
-    ? Date.now() - Number(rel[1]) * MIN[rel[2].toLowerCase()] * 6e4
-    : new Date(v).getTime();
+  if (rel) {
+    /* A RELATIVE END STAYS RELATIVE. Resolving it against Date.now() produced
+       a different ISO string on every call, so two subscribers asking the same
+       question a millisecond apart built two different expressions — and the
+       in-flight dedupe, which keys on the expression, missed and bought the
+       same analyzer scan twice. That is the defect the dedupe exists to stop,
+       recreated by the fix for a different one.
+       Offsets compose, so the whole window can stay in the grammar it arrived
+       in: an end of now()-2h with six hours of history is now()-480m to
+       now()-120m, the same two strings every time. */
+    const offMin = Math.round(Number(rel[1]) * MIN[rel[2].toLowerCase()]);
+    return { from: `now()-${offMin + histMin}m`, to: `now()-${offMin}m` };
+  }
+  const endMs = new Date(v).getTime();
   if (!Number.isFinite(endMs)) return { from: `now()-${histMin}m`, to: "now()" };
   const end = new Date(endMs);
   const start = new Date(endMs - histMin * 6e4);

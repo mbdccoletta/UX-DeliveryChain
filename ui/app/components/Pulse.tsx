@@ -2128,9 +2128,19 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           const errs = { label: "Errors on this view",
             proves: `${Math.round(errRate * 100)}% of its actions failed`,
             href: errorsExplorerHref(tf, appName, r.name) };
+          /* THE REQUEST DRILL FILTERS ON server.address, WHICH IS A HOST.
+             The probe was corrected to ask about hosts and this was left
+             asking about endpoints — rowDrilldown builds its span filter from
+             row.name, so an instrumented endpoint like api.example.com/orders
+             enabled a link that searched for that whole string as an address
+             and found nothing. Same mistake as the probe, one layer along: a
+             fix applied to the question and not to the filter. The endpoint
+             stays on screen; only what the drill FILTERS by becomes the
+             host. */
           const perf = rowDrilldown(
             KIND[metric],
-            { ...r, hasSpans: !!tracedDomains?.has(r.domain ?? r.name) },
+            { ...r, hasSpans: !!tracedDomains?.has(r.domain ?? r.name),
+              name: metric === "requests" ? (r.domain ?? r.name) : r.name },
             tf, appEntity, metric === "errors" ? "fail" : "time", appName);
           const leadsWithErrors = metric === "sessions" && errRate >= HIT_WARN;
           const dd = leadsWithErrors ? errs : perf;
@@ -2180,7 +2190,12 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
               + (dd ? " svcf__row--go" : ""),
           }, <>
             {dd && (
-              <a className="svcf__hit" aria-label={`${dd.label} — ${dd.proves}`}
+              /* THE LINK NO LONGER CONTAINS THE ROW'S TEXT, so its name has
+                 to carry it. Without this every row announced the same thing
+                 — "Where the time goes — where this view spends its time" —
+                 and a reader moving between links could not tell which view
+                 each one opened. */
+              <a className="svcf__hit" aria-label={`${r.name} — ${dd.label}: ${dd.proves}`}
                 {...rowProps} />
             )}
             {/* The tag lives INSIDE the name cell. As a sibling it became a
@@ -2202,6 +2217,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
               {fmtK(r.vol)} <em>{UNIT[metric]}</em>
               {alt && (
                 <a className="svcf__alt" href={alt.href} target="_blank" rel="noreferrer"
+                  aria-label={`${r.name} — ${alt.label}: ${alt.proves}`}
                   title={`${alt.label} — ${alt.proves}`}
                   onClick={(e) => e.stopPropagation()}>{alt.short} →</a>
               )}
