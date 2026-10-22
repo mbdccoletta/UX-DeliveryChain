@@ -67,11 +67,39 @@ async function poll(requestToken: string) {
  * on the first instead of buying it twice. */
 const inFlight = new Map<string, Promise<Forecast | null>>();
 
+/**
+ * OFF THE CRITICAL PATH, BY CONSTRUCTION.
+ *
+ * A forecast is a projection OVER a measurement, so it is never needed before
+ * the measurement is on screen — and on the Overview three of them start at
+ * first paint, each running a DQL timeseries inside the analyzer over up to a
+ * day of history. On a demo estate that is invisible; on a bank's production
+ * tenant it is three heavy scans competing with the queries the reader is
+ * actually waiting for, plus seconds of polling each.
+ *
+ * So they wait for the browser to be idle. Nothing about the answer changes —
+ * the memoisation, the dedupe and the quality gate are untouched — only when
+ * the work starts.
+ */
+const idle = (): Promise<void> =>
+  new Promise((done) => {
+    const w = globalThis as unknown as {
+      requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void;
+    };
+    if (typeof w.requestIdleCallback === "function") {
+      w.requestIdleCallback(() => done(), { timeout: 2500 });
+    } else {
+      setTimeout(done, 900);
+    }
+  });
+
 export function forecast(expression: string, horizon = 12): Promise<Forecast | null> {
   const key = `${horizon}|${expression}`;
   const running = inFlight.get(key);
   if (running) return running;
-  const p = runForecast(expression, horizon).finally(() => { inFlight.delete(key); });
+  const p = idle()
+    .then(() => runForecast(expression, horizon))
+    .finally(() => { inFlight.delete(key); });
   inFlight.set(key, p);
   return p;
 }

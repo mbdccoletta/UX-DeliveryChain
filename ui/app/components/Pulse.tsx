@@ -29,7 +29,13 @@ import { Intelligence } from "./Intelligence";
 import { OVERVIEW_STARTERS } from "../utils/starters";
 import { ChoroplethLayer, DotLayer, MapView,
   type MapViewRef } from "@dynatrace/strato-geo";
-import { CENTROID, REGION_CENTROID } from "../utils/geoCentroids";
+import { CENTROID, REGION_CENTROID as BR_REGIONS,
+  REGION_CENTROID_MORE } from "../utils/geoCentroids";
+
+/* One table, two files: Brazil was written first and the rest followed, and
+   a caller should not have to know which country lives where. */
+const REGION_CENTROID: Record<string, [number, number]> =
+  { ...BR_REGIONS, ...REGION_CENTROID_MORE };
 import { usePulse } from "../hooks/usePulse";
 import { useAppScope } from "../hooks/useAppScope";
 import { useMetricForecast, METRIC_LABEL, type Metric } from "../hooks/useEcgForecast";
@@ -95,7 +101,19 @@ function useCountUp(target: number, ms = 1100): number {
 
 /** The map's height. 380px left it a strip under a tall legend; the tile is
  *  the one place on this page where SPACE is the information. */
-const MAP_H = 520;
+/* THE MAP TAKES THE ROOM IT HAS.
+ *
+ * 520px was a fixed number chosen on a laptop. On a wide monitor the tile is
+ * nearly twice that tall, so the map sat in the upper half of its own panel
+ * with a country drawn small inside a large empty frame. MapView wants a
+ * number, not a CSS length, so the number is measured from the viewport and
+ * kept between a floor that still shows a country and a ceiling that does not
+ * push the table below the fold. */
+const MAP_H_MIN = 420, MAP_H_MAX = 1200;
+const mapHeight = () => {
+  const h = typeof window === "undefined" ? 760 : window.innerHeight;
+  return Math.round(Math.max(MAP_H_MIN, Math.min(MAP_H_MAX, h * 0.72)));
+};
 
 export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   data: ChainData;
@@ -122,11 +140,32 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
   const [geoSel, setGeoSel] = useState<string | null>(null);
+  /** The geo table starts short: the rows that matter are the first ones. */
+  const [geoAll, setGeoAll] = useState(false);
+  const GEO_CAP = 8;
+  /* The cap never hides the row the reader is standing on: a selected country
+     that fell past it is kept, and its states are shown in full, because the
+     states only exist on screen BECAUSE that country was opened. */
+  const shownGeo = React.useMemo(() => {
+    const all = geo ?? [];
+    if (geoAll || all.length <= GEO_CAP) return all;
+    const head = all.slice(0, GEO_CAP);
+    const sel = geoSel && !head.some((g) => g.country === geoSel)
+      ? all.find((g) => g.country === geoSel) : null;
+    return sel ? [...head, sel] : head;
+  }, [geo, geoAll, geoSel]);
+
   /** The state opened inside the selected country — its cities follow. */
   const [regionSel, setRegionSel] = useState<string | null>(null);
   /* Asked only once a country is open — the map's first level is one scan,
    * and these cost another only if a reader goes looking. */
   const regions = useRegions(data.tf, geoSel ? appId : null, geoSel);
+  const shownRegions = React.useMemo(() => {
+    const all = regions ?? [];
+    return geoAll || all.length <= GEO_CAP ? all : all.slice(0, GEO_CAP);
+  }, [regions, geoAll]);
+  const geoHidden = Math.max(0, (geo?.length ?? 0) - shownGeo.length)
+    + Math.max(0, (regions?.length ?? 0) - shownRegions.length);
   const cities = useCities(data.tf, regionSel ? appId : null, geoSel,
     regionSel ? regionSel.slice((geoSel ?? "").length + 1) : null);
   const [geoDetail, setGeoDetail] = useState<Array<{ view: string; sessions: number; hit: number }> | null>(null);
@@ -202,6 +241,44 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * zoom in/out round trip as the last resort, which has to move the view
    * twice and therefore has to report. */
   const mapRef = useRef<MapViewRef>(null);
+  /* Re-measured on resize, and the map is asked to re-frame itself after:
+     zoomToFit is the only lever this component answers to, so a new height
+     without a new fit would stretch the old framing rather than use it. */
+  const [mapH, setMapH] = useState(mapHeight);
+  /* THE MAP IS AS TALL AS THE LIST BESIDE IT.
+     The viewport was the wrong thing to measure: the two sit side by side and
+     the list is what decides how much room the tile actually occupies, so a
+     map sized from the window ended half way down a list of forty rows. The
+     list is observed instead — collapse it and the map follows it up, expand
+     it and the map grows with it — with a floor that still shows a country
+     and a ceiling that keeps one screen's worth of map. */
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = listRef.current;
+    const fromList = () => {
+      const h = el ? el.getBoundingClientRect().height : 0;
+      return Math.round(Math.max(MAP_H_MIN, Math.min(MAP_H_MAX, h || mapHeight())));
+    };
+    const on = () => setMapH((prev) => {
+      const h = fromList();
+      return Math.abs(prev - h) < 8 ? prev : h;
+    });
+    on();
+    const ro = el && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(on) : null;
+    if (el && ro) ro.observe(el);
+    window.addEventListener("resize", on);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", on);
+    };
+  }, [geoAll, geoSel]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try { mapRef.current?.zoomToFit(); } catch { /* not mounted */ }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [mapH]);
   const reported = useRef(false);
   useEffect(() => {
     if (!geo || geo.length === 0) return;
@@ -348,7 +425,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   }, [geoSel, appId, data.tf.from, data.tf.to]);
   const pulse = usePulse(appId, data.tf, feName || undefined);
   const fc = useAppForecast(appId, data.tf);
-  const ux = useUxOverview(data.tf);
+  const ux = useUxOverview(data.tf, appId);
   const scope = useAppScope(appId, data.apps.find((a) => a.appId === appId)?.entity);
   /* The page opens on sessions. Clicking a card opens that card's evidence
    * BELOW the grid — the chart and its breakdown — and clicking the open card
@@ -893,7 +970,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     by the equality guard below: the view we just rendered
                     comes straight back from onViewStateChange and is dropped
                     as a no-op, while a real pan still gets through. */}
-                <MapView height={MAP_H}
+                <MapView height={mapH}
                   ref={mapRef}
                   initialViewState={frame}
                   onViewStateChange={(v) => {
@@ -1087,7 +1164,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   );
                 })()}
               </div>
-              <div className="geo__rows">
+              <div className="geo__rows" ref={listRef}>
+                {/* COLLAPSED BY DEFAULT, BECAUSE THE TABLE IS AN INDEX.
+                    Thirteen countries and twenty-seven states is a page of
+                    scrolling for a tile whose job is to say where the trouble
+                    is — and the trouble is in the first few rows, which is why
+                    they are sorted by volume. The rest is still one click
+                    away, and the selected country is never hidden by the cap:
+                    a list that drops the row you are standing on has lost the
+                    reader to save space. */}
                 {/* THE COLUMNS SAY WHAT THEY ARE. Seven of them, and every
                     one was a bare number: 469, 68.4% hit, 93ms. "hit" and
                     "ms" carry their own meaning, but the volume column
@@ -1095,11 +1180,21 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     unnamed asks the reader to infer the schema. The header
                     rides the same grid as the rows, so the names sit over
                     the numbers they belong to and cannot drift from them. */}
-                <div className="geo__r geo__hd" aria-hidden="true">
+                {/* THE STATES BELONG UNDER THEIR COUNTRY, not under the last
+                    row of the table. The list is built as every country, then
+                    the selected country's states appended after them — so
+                    Brazil's states loaded below Switzerland. The right rows in
+                    the wrong place read as a loading bug rather than as a
+                    hierarchy.
+                    The rows stay where they are in the markup, which keeps the
+                    reading order and the tab order honest, and the column flex
+                    places them: each country takes a decade, its states take
+                    the numbers just above the next one. */}
+                <div className="geo__r geo__hd" aria-hidden="true" style={{ order: -1 }}>
                   <i /><span>code</span><span>country</span><span />
                   <span>sessions</span><span>met an error</span><span>ttfb p75</span>
                 </div>
-                {geo.map((g) => {
+                {shownGeo.map((g, gi) => {
                   const a = arms(g);
                   const { rate, lift } = a;
                   const tone = judge(g);
@@ -1111,6 +1206,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   return (
                     <button type="button"
                       className={`geo__r${geoSel === g.country ? " geo__r--on" : ""}`}
+                      style={{ order: gi * 100 }}
                       onClick={() => {
                         const opening = geoSel !== g.country;
                         setGeoSel((c) => (c === g.country ? null : g.country));
@@ -1119,7 +1215,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       key={g.country}
                       title={`${fmtN(g.sessions)} sessions from ${g.country} — ${fmtN(g.hit)} met an error (${(rate * 100).toFixed(1)}%, application average ${(base * 100).toFixed(1)}%) · ${WORD[tone]}: ${because(g)}`}>
                       <i className="geo__dot" style={{ background: TOK[tone] }} />
-                      <b className="geo__cc">{g.country}</b>
+                      {/* THE ROW SAYS IT OPENS. Clicking a country has always
+                          listed its states, and nothing on the row admitted
+                          it — the reader had to discover the behaviour by
+                          accident. A plus is the whole convention: it turns
+                          into a minus when the country is open, so the sign
+                          also says which state the row is in. */}
+                      <b className="geo__cc">
+                        <i className="geo__ex" aria-hidden="true">
+                          {geoSel === g.country ? "−" : "+"}
+                        </i>
+                        {g.country}
+                      </b>
                       <span className="geo__nm">{nameOf(g.country)}</span>
                       <span className="geo__t">
                         <i className="geo__b" style={{ width: `${(g.sessions / max) * 100}%`,
@@ -1151,7 +1258,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     tile, and a level missing from it reads as a level that
                     does not exist. Clicking one takes the map to it, so the
                     row and the picture always agree about where you are. */}
-                {geoSel && regions && regions.length > 0 && regions.map((r) => {
+                {geoSel && regions && regions.length > 0 && shownRegions.map((r, ri) => {
+                  // the decade of the country these belong to, so they sit
+                  // directly under it however the countries are sorted
+                  // a country owns a century of slots, so even Brazil's 27
+                  // states sit between it and the next country
+                  const under = shownGeo.findIndex((g) => g.country === geoSel) * 100
+                    + 1 + ri;
                   const rate = r.hit / Math.max(r.sessions, 1);
                   const t = r.sessions < GEO_MIN_SESSIONS ? "good"
                     : rate >= GEO_ABS_BAD ? "bad"
@@ -1160,6 +1273,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   return (
                     <button type="button" key={r.id}
                       className={`geo__r geo__r--sub${regionSel === r.id ? " geo__r--on" : ""}`}
+                      style={{ order: under }}
                       title={`${r.name} — ${fmtN(r.sessions)} sessions,`
                         + ` ${(rate * 100).toFixed(1)}% met an error.`
                         + (c ? " Click to centre the map on it and list its cities."
@@ -1185,13 +1299,24 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   );
                 })}
 
-                {/* the traffic light's own rulebook, always on screen — the
-                    verdict never asks to be taken on faith */}
-                <span className="geo__rule"
-                  title={`Errors: share of a country's sessions that met at least one — this app's average this window: ${(base * 100).toFixed(1)}%; the deviation arm needs ≥30 sessions, 5 errored, 2% hit before it speaks. Slowness: duration-only Apdex over the country's user actions, T = 3s — under 0.85 tolerating, under 0.50 frustrated (≥30 rated actions). Worst arm wins; each pin's tooltip names the arm that fired.`}>
-                  <i style={{ background: COL.bad }} /> ≥25% hit · <i style={{ background: COL.warn }} /> ≥10% ·
-                  <i style={{ background: COL.good }} /> below — or 1.5× / 1.15× the app&apos;s average · slow: Apdex &lt;0.85 / &lt;0.50
-                </span>
+                {/* THE WAY BACK UP, AND THE WAY DOWN. The count is on the
+                    button because "show more" without a number asks the
+                    reader to click to find out whether it was worth it. */}
+                {(geoHidden > 0 || geoAll) && (
+                  <button type="button" className="geo__more"
+                    style={{ order: 99999 }}
+                    onClick={() => setGeoAll((v) => !v)}>
+                    {geoAll ? "show fewer rows"
+                      : `show ${fmtN(geoHidden)} more row${geoHidden === 1 ? "" : "s"}`}
+                  </button>
+                )}
+
+                {/* The traffic light's rulebook used to print here, a
+                    permanent two-line legend under a table whose every row
+                    already carries its own verdict in its own tooltip. It was
+                    a footnote asking for the space of a finding. Removed at
+                    the reader's request; the thresholds still travel with
+                    each pin and each row, where they describe something. */}
               </div>
             </div>
             {/* THE DRILL: what this country does here — its screens, and where
