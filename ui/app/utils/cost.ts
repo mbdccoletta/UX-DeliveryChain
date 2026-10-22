@@ -77,6 +77,14 @@ export const scanTotals = () => ({ bytes: scanned, queries, truncated, trace, in
  *  nothing instead of something partial — but the screen now says so. */
 export const hasTruncation = () => truncated > 0;
 
+/** A cached payload that was truncated when it was first read re-raises the
+ *  warning, so the banner does not disappear just because the figures came
+ *  back from the cache instead of from Grail. */
+export function noteCachedTruncation(): void {
+  truncated += 1;
+  emit();
+}
+
 export function subscribeScan(f: () => void): () => void {
   subs.add(f);
   return () => { subs.delete(f); };
