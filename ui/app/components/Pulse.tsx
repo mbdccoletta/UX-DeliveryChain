@@ -1728,7 +1728,7 @@ function CleanCard(p: CardProps) {
             <em className="tk-block__sparkv">{p.actionsPerMin}/min<br />user actions</em></>}>
           <div className="tk-row2">
             <Stat v={fmtK(p.sessions)} l="sessions"
-              title="All sessions in the window — robots and synthetic included; the error-free figure beside it uses the same base" />
+              title="All sessions in the window — robots and synthetic included; the error-free figure beside it uses the same base. Analyze user sessions opens the FINISHED ones among these: a session only finishes after its inactivity timeout, so that list is shorter, and the difference is the sessions still running." />
             <Stat v={pct} l="error-free" tone={p.tone === "info" ? undefined : p.tone} />
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
