@@ -1934,11 +1934,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tk-btn { background: none; cursor: pointer; color: var(--ink-2);
   border: 1px solid var(--border-2); border-radius: 7px; padding: 7px 13px;
   font: 600 11px var(--mono); transition: border-color 140ms, color 140ms, box-shadow 140ms; }
-.tk-btn:hover, .tk-btn:focus-visible { color: var(--ink); border-color: var(--info);
-  outline: none; }
-.tk-btn--p { color: var(--info); border-color: color-mix(in srgb, var(--info) 60%, var(--border-2)); }
-.tk-btn--p:hover, .tk-btn--p:focus-visible {
-  box-shadow: 0 0 14px color-mix(in srgb, var(--info) 35%, transparent); }
+/* A BUTTON IS NOT A STATUS. These wore the primary blue — text, border, and
+   a 14px glow on hover — to mark one of them as the "main" action. On a
+   screen where colour means a verdict, a blue ring says "informational" to
+   the same eye that reads amber as warning, and this button is neither: it
+   is a door to another view. Hover and focus emphasise it the way an
+   uncoloured control should, by getting darker and firmer.
+   The two that keep their colour are the ones that only exist BECAUSE
+   something is wrong — the errors hand-off and the signals hand-off below. */
+.tk-btn:hover, .tk-btn:focus-visible { color: var(--ink-hi);
+  border-color: var(--ink-3); outline: none; }
 /* the errors hand-off wears the critical family — it is the one button that
    only exists because something is wrong */
 .tk-btn--warn { color: var(--warn); border-color:color-mix(in srgb, var(--warn-fill) 55%, var(--border-2)); }
