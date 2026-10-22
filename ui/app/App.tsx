@@ -6,7 +6,6 @@
 // happens to be hosted here — so the header, the navigation and the title bar
 // are Strato components, while everything they frame stays exactly as it was.
 import React, { useEffect, useState } from "react";
-import { APP_VERSION } from "./components/Pulse";
 import { AppHeader, HelpMenu, PageLayout, TitleBar } from "@dynatrace/strato-components/layouts";
 import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
@@ -225,14 +224,6 @@ export function App() {
               : "Measured just now. Re-query Grail."}>
             {d.loading ? "loading…"
               : d.cachedAt ? `cached ${Math.round((Date.now() - d.cachedAt) / 1000)}s ago` : "live"}
-            {/* THE BUILD, WHERE IT CANNOT BE MISSED. It was first put on the
-                overview's key line, which sits under the cards and scrolls
-                away — the reader looked at the foot of the page and found
-                nothing, which is a fair place to look. The header is on
-                screen at every scroll position and on every tab, and this is
-                the one fact that has to be readable before any defect report
-                is worth acting on. */}
-            {" · v"}{APP_VERSION}
           </AppHeader.ActionButton>
         </AppHeader.ActionItems>
         <AppHeader.Menus>
@@ -244,6 +235,14 @@ export function App() {
               target: "_blank",
             },
             feedback: { href: "https://community.dynatrace.com", target: "_blank" },
+            /* THE VERSION, WHERE THE PLATFORM KEEPS IT. It was printed on the
+               overview's key line, then beside the cache readout — both of
+               them places this app invented. "About this app" is the slot
+               Strato reserves for it: an InformationIcon in the help menu
+               that opens the app's details in Hub, where the installed
+               version is read from the manifest. Discreet, in the one place
+               a reader of any Dynatrace app already knows to look. */
+            about: "default",
           }} />
         </AppHeader.Menus>
       </AppHeader>
