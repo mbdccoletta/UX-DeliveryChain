@@ -1565,16 +1565,29 @@ const Module = React.forwardRef<HTMLElement, {
         + (tone === "info" ? " cc-mod--mute" : "")
         + (pick ? " cc-mod--pick" : "") + (active ? " cc-mod--on" : "")}
       {...(pick ? {
-        role: "button", tabIndex: 0, onClick: pick,
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
-        },
-        "aria-pressed": !!active,
-        title: `${active ? "Hide" : "Show"} the breakdown for `
-          + (metric === "services" ? "the called services" : METRIC_LABEL[metric as Metric]),
+        /* THE CARD IS A CONTAINER, NOT A CONTROL. It used to carry
+           role="button" and tabIndex itself, and then the service names were
+           added inside it — a button inside a button, which assistive
+           technology either announces confusingly or does not announce at
+           all. Stopping key propagation made the inner links WORK without
+           making the structure true.
+           Now the card's own action is a button that covers it, exactly as
+           the drill rows do: the card action and the service links are
+           siblings, each with its own name, in the order they read. The
+           pointer behaviour is unchanged — the whole card is still the
+           target — and the keyboard gains what it never had, which is two
+           separate stops instead of one ambiguous one. */
+        onClick: pick,
       } : {})}
       style={{ ["--c" as string]: FVAR[tone],
                ["--breath" as string]: BREATH[tone] }}>
+      {pick && (
+        <button type="button" className="tk-block__hit" onClick={pick}
+          aria-pressed={!!active}
+          title={`${active ? "Hide" : "Show"} the breakdown for `
+            + (metric === "services" ? "the called services" : METRIC_LABEL[metric as Metric])}
+          aria-label={`${title} — ${active ? "hide" : "show"} the breakdown`} />
+      )}
       <i className="tk-block__wm" aria-hidden="true"><Icon /></i>
       <header className="tk-block__hd">
         <i className="tk-block__ic"><Icon /></i>
@@ -1982,17 +1995,9 @@ error series, read at the same width the window is drawn in.`}>
             ) : (
             <button key={n} type="button" className="tk-note tk-note--link"
               title={`Open ${n} in the Services app`}
-              /* THE CARD EATS ENTER AND SPACE. Module is itself a button: it
-                 handles bubbled keydowns with preventDefault and opens its
-                 own panel, so a keyboard user focusing this link could never
-                 fire it — the card opened instead, every time. The key stops
-                 here, and the card keeps the keys it is not given. */
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" && e.key !== " ") return;
-                e.stopPropagation();
-                e.preventDefault();
-                p.onOpenService?.(filter);
-              }}
+              /* No key guard here any more: the card stopped being a button
+                 around this one, so Enter and Space arrive where they were
+                 aimed. A native button needs no help to be pressed. */
               onClick={(e) => { e.stopPropagation(); p.onOpenService?.(filter); }}>
               {n}<em className="tk-note__k"> service →</em>
             </button>

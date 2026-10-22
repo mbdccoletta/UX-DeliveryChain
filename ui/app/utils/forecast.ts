@@ -107,8 +107,14 @@ async function runForecast(expression: string, horizon = 12): Promise<Forecast |
       .filter(([k, v]) => Array.isArray(v) && !k.startsWith("dt.davis.forecast:"))
       .map(([, v]) => v as Array<number | null>);
     const measured = inputs.find((a) => a.length >= point.length) ?? inputs[0] ?? [];
-    const emptyInput = measured.length > 0
-      && !measured.some((n) => typeof n === "number" && n !== 0);
+    /* ABSENT, NOT IDLE. The first cut called a series empty when nothing in
+       it was a non-zero number — which is also true of an instrumented
+       service that simply had no traffic in the history, and saying "no
+       request metric for this service" about a service that publishes one
+       and sat idle is a different falsehood from the one this was fixing.
+       Absence is the absence of SAMPLES: every point null. A run of zeros is
+       a measurement, and zero is a legitimate thing to forecast. */
+    const emptyInput = measured.length > 0 && measured.every((n) => n == null);
 
     return {
       point, lower, upper,
