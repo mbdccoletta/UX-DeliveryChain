@@ -220,8 +220,15 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    * falls back to the whole application and says why it did — the finding
    * ("these journeys had no traffic") is kept as a sentence, not staged as a
    * page of noughts. */
-  const emptyPick = !!routePicks?.length && cohort !== null && cohort.cur.sessions === 0;
-  const scoped = !!routePicks?.length && !emptyPick;
+  /* A FAILED COHORT IS NOT AN EMPTY ONE. The hook used to answer a failed
+     query with zeroes, which arrives here indistinguishable from "nobody
+     walked these routes" — so a permission error or a timeout dropped the
+     reader's selection and explained it with a reason that was not true. The
+     two now arrive separately, and only one of them is a measurement. */
+  const cohortFailed = cohort?.failed === true;
+  const emptyPick = !!routePicks?.length && cohort !== null && !cohortFailed
+    && cohort.cur.sessions === 0;
+  const scoped = !!routePicks?.length && !emptyPick && !cohortFailed;
   const covN = Number(cov);
   const factor = covN >= 1 && covN < 100 ? 100 / covN : 1;
   const ex = factor > 1;
@@ -1071,6 +1078,21 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       {/* THE ROUTE SCOPE, stated. A board quietly narrowed is a board that
           lies by omission: this says what it is calculating on, how many
           sessions that is, and hands back the whole application in one click. */}
+      {cohortFailed && (
+        <div className="bc__scoped">
+          <span className="bc__scoped-l">showing the whole application</span>
+          <span className="bc__scoped-none">
+            the query for {routePicks && routePicks.length > 1 ? "those journeys" : "that journey"}
+            {" "}did not answer — a missing scope, or Grail timing out — so the board is showing
+            {" "}everything instead. This is not a measurement of them: it says nothing about
+            {" "}whether anyone walked them.
+          </span>
+          <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
+            clear the selection
+          </button>
+        </div>
+      )}
+
       {emptyPick && (
         <div className="bc__scoped">
           <span className="bc__scoped-l">showing the whole application</span>

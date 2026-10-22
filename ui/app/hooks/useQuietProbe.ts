@@ -32,7 +32,13 @@ export function useQuietProbe(entityId?: string, active = true): QuietProbe | nu
     (async () => {
       try {
         const rows = await runDql<{ sessions?: string; last?: string }>(
-          qQuietProbe(key), 1);
+          /* THE ENTITY, NOT THE CACHE KEY. The key carries a refresh
+             generation suffix, and this query compares its argument with
+             dt.rum.application.entities — so it matched nothing and the chain
+             reported "no sessions in 24 hours" for an application that had
+             traffic. A cache key is an implementation detail; it has no
+             business reaching a query. */
+          qQuietProbe(entityId!), 1);
         const res = { sessions: Number(rows[0]?.sessions) || 0,
           last: rows[0]?.last ? String(rows[0].last) : null };
         memo.set(key, res);
