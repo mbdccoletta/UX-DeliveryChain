@@ -152,7 +152,15 @@ export function App() {
    * token travels with the navigation and opens the flow already in
    * definition mode, waiting for the one click that is actually theirs. */
 
-  const d = useChainData(tf, state.session);
+  /* SCOPED TO THE CHOSEN APPLICATION, once there is one.
+     The two per-application RUM scans (origins, domains) used to read the
+     whole estate and the screens then kept only this application's rows. On
+     a production tenant that is what pushed the page past Grail's scan limit
+     and turned the figures partial. Before a choice exists the scans stay
+     estate-wide, which is right: the picker has to see the estate to offer
+     it — and the banner's advice, "pick a single application", now actually
+     changes what is scanned. */
+  const d = useChainData(tf, state.session, state.app);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   const uxMap = useUxOverview(tf);
   /* Users & Sessions filters by frontend.name, not the inventory name —
@@ -368,12 +376,29 @@ export function App() {
                 missing.{other.length > 0 ? " " : ""}
               </>
             )}
-            {other.length > 0 && (
-              <>
-                <b>Failed queries ({other.length}):</b> {other.map(label).slice(0, 4).join(" · ")}
-                {" "}— check the app scopes in <span className="num">app.config.json</span>.
-              </>
-            )}
+            {other.length > 0 && (() => {
+              /* THE PLATFORM'S OWN WORDS, NOT A GUESS DRESSED AS A DIAGNOSIS.
+                 This told every reader to check the app scopes. On a
+                 production estate the query that failed had the scopes and
+                 failed for another reason entirely, and the banner sent the
+                 reader to audit a manifest that was already correct. The
+                 message the platform returned is printed; the scopes are
+                 suggested only when it actually reads like a permission
+                 problem. */
+              const why = other[0].slice(other[0].indexOf(":") + 1)
+                .split("\n")[0].trim().slice(0, 180);
+              const perm = /permission|scope|forbidden|unauthori[sz]ed|403/i
+                .test(other.join(" "));
+              return (
+                <>
+                  <b>Failed queries ({other.length}):</b>{" "}
+                  {other.map(label).slice(0, 4).join(" · ")}
+                  {why ? <> — {why}</> : null}
+                  {perm ? <> · check the app scopes in{" "}
+                    <span className="num">app.config.json</span>.</> : null}
+                </>
+              );
+            })()}
           </div>
         );
       })()}

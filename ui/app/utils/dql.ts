@@ -192,6 +192,15 @@ export async function runDql<T = Record<string, unknown>>(
 export const onlySession = (id?: string | null) =>
   id ? `\n| filter dt.rum.session.id == "${String(id).replace(/["\\]/g, "")}"` : "";
 
+/**
+ * Narrows a RUM scan to one application, when the caller knows which one.
+ *
+ * Empty string when it does not — the estate-wide form is still correct, and
+ * is what the picker itself needs before an application has been chosen.
+ */
+export const scopeApp = (rumAppId?: string | null) =>
+  rumAppId ? `\n| filter dt.rum.application.id == "${String(rumAppId).replace(/["\\]/g, "")}"` : "";
+
 export const qApps = (tf: Timeframe, session?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | summarize sessions = countDistinct(dt.rum.session.id),
@@ -236,7 +245,11 @@ smartscapeNodes "FRONTEND"
 // native Android app under "Web".
 | fields id = id_classic, name, rumId = dt.rum.instrumentation.id,
     kind = frontend.type
-| limit 400`;
+/* Sized for a real estate. At 400 — and a 200-row client cap on top of it —
+   a production tenant's application came back unnamed and the picker showed
+   "Application fcea258c". Smartscape scans no Grail bytes, so the only cost
+   of a higher ceiling is the rows themselves. */
+| limit 2000`;
 
 /**
  * The sessions store's own name for each application.
@@ -326,13 +339,22 @@ fetch user.sessions, from: ${tf.from}, to: ${tf.to}
     exErrs = takeFirst(coalesce(error.count, 0))`;
 };
 
+/* THE SESSIONS FACET'S NAME PER ENTITY.
+ *
+ * `limit 100` was a demo-estate number: a production tenant has more
+ * frontends than that, the quieter ones fell off the end, and an application
+ * with no resolved name silently loses everything that depends on it — the
+ * sessions hand-off opens unfiltered, and the impact scan, the trend and the
+ * forecast all fall back from the session store to the event store. The
+ * failure is invisible, which is the worst kind, so the ceiling is sized for
+ * a real estate. */
 export const qFrontendNames = () => `
 fetch user.sessions, from: now()-24h
 | expand ent = dt.rum.application.entities
 | expand fe = frontend.name
 | summarize n = count(), by: {ent, fe}
 | sort n desc
-| limit 100`;
+| limit 1000`;
 
 /** Detected views per application (journeys). */
 export const qViews = (tf: Timeframe, session?: string | null) => `
@@ -1152,13 +1174,14 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
 | sort sessions desc | limit 20`;
 
 /** Contacted domains (layer 02). */
-export const qDomains = (tf: Timeframe) => {
+/** Scoped like qOrigins, and for the same measured reason. */
+export const qDomains = (tf: Timeframe, rumAppId?: string | null) => {
   /* On a shifted/absolute window tfMid is null — emit a literal null so the
    * client keeps its "no forecast" contract. The old fallback "now()" turned
    * unknown into a hard 0 and every leg's second half reading as empty. */
   const mid = tfMid(tf);
   return `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
 /* Requests UNION failed calls. Request records carry only 200/201 on both
  * measured estates (bwm: 445k requests, statuses {200, 0, null}) — every
  * failed call is filed as an error with source "fetch", so counting
@@ -1327,8 +1350,30 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * it began, not to every bin it spanned. Summing these bins therefore
  * reproduces the headline — a cheap check the card prints beside the bars.
  */
+/**
+ * HOW FAR BACK THE SESSION STORE IS ACTUALLY COMPLETE.
+ *
+ * The aggregation service waits 30+ minutes of inactivity before it writes a
+ * session record, so the newest stretch of any live window holds sessions
+ * that have happened and not yet been serialized. A TOTAL over that window is
+ * still the right number to print — it is exactly what Users & Sessions will
+ * show, which is the promise the card makes. A SERIES is different: drawing
+ * those bins as measured zeros says traffic collapsed, and the chart showed a
+ * bank's production application falling off a cliff at 20:10 when nothing had
+ * happened except the clock. The forecast then trained on the cliff and the
+ * analyzer rated it unsound — correctly, about a shape that was not real.
+ *
+ * So the drawn series stops where the store stops being complete. An hour is
+ * the documented 30 minutes with the same again for the write to land.
+ */
+export const SESSION_LAG_MIN = 60;
+
+/** The series' end: pulled back off a LIVE window, untouched on a past one. */
+export const seriesEnd = (tf: Timeframe): string =>
+  /^now\(?\)?$/i.test(tf.to.trim()) ? `now()-${SESSION_LAG_MIN}m` : tf.to;
+
 export const qSessionSeries = (tf: Timeframe, frontendName: string) => `
-fetch user.sessions, from: ${tf.from}, to: ${tf.to}
+fetch user.sessions, from: ${tf.from}, to: ${seriesEnd(tf)}
 | expand fe = frontend.name
 | filter fe == "${frontendName.replace(/["\\]/g, "")}"
 | summarize sessions = countDistinct(dt.rum.session.id),
@@ -1440,7 +1485,13 @@ smartscapeEdges "runs_on"
 | limit 1000`;
 
 /** Frontends registered in Smartscape. */
-export const qFrontends = () => `smartscapeNodes "FRONTEND" | fields id, name | limit 100`;
+/* LIMIT SIZED FOR A REAL ESTATE, NOT A DEMO ONE. At 100 a production tenant's
+   frontend simply was not in the answer, so the picker fell back to
+   "Application fcea258c" — and because the sessions facet's name comes from
+   the same inventory, the whole session-store path quietly reverted to the
+   event store. Smartscape is a topology read: it scans no Grail bytes, so the
+   ceiling costs nothing to raise. */
+export const qFrontends = () => `smartscapeNodes "FRONTEND" | fields id, name | limit 1000`;
 
 /** Node count per type — used in the topology summary. */
 export const qTopologyCounts = () => `
@@ -1739,8 +1790,22 @@ export const fmtN = (n: number) => n.toLocaleString("en-US");
  *  byte-identical copies had drifted across the board, the poster and the
  *  flow, and Pulse inlined a fourth with a different rule. */
 export const fmtPct = (v: number) => `${(v * 100).toFixed(v * 100 < 10 ? 1 : 0)}%`;
-export const fmtK = (n: number) =>
-  n >= 1000 ? (n / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "k" : fmtN(n);
+/**
+ * A COMPACT NUMBER THAT KEEPS SCALING PAST THOUSANDS.
+ *
+ * This stopped at "k", which is fine on a demo estate and absurd on a real
+ * one: a bank's production application printed "27,889.1k errors" and
+ * "6,608.2k sessions" — eleven characters to say 27.9M, and wide enough to
+ * shove the neighbouring stat out of its cell. A number nobody can read at a
+ * glance is not a compact format, it is a long one with a suffix.
+ */
+export const fmtK = (n: number) => {
+  const one = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  if (n >= 1e9) return one(n / 1e9) + "B";
+  if (n >= 1e6) return one(n / 1e6) + "M";
+  if (n >= 1000) return one(n / 1000) + "k";
+  return fmtN(n);
+};
 /** ns → human-readable duration. */
 export const fmtMs = (ns: number) => {
   const ms = ns / 1e6;
@@ -2312,10 +2377,27 @@ const tfMid = (tf: Timeframe): string | null =>
   /^now\(?\)?$/i.test(tf.to.trim())
     ? `now()-${Math.max(1, Math.round(tf.minutes / 2))}m` : null;
 
-export const qOrigins = (tf: Timeframe, session?: string | null) => {
+/**
+ * SCOPED TO THE APPLICATION ON SCREEN, BECAUSE THE FILTER IS THE BILL.
+ *
+ * This scanned the whole estate and the client then kept the rows of the one
+ * application it was showing — every consumer filters by appId, so the other
+ * applications' rows were scanned, paid for and thrown away. Harmless on a
+ * demo tenant; on a bank's production estate it is what pushed the landing
+ * page past Grail's 500 GB scan limit, and a truncated answer is not a slow
+ * answer — it is a wrong one that reports success.
+ *
+ * Measured and written in this app's own README: a bare count and an
+ * eight-column summarize scan the same bytes, so projections are free, but
+ * scoping to one application cut a 2-hour window from 5.9 GB to 2.9 GB, and
+ * to a small application 0.24 GB. The filter is the only lever that moves,
+ * and it was the one not being pulled.
+ */
+export const qOrigins = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => {
   const mid = tfMid(tf);
   return `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 | summarize agent = takeAny(dt.rum.agent.type),
     // deterministic, like qDevices: a session carrying both robot and human
     // events must land in the SAME origin every run
