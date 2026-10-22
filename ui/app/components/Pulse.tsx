@@ -380,8 +380,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     detail && detail !== "services" ? detail : null);
   // which of the listed domains are served by instrumented code — one scan,
   // only while the requests panel is open
+  /* THE PROBE ASKS ABOUT HOSTS. Its query matches a span's server address, so
+     feeding it the endpoint names — which it was, from the moment this drill
+     began grouping by endpoint — asked about things no span can be. The
+     lookup was already corrected to read r.domain; the LIST it is looked up
+     in had to be corrected the same way, or the set was simply always empty.
+     Deduplicated, because many endpoints share one host and the probe is
+     billed per host. */
   const domainTraces = useDomainTraces(
-    detail === "requests" ? (detailRows ?? []).map((r) => r.name) : [],
+    detail === "requests"
+      ? [...new Set((detailRows ?? []).map((r) => r.domain ?? r.name))]
+      : [],
     data.tf, detail === "requests");
   // the services drill-down: the busiest first, capped, and only once opened
   const svcTop = [...scope.traces.entries()]
@@ -390,11 +399,25 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     .slice(0, SERVICE_FORECAST_CAP);
   const svcAhead = useServiceForecasts(svcTop, detail === "services");
   // measured now, beside the projections — one read for every service at once
-  const svcVitals = useServiceVitals(svcTop.map((x) => x.id), data.tf,
-    detail === "services");
+  /* ALWAYS ON, for two services' worth of names. The card offers each
+     service name as a link to its own page in the Services app, and that app
+     filters on `dt.service.name` — which is the METRIC STORE's name and can
+     differ from the Smartscape display name the card had been using. A link
+     built from the wrong one opens an Explorer listing nothing, which is the
+     failure that looks like success. This read is the resolver: one
+     metric-store query for the whole set, which is orders cheaper than the
+     RUM scans this page already pays for, and the panel below reuses it. */
+  const svcVitals = useServiceVitals(svcTop.map((x) => x.id), data.tf, true);
   const scopeCount = scope.resolved ? scope.services.size : null;
-  const svcNames = [...scope.services]
-    .map((id) => scope.names.get(id)).filter(Boolean) as string[];
+  /* The card shows the busiest, and carries BOTH names: what to print (the
+     one a reader recognises) and what the Explorer filters on. Without the
+     second the link cannot be built, and a link that cannot be built is not
+     offered — see the tk-note--link branch. */
+  const svcLinks = svcTop.map((x) => ({
+    label: scope.names.get(x.id) ?? x.id,
+    filter: svcVitals?.get(x.id)?.name ?? null,
+  })).filter((x) => x.label);
+  const svcNames = svcLinks.map((x) => x.label);
   // The domains this application actually calls, busiest first. Rows arrive
   // split by origin, so they are aggregated per domain before ranking —
   // otherwise one domain contacted from two origins would appear twice and
@@ -639,7 +662,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           fru: uxRow.frustrated, fruErr: uxRow.fruErr } : null}
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
-        services={scopeCount} svcNames={svcNames} domNames={domNames}
+        services={scopeCount} svcNames={svcNames} svcLinks={svcLinks} domNames={domNames}
         onOpenService={(n) => window.open(servicesExplorerHref(data.tf, n), "_blank", "noopener")}
         fc={heroFc} fcMetric={heroMetric} onOpen={() => onOpenChain()}
         /* Always open. Clicking the open box used to collapse it, which left
@@ -1491,6 +1514,10 @@ interface CardProps {
   /** Sessions hit by an error — keeps the verdict from rounding up to perfect. */
   hitSessions: number;
   services: number | null; svcNames: string[];
+  /** Each service's printable name and the name the Services Explorer filters
+   *  on — null until the metric store has answered, and a name that cannot be
+   *  resolved gets no link rather than a link that opens nothing. */
+  svcLinks?: Array<{ label: string; filter: string | null }>;
   /** Of those sessions, the ones belonging to real people — null until the
    *  per-session leg has answered. The headline counts EVERYTHING, which is
    *  what makes it comparable to error-free beside it; this is what makes it
@@ -1946,7 +1973,13 @@ error series, read at the same width the window is drawn in.`}>
               rebuilding — so the name opens it, filtered to that service, in
               the Services app. The click is stopped from reaching the card,
               whose own job is the projections panel below. */}
-          {p.svcNames.slice(0, 2).map((n) => (
+          {(p.svcLinks ?? p.svcNames.map((n) => ({ label: n, filter: null })))
+            .slice(0, 2).map(({ label: n, filter }) => (
+            filter == null ? (
+              /* the metric store has not named it yet, or does not know it:
+                 a link that cannot be built is not offered */
+              <div key={n} className="tk-note" title={n}>{n}</div>
+            ) : (
             <button key={n} type="button" className="tk-note tk-note--link"
               title={`Open ${n} in the Services app`}
               /* THE CARD EATS ENTER AND SPACE. Module is itself a button: it
@@ -1958,11 +1991,12 @@ error series, read at the same width the window is drawn in.`}>
                 if (e.key !== "Enter" && e.key !== " ") return;
                 e.stopPropagation();
                 e.preventDefault();
-                p.onOpenService?.(n);
+                p.onOpenService?.(filter);
               }}
-              onClick={(e) => { e.stopPropagation(); p.onOpenService?.(n); }}>
+              onClick={(e) => { e.stopPropagation(); p.onOpenService?.(filter); }}>
               {n}<em className="tk-note__k"> service →</em>
             </button>
+            )
           ))}
           {/* Not the browser's request series relabelled: this is
               dt.service.request.count summed over the services this
