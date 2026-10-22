@@ -1816,13 +1816,27 @@ function CleanCard(p: CardProps) {
               compare are worth more than one they have to defend. */}
           {p.realSessions != null && p.realSessions !== p.sessions && (
             <div className="tk-note"
-              title={`Users & Sessions lists real users and sessions that `
-                + `STARTED in this window; the headline counts every session `
-                + `active in it, robots and synthetic monitors included.`}>
+              title={`The headline counts every session active in the window, `
+                + `robots and synthetic monitors included, because the `
+                + `error-free figure beside it shares that base. This is the `
+                + `part belonging to real people.`}>
               {fmtK(p.realSessions)} real users
               <em className="tk-note__k"> of {fmtK(p.sessions)}</em>
             </div>
           )}
+          {/* WHAT THE BUTTON WILL SHOW, SAID BEFORE IT IS PRESSED. "Analyze
+              user sessions" opens the FINISHED sessions list — the view whose
+              filter grammar this app can write — and a session only finishes
+              after its inactivity timeout. In a two-hour window most of them
+              have not, so that list is always shorter than this count, and a
+              reader who compares them without being told reads a defect. The
+              gap IS the sessions still running. */}
+          <div className="tk-note tk-note--go"
+            title={`A session finishes after its inactivity timeout, so the `
+              + `list shows fewer than the count above. The difference is the `
+              + `sessions still running.`}>
+            the sessions list shows the finished ones
+          </div>
 
           {/* THE SCALE IS NOT A HEADLINE. This footnote repeated the band word
               already printed as the biggest thing on the screen, added the
