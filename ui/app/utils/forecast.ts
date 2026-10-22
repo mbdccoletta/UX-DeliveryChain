@@ -160,11 +160,23 @@ export const FC_HIST_CAP_MIN = 1440;
 export function histWindow(
   tf: { to: string }, histMin: number,
 ): { from: string; to: string } {
-  const live = /^now\(?\)?$/i.test(tf.to.trim());
-  if (live) return { from: `now()-${histMin}m`, to: "now()" };
-  const end = new Date(tf.to.trim().replace(/^"(.*)"$/, "$1"));
-  if (!Number.isFinite(end.getTime())) return { from: `now()-${histMin}m`, to: "now()" };
-  const start = new Date(end.getTime() - histMin * 6e4);
+  const v = tf.to.trim().replace(/^"(.*)"$/, "$1");
+  if (/^now\(?\)?$/i.test(v)) return { from: `now()-${histMin}m`, to: "now()" };
+  /* A SHIFTED WINDOW IS OFTEN STILL RELATIVE. tfFrom emits `now()-2h` for the
+     END of a range like from=-4h,to=-2h, and the first cut of this function
+     only recognised the literal `now()`: everything else went to new Date(),
+     which cannot parse `now()-2h`, so it fell back to anchoring on now() —
+     the exact defect this function exists to fix, surviving in the case that
+     needed it most. Relative ends are resolved here instead of being handed
+     to a Date constructor that has no idea what they mean. */
+  const MIN: Record<string, number> = { s: 1 / 60, m: 1, h: 60, d: 1440, w: 10080 };
+  const rel = /^now\(?\)?\s*-\s*(\d+)\s*([smhdw])$/i.exec(v);
+  const endMs = rel
+    ? Date.now() - Number(rel[1]) * MIN[rel[2].toLowerCase()] * 6e4
+    : new Date(v).getTime();
+  if (!Number.isFinite(endMs)) return { from: `now()-${histMin}m`, to: "now()" };
+  const end = new Date(endMs);
+  const start = new Date(endMs - histMin * 6e4);
   return { from: `"${start.toISOString()}"`, to: `"${end.toISOString()}"` };
 }
 
