@@ -74,8 +74,22 @@ export function useRouteCohort(
   tf: Timeframe, appId: string, picks: string[] | null, ctx: RouteCtx | null,
   defs?: OutcomeDefs,
 ): RouteCohort | null {
+  /* THE CONTEXT IS PART OF THE QUESTION. The cohort is resolved AGAINST ctx
+     — the mined routes and their depth — and ctx was in neither the cache key
+     nor the effect's dependencies. On a shared Business Control link the
+     board mounts while the journeys are still being mined, so the first ctx
+     has no routes and depth zero; a stage or tail selection evaluated against
+     that empty context matched nothing, was cached under a key that did not
+     mention it, and was never recomputed when the mine arrived. The board
+     then quietly fell back to the whole application. The outcome definitions
+     belong in the key for the same reason: they decide what "converted"
+     means, so a different set is a different answer. */
+  const ctxKey = ctx
+    ? `${ctx.deepest}|${ctx.outcomes}|${[...ctx.top].sort().join(",")}`
+      + `|${[...ctx.tailStarts].sort().join(",")}` : "";
   const key = picks?.length && appId
-    ? `${tf.from}|${tf.to}|${appId}|${picks.join("\t")}` : "";
+    ? `${tf.from}|${tf.to}|${appId}|${picks.join("\t")}|${ctxKey}`
+      + `|${defs ? JSON.stringify(defs) : ""}` : "";
   const [out, setOut] = useState<RouteCohort | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {

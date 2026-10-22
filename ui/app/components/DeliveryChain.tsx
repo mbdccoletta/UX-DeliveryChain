@@ -1815,6 +1815,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
           chainFacts names every layer the app could NOT resolve, so an answer
           cannot quietly reason across a gap. */}
       <Intelligence subject="the Delivery Chain of this application"
+        scope={`${appId}|${data.tf.from}|${data.tf.to}`}
         starters={CHAIN_STARTERS} facts={chainFacts} />
 
       <div className={`panel dcf-shell stage ${intro ? "intro" : ""}`} ref={shellRef}>

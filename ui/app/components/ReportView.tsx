@@ -999,6 +999,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           tiles are rendering, including the ones that could NOT be measured,
           stated as such, so nothing fills a gap with a plausible number. */}
       <Intelligence subject="the Business Control board" className="bc__intel"
+        scope={`${scopeApp}|${data.tf.from}|${data.tf.to}`}
         starters={BOARD_STARTERS} facts={boardFacts} />
 
       <div className="bc__bar">
