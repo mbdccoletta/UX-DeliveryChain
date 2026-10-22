@@ -45,9 +45,11 @@ export interface UxRow {
 const memo = new Map<string, Map<string, UxRow>>();
 
 /** Impact per application id, or null while loading / when the query failed. */
-export function useUxOverview(tf: Timeframe): Map<string, UxRow> | null {
+export function useUxOverview(tf: Timeframe, appId?: string | null): Map<string, UxRow> | null {
   const gen = useMemoGen();
-  const key = `${tf.from}|${tf.to}|${gen}`;
+  // the scope is part of the key: a payload that lacked this application
+  // must not answer for the request that went and fetched it
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${gen}`;
   const [map, setMap] = useState<Map<string, UxRow> | null>(memo.get(key) ?? null);
 
   useEffect(() => {
@@ -58,7 +60,21 @@ export function useUxOverview(tf: Timeframe): Map<string, UxRow> | null {
     setMap(null);
     (async () => {
       try {
+        /* THE SELECTED APPLICATION IS NEVER CROWDED OUT.
+           The estate scan answers the comparison line and is capped at a
+           hundred rows; a production tenant has more frontends than that, and
+           the row that falls off is the one on screen — an Apdex reading "—"
+           over hundreds of thousands of rated actions. So when the estate's
+           answer does not contain the application being shown, it is asked
+           for on its own. One extra query, only where the cap actually bit,
+           and a fraction of the scan the estate costs. */
         const rows = await runDql<Record<string, unknown>>(qUxByApp(tf), 100);
+        if (appId && !rows.some((r) => String(r.appId ?? "") === appId)) {
+          try {
+            rows.push(...await runDql<Record<string, unknown>>(
+              qUxByApp(tf, appId), 2));
+          } catch { /* the estate's answer still stands on its own */ }
+        }
         // TWO row kinds share an appId: the main per-app row, and the Apdex
         // leg's row carrying only satisfied/tolerating/frustrated (the bands
         // live in their own subquery so Dynatrace's error rule can rate at
