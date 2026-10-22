@@ -1711,13 +1711,22 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and (characteristics.classifier == "request"
       or (characteristics.classifier == "error" and error.source == "fetch"))
+/* THE ENDPOINT, NOT THE HOST. This grouped by url.domain, so the drill under
+   "Web requests" listed the same handful of hostnames the Called services
+   card lists — two cards saying the same thing, and neither of them saying
+   which REQUEST is slow or failing, which is the only reason to open this
+   panel. The path is what distinguishes one endpoint from another; the
+   domain stays in front of it because the same path on two hosts is two
+   endpoints. coalesce keeps the fetch-error rows, which do not always carry
+   a path, grouped under their host rather than dropped. */
+| fieldsAdd ep = concat(url.domain, coalesce(url.path, ""))
 | summarize vol = countIf(characteristics.classifier == "request"),
     failures = countIf(characteristics.classifier == "error"),
     sessions = countDistinct(dt.rum.session.id),
     p50 = percentile(if(characteristics.classifier == "request", toLong(duration)), 50),
     p90 = percentile(if(characteristics.classifier == "request", toLong(duration)), 90),
     p95 = percentile(if(characteristics.classifier == "request", toLong(duration)), 95),
-  by: { name = url.domain }
+  by: { name = ep }
 | filter isNotNull(name) and name != ""
 | sort vol desc | limit 8`;
 
