@@ -7,7 +7,8 @@
 // is orders cheaper than re-scanning spans for 24 hours.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql } from "../utils/dql";
+import { qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql,
+  type Timeframe } from "../utils/dql";
 import { forecast, type Forecast } from "../utils/forecast";
 
 export type MetricTarget =
@@ -36,24 +37,39 @@ const memo = new Map<string, NodeMetrics>();
 const keyOf = (t: MetricTarget) =>
   t.kind === "domain" ? `d:${t.appId}:${t.domain}` : `${t.kind}:${t.id}`;
 
-export function useNodeMetrics(target: MetricTarget | null): NodeMetrics | null {
+/**
+ * THE SAME WINDOW AS THE REST OF THE SCREEN.
+ *
+ * These were a fixed "last 30 minutes", labelled as such, on the reasoning
+ * that a live reading is cheap and a different question. In practice the
+ * drawer then carried three windows at once — 30 minutes of vitals, two
+ * hours of ledger, forty minutes of forecast — and a reader asked the
+ * obvious: why is the chain on 2h and the drill-down on 30m? Annotating the
+ * contradiction had already been tried; it is still a contradiction. The
+ * probe follows the selection now, so every number in the drawer describes
+ * the window the reader chose.
+ */
+export function useNodeMetrics(
+  target: MetricTarget | null, tf: Timeframe,
+): NodeMetrics | null {
   const gen = useMemoGen();
+  const win = `${tf.from}|${tf.to}`;
   const [m, setM] = useState<NodeMetrics | null>(
-    target ? memo.get(`${keyOf(target)}|${gen}`) ?? EMPTY : null,
+    target ? memo.get(`${keyOf(target)}|${win}|${gen}`) ?? EMPTY : null,
   );
 
   useEffect(() => {
     if (!target) { setM(null); return; }
-    const k = `${keyOf(target)}|${gen}`;
+    const k = `${keyOf(target)}|${win}|${gen}`;
     const hit = memo.get(k);
     if (hit?.ready) { setM(hit); return; }
 
     let live = true;
     setM(EMPTY);
     (async () => {
-      const q = target.kind === "service" ? qSvcMetrics(target.id)
-        : target.kind === "app" ? qAppMetrics(target.id)
-        : qDomMetrics(target.appId, target.domain);
+      const q = target.kind === "service" ? qSvcMetrics(target.id, tf)
+        : target.kind === "app" ? qAppMetrics(target.id, tf)
+        : qDomMetrics(target.appId, target.domain, tf);
       let out: NodeMetrics = { ...EMPTY };
       try {
         const r = (await runDql<Record<string, unknown>>(q, 1))[0] ?? {};
@@ -71,7 +87,7 @@ export function useNodeMetrics(target: MetricTarget | null): NodeMetrics | null 
       if (target.kind === "service" && noSpans(out)) {
         try {
           const f = (await runDql<Record<string, unknown>>(
-            qSvcMetricsFallback(target.id), 1))[0] ?? {};
+            qSvcMetricsFallback(target.id, tf), 1))[0] ?? {};
           const calls = Number(f.calls) || 0;
           if (calls > 0) {
             const avg = Number(f.avgNs) || 0;
@@ -95,7 +111,7 @@ export function useNodeMetrics(target: MetricTarget | null): NodeMetrics | null 
     })();
 
     return () => { live = false; };
-  }, [target ? keyOf(target) : null, gen]);
+  }, [target ? keyOf(target) : null, win, gen]);
 
   return m;
 }

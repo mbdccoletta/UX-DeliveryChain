@@ -10,7 +10,7 @@
 // per application and timeframe for the life of the session.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qImpacted, runDql, type Timeframe } from "../utils/dql";
+import { qImpacted, qImpactedSessions, runDql, type Timeframe } from "../utils/dql";
 
 export interface Impacted {
   /** Distinct sessions in the window — the denominator. */
@@ -28,12 +28,22 @@ export interface Impacted {
 
 const memo = new Map<string, Impacted | null>();
 
-/** Impact for an application, or null while loading / when unavailable. */
+/**
+ * Impact for an application, or null while loading / when unavailable.
+ *
+ * `frontendName` decides WHICH STORE answers. With it, the figures come from
+ * `user.sessions` — the store Users & Sessions reads — so the number on the
+ * card is the number its own button opens, which is the whole point of
+ * measuring it there. Without it (the name scan is still in flight, or this
+ * estate has no frontend node for the application) the original per-session
+ * scan of `user.events` answers, as it always did.
+ */
 export function useImpacted(
-  rumAppId?: string, tf?: Timeframe, active = false,
+  rumAppId?: string, tf?: Timeframe, active = false, frontendName?: string,
 ): Impacted | null {
   const gen = useMemoGen();
-  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${gen}` : "";
+  const fe = frontendName || "";
+  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${fe}|${gen}` : "";
   const [imp, setImp] = useState<Impacted | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -48,35 +58,54 @@ export function useImpacted(
     let live = true;
     (async () => {
       let out: Impacted | null = null;
-      try {
-        const rows = await runDql<Record<string, unknown>>(qImpacted(tf!, rumAppId!), 1);
-        const r = rows[0];
-        if (r) {
-          out = {
-            sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
-            realSessions: Number(r.realSessions) || 0,
-            hitReal: Number(r.hitReal) || 0, hitRobot: Number(r.hitRobot) || 0,
-            hitSynth: Number(r.hitSynth) || 0,
+      /* Rows → Impacted, whichever store produced them: both queries project
+         the same names, which is the only reason one reader can serve both. */
+      const shape = (r?: Record<string, unknown>): Impacted | null => {
+        if (!r) return null;
+        const o: Impacted = {
+          sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0,
+          realSessions: Number(r.realSessions) || 0,
+          hitReal: Number(r.hitReal) || 0, hitRobot: Number(r.hitRobot) || 0,
+          hitSynth: Number(r.hitSynth) || 0,
+        };
+        // an exemplar only counts when it actually erred — a healthy session
+        // proves nothing about the impact
+        if (r.exSid && r.exStart && Number(r.exErrs) > 0) {
+          o.ex = {
+            sid: String(r.exSid), start: String(r.exStart),
+            inst: r.exInst ? String(r.exInst) : undefined,
+            errs: Number(r.exErrs) || 0,
           };
-          // an exemplar only counts when it actually erred — a healthy session
-          // proves nothing about the impact
-          if (r.exSid && r.exStart && Number(r.exErrs) > 0) {
-            out.ex = {
-              sid: String(r.exSid), start: String(r.exStart),
-              inst: r.exInst ? String(r.exInst) : undefined,
-              errs: Number(r.exErrs) || 0,
-            };
-          }
+        }
+        return o;
+      };
+      const ask = async (q: string) =>
+        shape((await runDql<Record<string, unknown>>(q, 1))[0]);
+      try {
+        if (fe) {
+          out = await ask(qImpactedSessions(tf!, fe));
+          /* NOTHING SERIALIZED IS NOT NOTHING HAPPENED. The session store
+             trails live traffic by the aggregation service's 30-minute
+             inactivity timeout, so a short or very recent window can hold
+             real activity and no session records at all. Reading that as
+             "0 sessions" would blank the verdict, the ring and the error
+             share over an application that is plainly busy, so the event
+             scan answers instead — fewer promises about the hand-off, but a
+             page that still describes what is happening. */
+          if (!out || out.sessions === 0) out = await ask(qImpacted(tf!, rumAppId!));
+        } else {
+          out = await ask(qImpacted(tf!, rumAppId!));
         }
       } catch {
         // no scope or the query failed — the row and the steps are not offered
+        try { out = await ask(qImpacted(tf!, rumAppId!)); } catch { out = null; }
       }
       memo.set(key, out);
       if (live) setImp(out);
     })();
 
     return () => { live = false; };
-  }, [key, active, rumAppId, tf]);
+  }, [key, active, rumAppId, tf, fe]);
 
   return imp;
 }

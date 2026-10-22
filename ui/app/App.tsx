@@ -408,8 +408,12 @@ export function App() {
                    * filled the bar with a name the store never uses and the
                    * list read "no sessions" (documented failure) */
                   if (intentsAvailable() && a && fe) {
-                    openIntent(sessionsLink(tf, fe,
-                      uxMap?.get(current)?.sessions ?? a.sessions));
+                    /* No count in the meta line here — not because the two
+                       would disagree (the card counts this same store now),
+                       but because this header button is outside the scan
+                       that measures it, and a figure re-derived here would
+                       be a second measurement of one fact. */
+                    openIntent(sessionsLink(tf, fe, 0));
                   } else { setAppId(current); set({ tab: "flow", sel: null }); }
                 }} />
             </Boundary>

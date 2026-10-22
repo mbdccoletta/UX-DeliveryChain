@@ -47,7 +47,7 @@ import { XmarkIcon,
 
 import { verdictOf, VERDICT_LEGEND, HIT_WARN, davisCategory,
   type Tone, failTone} from "../utils/verdict";
-import { errorsExplorerHref, servicesExplorerHref, rowDrilldown, open,
+import { errorsExplorerHref, servicesExplorerHref, viewVitalsHref, rowDrilldown, open,
   intentsAvailable, appEntityOf } from "../utils/links";
 import type { DeepLink } from "../utils/links";
 import { apdexOf, apdexBand, apdexTone, fmtApdex, APDEX_LABEL, APDEX_T_MS } from "../utils/apdex";
@@ -105,8 +105,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   onAnalyze: () => void;
 }) {
   const app = data.apps.find((a) => a.appId === appId);
-  const impacted = useImpacted(appId, data.tf, true);
-  const geo = useGeo(data.tf, appId);
   /* The name Users & Sessions knows this app by. Its Frontends facet filters
    * on frontend.name, not the inventory name — "Astroshop Android" the
    * entity, "Astroshop_Android" the frontend — and the wrong one is accepted
@@ -116,6 +114,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * on it, because the inventory-name fallback re-created the documented
    * empty-list failure while the name scan was still in flight */
   const feName = (app && feNames?.get(app.entity ?? "")) || "";
+  /* RESOLVED FIRST, BECAUSE IT DECIDES THE MEASURE. The name is what lets
+     the impact scan read the session store instead of the event store, so
+     the card counts what its own button opens. */
+  const impacted = useImpacted(appId, data.tf, true, feName || undefined);
+  const geo = useGeo(data.tf, appId);
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
   const [geoSel, setGeoSel] = useState<string | null>(null);
@@ -343,7 +346,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, appId, data.tf.from, data.tf.to]);
-  const pulse = usePulse(appId, data.tf);
+  const pulse = usePulse(appId, data.tf, feName || undefined);
   const fc = useAppForecast(appId, data.tf);
   const ux = useUxOverview(data.tf);
   const scope = useAppScope(appId, data.apps.find((a) => a.appId === appId)?.entity);
@@ -353,14 +356,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const [detail, setDetail] = useState<DetailMetric | "services" | null>("sessions");
 
   const mfc = useMetricForecast(appId, data.tf,
-    detail && detail !== "services" ? detail : null);
+    detail && detail !== "services" ? detail : null, feName || undefined);
   /* One projection per card, because every card now draws one. These are NOT
    * free: each runs a DQL timeseries over user.events inside the analyzer, so
    * each is a real Grail scan — and one the header's readout never sees, since
    * the app's own query path is not the one executing it. That is why history
    * is capped (forecastPlan): four cards on a thirty-day window used to ask
    * for four times ninety days. */
-  const fcSessions = useMetricForecast(appId, data.tf, "sessions");
+  const fcSessions = useMetricForecast(appId, data.tf, "sessions", feName || undefined);
   const fcErrors = useMetricForecast(appId, data.tf, "errors");
   const fcRequests = useMetricForecast(appId, data.tf, "requests");
   /* THE HERO'S PROJECTION FOLLOWS THE SELECTED BOX. It used to be the error
@@ -543,7 +546,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
       `Window: ${data.tf.label}`,
       `Verdict:  — `,
       impacted
-        ? `Sessions: ${fmtN(impacted.sessions)} (${fmtN(impacted.realSessions)} from real people, the rest robots or synthetic)`
+        ? `Sessions: ${fmtN(impacted.sessions)} started in this window as Users & Sessions lists them (${fmtN(impacted.realSessions)} from real people, the rest robots or synthetic)`
         : "Sessions: not measured in this window",
       impacted && impacted.realSessions > 0
         ? `Sessions that met an error: ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} real ones`
@@ -638,7 +641,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         realSessions={impacted?.realSessions ?? null}
         clean={clean} tone={tone} name={app.name} isMobile={!!isMobile}
         series={pulse?.series ?? []}
-        actionsPerMin={perMin(pulse?.actions ?? 0)}
+        /* THE CAPTION DESCRIBES THE BARS. It read "/min user actions" beside
+           a sparkline of SESSIONS — two facts in one slot, and on an
+           application that records no user action at all it printed 0.0 next
+           to bars that plainly were not zero. Read off the series the bars
+           draw, so the two can never drift apart. */
+        sessionsPerMin={perMin((pulse?.series ?? [])
+          .reduce((a, b) => a + b.sessions, 0))}
         errors={app.errors} errorsPerMin={perMin(app.errors)}
         crashes={app.crashes} anrs={app.anrs}
 
@@ -1489,7 +1498,9 @@ interface CardProps {
   sessions: number; clean: number | null; tone: Tone; name: string; isMobile: boolean;
   /** The per-bin series; `t` is what the hover read-out puts on screen. */
   series: Array<{ t: string; sessions: number; errors: number; requests: number }>;
-  actionsPerMin: string; errors: number; errorsPerMin: string;
+  /** Sessions per minute, read off the same series the bars draw. */
+  sessionsPerMin: string;
+  errors: number; errorsPerMin: string;
   /** The fatal subset of `errors` — crashes end the session, ANRs freeze it
    *  until Android kills it. Mobile only, by what the types can occur on. */
   crashes: number; anrs: number;
@@ -1528,6 +1539,9 @@ interface CardProps {
    *  what makes it comparable to error-free beside it; this is what makes it
    *  comparable to Users & Sessions, which lists real users. */
   realSessions?: number | null;
+  /** What the sessions hand-off will list — counted from user.sessions, the
+   *  store the explorer reads, so the card can state it instead of leaving
+   *  the reader to discover that two stores count two populations. */
   /** Opens one service's own page in the platform's Services app. */
   onOpenService?: (name: string) => void;
   /** The domains this application contacts, busiest first, with their volume. */
@@ -1784,20 +1798,21 @@ function CleanCard(p: CardProps) {
         <Module Icon={UserSessionsIcon} title="User experience"
           metric="sessions" active={p.detail === "sessions"} onPick={p.onMetric}
           spark={<><Bars vals={sess} times={times} label="sessions" fc={p.fcBars?.sessions} />
-            <em className="tk-block__sparkv">{p.actionsPerMin}/min<br />user actions</em></>}>
+            <em className="tk-block__sparkv">{p.sessionsPerMin}/min<br />sessions</em></>}>
           <div className="tk-row2">
             <Stat v={fmtK(p.sessions)} l="sessions"
-              title={`All sessions with any event in the window — robots and `
-                + `synthetic included, because the error-free figure beside it `
-                + `uses the same base.`
+              title={`Sessions that STARTED in this window, counted from `
+                + `user.sessions — the same store the Analyze user sessions `
+                + `button opens, so this number and that list are the same `
+                + `population. Robots and synthetic monitors are included, `
+                + `because the error-free figure beside it shares this base.`
                 + (p.realSessions != null
                   ? ` ${fmtN(p.realSessions)} of them belong to real people.` : "")
-                + ` Users & Sessions will show fewer for two reasons, and both `
-                + `are differences in WHAT is counted rather than in the `
-                + `counting: it lists real users, and it lists sessions that `
-                + `STARTED in the window, while this counts every session that `
-                + `was active in it — a session that began earlier and is still `
-                + `running is here and not there.`} />
+                + ` Two kinds of session are NOT here, both by the platform's `
+                + `design: ones still running or closed less than ~30 minutes `
+                + `ago, which the session aggregator has not written yet, and `
+                + `ones with no navigation and no interaction at all, which it `
+                + `never writes.`} />
             <Stat v={pct} l="error-free" tone={p.tone === "info" ? undefined : p.tone} />
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
@@ -1816,28 +1831,14 @@ function CleanCard(p: CardProps) {
               compare are worth more than one they have to defend. */}
           {p.realSessions != null && p.realSessions !== p.sessions && (
             <div className="tk-note"
-              title={`The headline counts every session active in the window, `
-                + `robots and synthetic monitors included, because the `
-                + `error-free figure beside it shares that base. This is the `
-                + `part belonging to real people.`}>
+              title={`The headline counts every session the platform listed `
+                + `for this window, robots and synthetic monitors included, `
+                + `because the error-free figure beside it shares that base. `
+                + `This is the part belonging to real people.`}>
               {fmtK(p.realSessions)} real users
               <em className="tk-note__k"> of {fmtK(p.sessions)}</em>
             </div>
           )}
-          {/* WHAT THE BUTTON WILL SHOW, SAID BEFORE IT IS PRESSED. "Analyze
-              user sessions" opens the FINISHED sessions list — the view whose
-              filter grammar this app can write — and a session only finishes
-              after its inactivity timeout. In a two-hour window most of them
-              have not, so that list is always shorter than this count, and a
-              reader who compares them without being told reads a defect. The
-              gap IS the sessions still running. */}
-          <div className="tk-note tk-note--go"
-            title={`A session finishes after its inactivity timeout, so the `
-              + `list shows fewer than the count above. The difference is the `
-              + `sessions still running.`}>
-            the sessions list shows the finished ones
-          </div>
-
           {/* THE SCALE IS NOT A HEADLINE. This footnote repeated the band word
               already printed as the biggest thing on the screen, added the
               threshold, and did it in a column too narrow to hold it — so the
@@ -1993,9 +1994,16 @@ error series, read at the same width the window is drawn in.`}>
               <br />requests</em></>}>
           <div className="tk-row2">
             <Stat v={fmtK(p.requests)} l="web requests" />
+            {/* THE SAME RULE THE MODULE USES, not a second one. This read
+                `reqFail > 0 ? "bad"` — a COUNT test under a module whose own
+                comment says a rate — so one failed call in 927k printed
+                "0.0%" in red. A figure that rounds to zero must not be the
+                loudest thing on the card; the shared thresholds decide, and
+                a healthy rate carries no colour at all. */}
             <Stat v={p.requests > 0
                 ? `${((p.reqFail / p.requests) * 100).toFixed(1)}%` : "—"}
-              l="calls failed" tone={p.reqFail > 0 ? "bad" : undefined} />
+              l="calls failed"
+              tone={reqTone === "good" || reqTone === "info" ? undefined : reqTone} />
           </div>
           <div className="tk-note">{fmtMs(p.loadP50)} load <em>(p50)</em></div>
           {/* HOSTS, AND LABELLED AS HOSTS. These read exactly like the
@@ -2129,9 +2137,77 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
     sessions: "actions", errors: "errors", requests: "requests",
   };
   const max = Math.max(...(rows ?? []).map((r) => r.vol), 1);
+  /* FULL NAMES ON DEMAND. An endpoint list is a column of near-identical
+     prefixes whose ending is the whole point, and the ellipsis eats exactly
+     that. Widening the column for everyone would starve the numbers, so the
+     reader asks: the names then wrap instead of truncating and the name
+     column takes the share the bar can spare. */
+  const [wide, setWide] = useState(false);
+
+  /* DRAGGABLE COLUMNS. The toggle above makes names wrap, which a reader
+     asked for and then told me was not the thing: they wanted to MOVE the
+     divider. Fair — these endpoint names differ in their last twenty
+     characters and no automatic width rule knows how much of a hostname a
+     given reader needs to see.
+     The header and the rows are one grid, so the widths live in a custom
+     property on the panel and both follow it. They start as whatever the
+     automatic layout measured, so grabbing a divider continues the layout
+     rather than replacing it with numbers out of nowhere. */
+  const hdRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [cols, setCols] = useState<number[] | null>(null);
+  /* MEASURE THE WIDEST ROW, NOT THE HEADER.
+     The first cut froze the widths the HEADER cells happened to have, and the
+     header says "response time" where the row says "p50 865ms · p90 1.5s p95
+     4.7s". Those tracks were narrower than the data, the numeric cells do not
+     wrap, and they spilled over their neighbours — the reader saw
+     "p9054576s", three readings printed on top of each other.
+     Every row is its own grid, so the resolved tracks are read per row and the
+     widest wins. Nothing is frozen until a divider is actually grabbed: until
+     then the automatic layout is in charge, which is what sizes those cells
+     correctly in the first place. */
+  const measure = (): number[] | null => {
+    const root = rootRef.current;
+    if (!root) return null;
+    let best: number[] | null = null;
+    for (const r of root.querySelectorAll<HTMLElement>(".svcf__row")) {
+      const t = getComputedStyle(r).gridTemplateColumns.split(" ").map(parseFloat);
+      if (!t.length || t.some((n) => !Number.isFinite(n))) continue;
+      best = best ? best.map((w, i) => Math.max(w, t[i] ?? 0)) : t;
+    }
+    return best && best.length >= 2 ? best : null;
+  };
+
+  const drag = (i: number) => (e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const start = cols ?? measure();
+    if (!start) return;
+    if (!cols) setCols(start);
+    const base = [...start];
+    const x0 = e.clientX;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - x0;
+      const next = [...base];
+      // the dragged column takes the width; its right-hand neighbour gives
+      // it up, so the table does not grow a horizontal scrollbar
+      next[i] = Math.max(48, base[i] + dx);
+      if (base[i + 1] != null) next[i + 1] = Math.max(40, base[i + 1] - dx);
+      setCols(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const gridVar = cols
+    ? ({ "--svcf-cols": cols.map((n) => `${n}px`).join(" ") } as React.CSSProperties)
+    : undefined;
 
   return (
-    <div className="svcf">
+    <div className={`svcf${wide ? " svcf--wide" : ""}`} style={gridVar} ref={rootRef}>
       <div className="mch__hd">
         <span className="mch__t">{TITLE[metric]}
           <em>· {tf.label}, busiest first
@@ -2141,6 +2217,12 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
         <span className="mch__fc">
           {rows === null ? "measuring…" : `${rows.length} shown`}
         </span>
+        <button className="svcf__wide" onClick={() => setWide((w) => !w)}
+          aria-pressed={wide}
+          title={wide ? "Trim the names back to one line"
+            : "Show each name in full — they wrap instead of being cut"}>
+          {wide ? "trim names" : "full names"}
+        </button>
         <button className="mch__x" onClick={onClose} aria-label="Close"><XmarkIcon /></button>
       </div>
 
@@ -2153,12 +2235,20 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           not one label: a reader had to infer the schema from the data, and
           the units differ per metric. The header rides the rows' own grid, so
           the names sit over the numbers they belong to. */}
-      <div className="svcf__row svcf__hd" aria-hidden="true">
-        <span>{TITLE[metric].toLowerCase()}</span>
-        <span>share</span>
-        <span>{UNIT[metric]}</span>
-        <span>{metric === "errors" ? "reached a user" : "response time"}</span>
-        <span>{metric === "errors" ? "kind" : "failures"}</span>
+      <div className="svcf__row svcf__hd" ref={hdRef}>
+        {[TITLE[metric].toLowerCase(), "share", UNIT[metric],
+          metric === "errors" ? "reached a user" : "response time",
+          metric === "errors" ? "kind" : "failures"].map((h, i, all) => (
+          <span key={h + i}>{h}
+            {/* the divider: present on every column but the last, since the
+                last has no neighbour to take width from */}
+            {i < all.length - 1 && (
+              <i className="svcf__grip" onPointerDown={drag(i)}
+                role="separator" aria-orientation="vertical"
+                title="Drag to resize this column" />
+            )}
+          </span>
+        ))}
       </div>
         {(rows ?? []).map((r) => {
           /* ONE destination per row, chosen by what the row is evidence of.
@@ -2199,23 +2289,58 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           const perf = rowDrilldown(
             KIND[metric],
             { ...r, hasSpans: !!tracedDomains?.has(r.domain ?? r.name),
+              /* the HOST still names the row for the span lookup; the
+                 ENDPOINT rides beside it, for the filter */
+              ep: metric === "requests" ? r.name : undefined,
               name: metric === "requests" ? (r.domain ?? r.name) : r.name },
             tf, appEntity, metric === "errors" ? "fail" : "time", appName);
+          /* A VIEW GOES TO THE PAGE THAT OWNS IT. Until now a view row led
+             either to the Error Inspector or to the traces, depending on how
+             much of it had failed — two destinations that both describe a
+             view from the outside. The platform has a page about the view
+             itself, and the reader asked for it: Experience / Vitals, that
+             frontend, that view, this window. It replaces the choice rather
+             than joining it. */
+          const vitals = metric === "sessions"
+            ? viewVitalsHref(tf, appEntity, r.name) : null;
           const leadsWithErrors = metric === "sessions" && errRate >= HIT_WARN;
-          const dd = leadsWithErrors ? errs : perf;
-          /* BOTH DOORS, ALWAYS — the row stops choosing for the reader.
-             The rule routed by the DATA: any view past the 10% error line
-             went to the Error Inspector. But the reader arrived here from
-             the User Experience card, and what they followed was a p50 of
-             2.2s — the worst on the page. A single error on that view then
-             sent them to the error page and there was no way back to
-             performance from the row. The route a reader needs depends on
-             the question they came with, which the row cannot know, so it
-             offers the other one beside the first instead of guessing. */
-          const alt = leadsWithErrors
-            ? (perf ? { ...perf, short: "performance" } : null)
-            : ((r.errors ?? 0) > 0 && appName
-                ? { ...errs, short: "errors" } : null);
+          const dd = vitals
+            ? {
+                label: "Open this view's vitals",
+                meta: `Experience · ${r.name} · ${tf.label}`,
+                proves: "how this view performs for real users, over this window",
+                href: vitals, payload: {}, keyProperties: [], viaHref: true,
+                app: "Experience",
+              } satisfies DeepLink
+            : leadsWithErrors ? errs : perf;
+          /* ONE DOOR. The row used to carry a second, smaller link — "errors"
+             or "performance" — appearing on hover beside the count, so the
+             reader could take the route the row had not chosen for them.
+             With the view's own vitals page as the destination that choice
+             has nothing left to resolve, and a chip that appears under the
+             cursor over a row that is already a link was reading as a third
+             thing to decide. Removed at the reader's request. */
+          /* The sentence a row without a destination owes the reader. */
+          const noDrill = metric === "requests"
+            ? (r.domain
+                ? `No server-side traces behind ${r.domain}: no span in this `
+                  + `window carries it as a server address. That is what a `
+                  + `third party, a CDN or an uninstrumented backend looks `
+                  + `like from here — the browser's side is measured, the `
+                  + `other side is not ours to open.`
+                : "No host recorded for this endpoint, so there is nothing to "
+                  + "look for on the server side.")
+            : metric === "errors"
+              ? (r.named === 0
+                  ? "This failure carries no error name of its own — the name "
+                    + "on the row was written here, from what the record did "
+                    + "carry. The Error Explorer lists errors BY name, so it "
+                    + "would open on nothing."
+                  : "No destination for this row.")
+              : ((r.errors ?? 0) === 0
+                  ? "Nothing failed on this view in this window."
+                  : "No destination for this row.");
+
           /* An anchor, not a button: without an href the click died silently
            * wherever the intent bus is absent. Two kinds of target arrive
            * here — a full intent hand-off, and a plain url built from an app's
@@ -2267,23 +2392,32 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
                 track and the fatal note wrapped onto a second grid row. The
                 reader saw it as "muitos espaços desnecessários", and it was
                 literally the layout misaligned. */}
-            <span className="svcf__nm" title={r.name}>
+            {/* WHY A ROW GOES NOWHERE, ON THE ROW ITSELF. Some endpoints have
+                no drill-down and the reason used to be visible for free: the
+                hostname was printed in the name, and a reader could see that
+                firebase and firelog are not this estate's backends. Taking
+                the host off the row took the explanation with it, so the row
+                now says it in its tooltip instead of merely going quiet. */}
+            <span className="svcf__nm"
+              title={dd
+                ? (metric === "requests" && r.domain && r.domain !== r.name
+                    ? `${r.name}\non ${r.domain}` : r.name)
+                : `${r.name}\n${noDrill}`}>
               {metric === "errors" && (r.type === "crash" || r.type === "anr") && (
                 <b className="svcf__fatal">{r.type === "anr" ? "ANR" : "CRASH"}</b>
               )}
               {r.name}
+              {/* NO HOST ON THE ROW. Every endpoint in this panel shares
+                  one, so printing it eight times spent the column on the
+                  identical part and truncated the only part that differs.
+                  It survives in the row's tooltip and in the trace hand-off,
+                  which is where it is actually needed. */}
             </span>
             <span className="svcf__bar" aria-hidden="true">
               <i style={{ width: `${(r.vol / max) * 100}%` }} />
             </span>
             <span className="svcf__v">
               {fmtK(r.vol)} <em>{UNIT[metric]}</em>
-              {alt && (
-                <a className="svcf__alt" href={alt.href} target="_blank" rel="noreferrer"
-                  aria-label={`${r.name} — ${alt.label}: ${alt.proves}`}
-                  title={`${alt.label} — ${alt.proves}`}
-                  onClick={(e) => e.stopPropagation()}>{alt.short} →</a>
-              )}
             </span>
             {metric === "errors" ? (
               <>
