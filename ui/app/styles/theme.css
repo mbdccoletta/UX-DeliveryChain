@@ -285,9 +285,6 @@ svg { shape-rendering: geometricPrecision; }
 
 /* panels */
 .panel { background: var(--panel); border: var(--bw) solid var(--border); }
-/* the build stamp on the overview's key — quiet, mono, never a heading */
-.cc-motion__v { font: 500 10px var(--mono); font-style: normal;
-  color: var(--ink-3); margin-left: 10px; letter-spacing: 0.06em; }
 /* every close control carries Strato's XmarkIcon now, at one size */
 .mch__x svg, .drawer__x svg, .geo__drill-x svg { width: 13px; height: 13px; }
 /* the two that sit after a word carry a smaller one, sized to the text */
