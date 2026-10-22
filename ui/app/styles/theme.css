@@ -2836,6 +2836,12 @@ div:has(> header):has(main) > div {
 /* access and health by location — share of traffic as the bar, the judgement
    as the tone, against the application's own error share */
 .geo__rows { display: flex; flex-direction: column; gap: 5px; }
+/* the column names, on the rows' own grid so they cannot drift from them */
+.geo__hd { font: 700 9px var(--mono); letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--ink-3); padding-bottom: 4px;
+  border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+.geo__hd span:nth-child(5), .geo__hd span:nth-child(6),
+.geo__hd span:nth-child(7) { text-align: right; }
 /* the traffic light's rulebook: one quiet line, dots matching the map */
 .geo__rule {
   margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--border);

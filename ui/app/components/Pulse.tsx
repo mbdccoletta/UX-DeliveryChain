@@ -206,11 +206,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     const fit = () => { try { mapRef.current?.zoomToFit(); } catch { /* not mounted yet */ } };
     const t1 = setTimeout(fit, 80);
     const t2 = setTimeout(fit, 600);
+    /* THE NUDGE IS UNCONDITIONAL NOW, and the reason is a real estate with
+       traffic on every continent: zoomToFit() had nothing to do there — the
+       data already filled the default world view — so it moved nothing and
+       therefore emitted nothing, and the overlay, which refuses to draw
+       against a view the map has not confirmed, stayed empty. Marks on the
+       map simply were not there.
+       A zoom in followed by a zoom out has to move the view twice whatever
+       the data looks like, and it lands back where it started. */
     const t3 = setTimeout(() => {
-      if (reported.current) return;
       try {
         mapRef.current?.zoomIn();
-        setTimeout(() => { try { mapRef.current?.zoomOut(); } catch { /* gone */ } }, 140);
+        setTimeout(() => { try { mapRef.current?.zoomOut(); } catch { /* gone */ } }, 160);
       } catch { /* gone */ }
     }, 1100);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
@@ -985,6 +992,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                 })()}
               </div>
               <div className="geo__rows">
+                {/* THE COLUMNS SAY WHAT THEY ARE. Seven of them, and every
+                    one was a bare number: 469, 68.4% hit, 93ms. "hit" and
+                    "ms" carry their own meaning, but the volume column
+                    carried none at all, and a table whose columns are
+                    unnamed asks the reader to infer the schema. The header
+                    rides the same grid as the rows, so the names sit over
+                    the numbers they belong to and cannot drift from them. */}
+                <div className="geo__r geo__hd" aria-hidden="true">
+                  <i /><span>code</span><span>country</span><span />
+                  <span>sessions</span><span>met an error</span><span>ttfb p75</span>
+                </div>
                 {geo.map((g) => {
                   const a = arms(g);
                   const { rate, lift } = a;
