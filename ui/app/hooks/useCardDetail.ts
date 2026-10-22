@@ -40,6 +40,11 @@ export interface DetailRow {
   /** How many of these carry a real error.name. Zero means the Error Explorer,
    *  which lists BY name, would open on nothing. */
   named?: number;
+  /** Errors card: the raw, uncollapsed error.name, and how many distinct raw
+   *  names the row's label stands for. One means the label is the platform's
+   *  own value and can be sent as a filter; more means it cannot. */
+  raw?: string;
+  rawNames?: number;
   /** error.source — how it was raised. Shown, never used as a filter value. */
   src?: string;
   /** Experience card: the Apdex bands for this view. */
@@ -92,6 +97,8 @@ export function useCardDetail(
           third: r.third == null ? undefined : Number(r.third),
           type: r.type == null ? undefined : String(r.type),
           named: r.named == null ? undefined : Number(r.named),
+          raw: r.raw == null ? undefined : String(r.raw),
+          rawNames: r.rawNames == null ? undefined : Number(r.rawNames),
           src: r.src == null ? undefined : String(r.src),
           sat: r.sat == null ? undefined : Number(r.sat),
           tol: r.tol == null ? undefined : Number(r.tol),

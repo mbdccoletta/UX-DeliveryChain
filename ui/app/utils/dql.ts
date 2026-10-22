@@ -250,6 +250,82 @@ smartscapeNodes "FRONTEND"
  * the timeframe, and user.sessions is a small store (134k rows/24h measured
  * on a live estate, 2026-08-25).
  */
+/**
+ * THE NUMBER THE SESSIONS LIST WILL SHOW.
+ *
+ * The card counts sessions from `user.events` — every session with an event
+ * in the window — and the hand-off opens Users & Sessions, which reads
+ * `user.sessions`. Two stores, two populations: 426 against 180 on a live
+ * estate, and a reader comparing them reads a defect, because explaining a
+ * gap is not the same as not having one.
+ *
+ * So the card asks the OTHER store for its own figure and prints it beside
+ * the first. Both numbers are then true, both are on screen, and the one the
+ * button opens is stated before it is pressed. user.sessions is small —
+ * 134k rows per 24h measured on a live estate — so this costs a fraction of
+ * the RUM scans this page already pays for.
+ *
+ * Filtered on `frontend.name`, which is what the explorer's own Frontends
+ * chip matches; the inventory name is a different string and matches nothing.
+ */
+/**
+ * SESSIONS AS THE PLATFORM COUNTS THEM — the same store Users & Sessions
+ * reads, so the number on the card is the number the button opens.
+ *
+ * This replaced a per-session scan of `user.events`, which counted every
+ * session with any event in the window. That measure is not wrong, it is a
+ * DIFFERENT population, and a reader comparing the card with the list it
+ * opens found 439 against 184 and read the app as broken. Three documented
+ * reasons the stores disagree, none of them fixable by a better query:
+ *
+ *   · `fetch user.sessions` returns sessions that STARTED in the window;
+ *     the event scan counted every session ACTIVE in it
+ *   · the aggregation service waits 30+ minutes of inactivity before it
+ *     writes a session record, so the newest part of any window is not in
+ *     this store yet
+ *   · ZOMBIE SESSIONS — zero navigations and zero user interactions — are
+ *     never written at all, by design. On an application whose RUM records
+ *     requests and errors but almost no human actions, that is most of them.
+ *
+ * So the app counts what the platform will show. The cost of that choice is
+ * stated where it is paid: the newest sessions are missing until they are
+ * serialized, and machine-only sessions are missing permanently.
+ *
+ * The filter is on `frontend.name` rather than the entity id because that is
+ * the field the explorer's own Frontends chip matches — verified against it
+ * on a live estate, 192 here against 191 listed, the one a window boundary.
+ *
+ * `expand` fans a session out once per frontend it touched, so every count
+ * here is countDistinct over the session id rather than count().
+ */
+export const qImpactedSessions = (tf: Timeframe, frontendName: string) => {
+  const fe = frontendName.replace(/["\\]/g, "");
+  // The same real-user rule the event scan used, written the same way: a
+  // negative test, so a user_type this app has not met counts as a person
+  // rather than silently emptying the denominator.
+  const real = `not(dt.rum.user_type == "robot")
+      and not(dt.rum.user_type == "synthetic")`;
+  // null is not zero — a session with no error field must not be read as
+  // "has errors" by a null-propagating comparison
+  const err = `coalesce(error.count, 0) > 0`;
+  return `
+fetch user.sessions, from: ${tf.from}, to: ${tf.to}
+| expand fe = frontend.name
+| filter fe == "${fe}"
+| sort coalesce(error.count, 0) desc
+| summarize sessions = countDistinct(dt.rum.session.id),
+    hit = countDistinct(if(${err}, dt.rum.session.id)),
+    realSessions = countDistinct(if(${real}, dt.rum.session.id)),
+    hitReal = countDistinct(if(${err} and ${real}, dt.rum.session.id)),
+    hitRobot = countDistinct(if(${err} and dt.rum.user_type == "robot",
+      dt.rum.session.id)),
+    hitSynth = countDistinct(if(${err} and dt.rum.user_type == "synthetic",
+      dt.rum.session.id)),
+    exSid = takeFirst(dt.rum.session.id), exStart = takeFirst(start_time),
+    exInst = takeFirst(dt.rum.instance.id),
+    exErrs = takeFirst(coalesce(error.count, 0))`;
+};
+
 export const qFrontendNames = () => `
 fetch user.sessions, from: now()-24h
 | expand ent = dt.rum.application.entities
@@ -1237,6 +1313,28 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     by: { appId } ]`;
 
 /** Sessions and errors over time, for the landing page's trend chart. */
+/**
+ * SESSIONS PER BIN, FROM THE STORE THE HEADLINE COUNTS.
+ *
+ * The trend used to come from the event scan while the headline came from
+ * `user.sessions`, and the two bases met in the open: a card reading 181
+ * sessions over two hours sat above a forecast of "≈309 next 40m", drawn
+ * from a series that counted a different population. Whichever number a
+ * reader trusted, the page contradicted itself.
+ *
+ * Binned on `start_time`, which is what "sessions in this bin" has to mean
+ * for a store whose rows are whole sessions: a session belongs to the moment
+ * it began, not to every bin it spanned. Summing these bins therefore
+ * reproduces the headline — a cheap check the card prints beside the bars.
+ */
+export const qSessionSeries = (tf: Timeframe, frontendName: string) => `
+fetch user.sessions, from: ${tf.from}, to: ${tf.to}
+| expand fe = frontend.name
+| filter fe == "${frontendName.replace(/["\\]/g, "")}"
+| summarize sessions = countDistinct(dt.rum.session.id),
+  by: { t = bin(start_time, ${binFor(tf.minutes)}) }
+| sort t asc`;
+
 export const qPulseSeries = (tf: Timeframe, rumAppId: string) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
@@ -1263,13 +1361,39 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     requests = countIf(characteristics.classifier == "request"),
     // failed CALLS, not status codes — request records carry only 200/201
     // on both measured estates; failures are filed as fetch-source errors
-    reqfail = countIf(characteristics.classifier == "error"
-      and error.source == "fetch"),
+    reqfail = countIf(${FAILED_CALL}),
     exceptions = countIf(error.type == "exception"),
   by: { os = os.name, osv = os.version, man = device.manufacturer,
         model = device.model.identifier, ver = app.short_version,
         cc = geo.country.iso_code, ut = dt.rum.user_type }
 | limit 500`;
+
+/**
+ * A FAILED CALL - one definition, used by the card and by its drill-down.
+ *
+ * This was `error.source == "fetch"` alone, measured on one estate where the
+ * 404s carried exactly that. A reader then found an application whose
+ * failures panel was full of `404: api...` rows above a card reading
+ * "0.0% calls failed", which is the shape of a predicate that is true
+ * somewhere and false here - and one field is a single point of failure when
+ * the question is "did a call fail".
+ *
+ * So the test is the UNION of the signals, each sufficient on its own and
+ * none of which a JavaScript exception carries:
+ *   - `error.type == "request"` - the platform filed it as a request error
+ *   - `error.source == "fetch"` - raised by the fetch/XHR layer
+ *   - an HTTP status of 400 or worse on the record itself
+ * An exception in the page's own code has no request type, no fetch source
+ * and no status code, so it stays out - which is what keeps this number
+ * different from the errors card beside it, on purpose.
+ *
+ * Why not status codes off the `request` records: those carry only 200 and
+ * 201 on both measured estates. Counting 4xx/5xx there returned 0 failures
+ * against 598 real ones.
+ */
+export const FAILED_CALL = `characteristics.classifier == "error"
+      and (error.type == "request" or error.source == "fetch"
+        or coalesce(toLong(http.response.status_code), 0) >= 400)`;
 
 /** Most requested paths (layers 04/05). */
 export const qPaths = (tf: Timeframe) => `
@@ -1505,33 +1629,47 @@ smartscapeEdges "runs_on"
  * Fixed 30-minute window, said on the drawer's face, for the same cost reason
  * as the trace step.
  */
-export const qSvcMetrics = (id: string) => `
-fetch spans, from: now()-30m
+export const qSvcMetrics = (id: string, tf: Timeframe) => `
+fetch spans, from: ${tf.from}, to: ${tf.to}
 | filter dt.entity.service == "${id.replace(/["\\]/g, "")}"
 | summarize p50 = percentile(toLong(duration), 50), p90 = percentile(toLong(duration), 90),
     p95 = percentile(toLong(duration), 95), thr = count(),
     fails = countIf(request.is_failed == true)
 | limit 1`;
 
-export const qAppMetrics = (rumAppId: string) => `
-fetch user.events, from: now()-30m
+/**
+ * ONE UNIT ON BOTH SIDES OF THE RATE.
+ *
+ * This counted VIEWS as the throughput and every ERROR EVENT as the failures,
+ * then the drawer divided one by the other: 95 calls, 1,087 failed, 1144%.
+ * Not a rounding problem — two different things sharing a fraction bar. An
+ * application can easily record ten errors per view, and nothing about that
+ * is a failure RATE.
+ *
+ * So the app node now measures what every other node in this chain measures:
+ * calls out, calls failed, and the latency of those calls. FAILED_CALL is the
+ * same predicate the Overview's "calls failed" uses, so the drawer and the
+ * card can no longer disagree about what failed. View timing has not been
+ * lost — it is the Render tier's own headline, p50 of the view.
+ */
+export const qAppMetrics = (rumAppId: string, tf: Timeframe) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
-| summarize
-    p50 = percentile(if(characteristics.classifier == "view_summary", toLong(duration)), 50),
-    p90 = percentile(if(characteristics.classifier == "view_summary", toLong(duration)), 90),
-    p95 = percentile(if(characteristics.classifier == "view_summary", toLong(duration)), 95),
-    thr = countIf(characteristics.classifier == "view_summary"),
-    fails = countIf(characteristics.classifier == "error")
+    and (characteristics.classifier == "request" or (${FAILED_CALL}))
+| fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
+| summarize p50 = percentile(if(_req == 1, toLong(duration)), 50),
+    p90 = percentile(if(_req == 1, toLong(duration)), 90),
+    p95 = percentile(if(_req == 1, toLong(duration)), 95),
+    thr = countIf(_req == 1), fails = countIf(_req == 0)
 | limit 1`;
 
-export const qDomMetrics = (rumAppId: string, domain: string) => `
-fetch user.events, from: now()-30m
+export const qDomMetrics = (rumAppId: string, domain: string, tf: Timeframe) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
 /* failed CALLS ride as fetch-source errors, not status >= 400 on request
  * records (those carry only 200/201 — measured on both estates) */
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and url.domain == "${domain.replace(/["\\]/g, "")}"
-    and (characteristics.classifier == "request"
-      or (characteristics.classifier == "error" and error.source == "fetch"))
+    and (characteristics.classifier == "request" or (${FAILED_CALL}))
 | fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
 | summarize p50 = percentile(if(_req == 1, toLong(duration)), 50),
     p90 = percentile(if(_req == 1, toLong(duration)), 90),
@@ -1710,6 +1848,16 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     // records that carry a real error.name — the Error Explorer lists errors
     // BY name, so a row we had to name ourselves has nothing for it to show
     named = countIf(isNotNull(error.name)),
+    // THE UNCOLLAPSED NAME, AND HOW MANY HIDE BEHIND THE ROW.
+    // The name above is this app's label: an error.name with its ids replaced,
+    // or — when nothing was named — a sentence this app wrote itself. The
+    // Error Explorer filters on the PLATFORM's "Error Name", so handing it
+    // the label matches nothing and opens an empty page that reads as a
+    // working filter. These two decide whether an exact filter is possible:
+    // one distinct raw name behind the row means the label IS that name and
+    // can travel; more than one means the collapse did its job and there is
+    // no single value to send.
+    raw = takeAny(error.name), rawNames = countDistinct(error.name),
   by: { name }
 | sort vol desc | limit 8`;
 
@@ -1724,8 +1872,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 export const qDetailRequests = (tf: Timeframe, rumAppId: string) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
-    and (characteristics.classifier == "request"
-      or (characteristics.classifier == "error" and error.source == "fetch"))
+    and (characteristics.classifier == "request" or (${FAILED_CALL}))
 /* THE ENDPOINT, NOT THE HOST. This grouped by url.domain, so the drill under
    "Web requests" listed the same handful of hostnames the Called services
    card lists — two cards saying the same thing, and neither of them saying
@@ -1739,7 +1886,17 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
    volume alone sorted it off the end of the list. The panel then showed
    eight rows of "no failures" while the card above it counted failed
    calls. */
-| fieldsAdd ep = concat(url.domain, coalesce(url.path, ""))
+/* THE NAME A TRACE WOULD USE. This was host+path, which repeated the same
+   40-character hostname on all eight rows and pushed the part that
+   distinguishes them off the end of the column - the reader saw eight
+   truncations and no endpoints. A span's Endpoint attribute reads
+   "GET /glog/index.faces": method, space, path. Same string here, so the
+   row and the trace it opens call one endpoint by one name. The host stays
+   as its own field - it is what the trace hand-off filters on, and it is
+   printed beside the name rather than inside it. */
+| fieldsAdd ep = if(isNull(url.path), url.domain,
+    else: if(isNull(http.request.method), url.path,
+      else: concat(http.request.method, " ", url.path)))
 | summarize vol = countIf(characteristics.classifier == "request"),
     /* THE HOST SURVIVES THE REGROUPING. Pulse hands each row's name to
        useDomainTraces, which matches it against a span's server address — so
@@ -1747,7 +1904,10 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
        the trace hand-off went quiet. The host is still one value per row
        (the endpoint contains it), so it rides along as its own field. */
     domain = takeAny(url.domain),
-    failures = countIf(characteristics.classifier == "error"),
+    // the SAME predicate the card counts with, named once in FAILED_CALL -
+    // the panel and the headline disagreeing about what a failure is was
+    // exactly the defect this replaced
+    failures = countIf(${FAILED_CALL}),
     sessions = countDistinct(dt.rum.session.id),
     p50 = percentile(if(characteristics.classifier == "request", toLong(duration)), 50),
     p90 = percentile(if(characteristics.classifier == "request", toLong(duration)), 90),
@@ -2062,11 +2222,11 @@ fetch dt.entity.service, from: now()-2h
  * No percentile split: the store keeps an average, so p50/p90/p95 would be one
  * number printed three times. The caller shows the average as what it is.
  */
-export const qSvcMetricsFallback = (id: string) => `
+export const qSvcMetricsFallback = (id: string, tf: Timeframe) => `
 timeseries { rt = avg(dt.service.request.response_time),
              ct = sum(dt.service.request.count),
              fl = sum(dt.service.request.failure_count) },
-  from: now()-30m,
+  from: ${tf.from}, to: ${tf.to},
   filter: { dt.entity.service == "${id.replace(/["\\]/g, "")}" }
 | fieldsAdd avgNs = arrayAvg(rt) * 1000, calls = arraySum(ct), fails = arraySum(fl)
 | fields avgNs, calls, fails

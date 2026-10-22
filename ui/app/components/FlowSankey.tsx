@@ -125,9 +125,26 @@ function stageMeta(id: string, outcomes: boolean, deepest: number): Stage {
     return { id, nm: "No navigation recorded", tone: "bad", sub: "session with no navigation event" };
   }
   void outcomes;
+  /* COLOUR IS A JUDGEMENT, AND MOST OF THESE STAGES ARE NOT ONE.
+   *
+   * Three of the five stages were amber, so the ribbons leaving them were
+   * amber too and the whole diagram ran warm — a reader met a wall of orange
+   * and red and concluded the application was on fire, when most of what
+   * they were looking at was ordinary traffic going about its business.
+   *
+   * Depth is not a fault. A session that reached three views went FURTHER
+   * than one that reached two; neither is a problem, and calling both of them
+   * a warning spends the alarm colour on the normal case — which is how an
+   * alarm colour stops working. They are measurements, so they take the
+   * neutral tone.
+   *
+   * What stays warm is what a reader should act on: a session that bounced on
+   * its entry view (amber — it arrived and left), and a session the product
+   * never saw at all (red — a blind spot, not a behaviour). Green is kept for
+   * the one stage that is genuinely the good outcome: reaching the end. */
   if (id === "st-order") return { id, nm: "Reached the deepest journey", tone: "good", sub: `${deepest} views` };
-  if (id === "st-cart") return { id, nm: "Went deep", tone: "warn", sub: "3+ views" };
-  if (id === "st-prod") return { id, nm: "Two views in", tone: "warn", sub: "2 views" };
+  if (id === "st-cart") return { id, nm: "Went deep", tone: "info", sub: "3+ views" };
+  if (id === "st-prod") return { id, nm: "Two views in", tone: "info", sub: "2 views" };
   return { id, nm: "Entry view only", tone: "warn", sub: "immediate bounce" };
 }
 
@@ -161,6 +178,8 @@ export const deepestOf = (seqs: SeqRow[]) => {
 const OUTCOME: Record<string, { id: string; nm: string; tone: Tone; sub: string }> = {
   "st-order": { id: "o-conv", nm: "Converted", tone: "good", sub: "flow with a measured order" },
   "st-cart": { id: "o-cart", nm: "Stopped before the end", tone: "bad", sub: "started and abandoned" },
+  // "left without starting" IS a warning: the visit happened and the business
+  // got nothing from it. Unlike depth, that is something to act on.
   "st-prod": { id: "o-browse", nm: "Left without starting", tone: "warn", sub: "no intent recorded" },
   "st-home": { id: "o-browse", nm: "Left without starting", tone: "warn", sub: "no intent recorded" },
   "st-none": { id: "o-blind", nm: "Invisible to the business", tone: "bad", sub: "instrumentation gap" },
@@ -934,6 +953,35 @@ export function FlowSankey({
         ctx.fill();
       }
 
+      /* TWO LABELS NEVER SHARE A LINE.
+       *
+       * Thin ribbons sit a few pixels apart, so their labels — two text lines
+       * and a backing plate each — landed on top of one another and the names
+       * printed through each other. The plate made it worse: the lower label
+       * painted its own background over the upper one's second line.
+       *
+       * Each label claims a vertical band in its column before it is drawn.
+       * A label whose band is taken slides DOWN, in small steps, until it
+       * finds room — a few pixels off its ribbon's centre is still obviously
+       * its label. If it has to move further than that it would be pointing
+       * at a neighbour's ribbon, which is worse than silence, so it is not
+       * drawn at all: the node still answers on hover, the way the thin nodes
+       * of the step view already do. */
+      const bands: Array<{ c: number; y0: number; y1: number }> = [];
+      /* Which nodes ended up with their label on screen — the hover box asks,
+         so it can keep quiet about the ones already saying it themselves. */
+      const labelled = new Set<string>();
+      const claimY = (c: number, cy: number, half: number): number | null => {
+        const MAX_SHIFT = 36, STEP = 3;
+        for (let d = 0; d <= MAX_SHIFT; d += STEP) {
+          const y = cy + d, y0 = y - half, y1 = y + half;
+          if (!bands.some((b) => b.c === c && y0 < b.y1 && y1 > b.y0)) {
+            bands.push({ c, y0, y1 });
+            return y;
+          }
+        }
+        return null;
+      };
       for (const n of placed) {
         const dim = (picks.length || sel) && !lit.has(n.id);
         if (dim && focus) continue; // focus mode hides labels of hidden flows too
@@ -956,7 +1004,6 @@ export function FlowSankey({
           ctx.restore();
         }
         const left = n.c === 0 && !stepMode;
-        ctx.textAlign = stepMode ? "center" : left ? "right" : "left";
         const tx = stepMode ? n.x : left ? n.x - 12 : n.x + 12;
         const subTxt = (n.ab ? "▼ most abandoned · " : "") + `${fmtN(n.v)} · ${n.sub}`;
         /* The count is the point of the diagram, so it is written like it:
@@ -966,6 +1013,24 @@ export function FlowSankey({
         const subCol = n.ab ? cssVar("--bad") : cssVar("--ink");
         const NM_F = "600 12px sans-serif", SUB_F = "700 11px monospace";
 
+        /* NO LABEL LEAVES THE CANVAS, ON EITHER SIDE.
+         *
+         * Canvas does not clip politely: text drawn past an edge is simply
+         * painted away and the reader is handed a sentence with its head or
+         * its tail missing — "cia de Canais PJ (Desktop) - WEB" on the left,
+         * "5.3% of ses" on the right. Alignment alone could not fix it: the
+         * first column writes leftwards and the last writes rightwards, so
+         * each overflows its own way, and the middle column's path labels are
+         * long enough to overflow from the inside.
+         *
+         * So every label is laid out as a BOX and the box is pushed back
+         * inside the frame before anything is drawn. Nothing is abbreviated
+         * and nothing is dropped; a label that would not fit where it belongs
+         * simply slides until it does, over its own backing plate. */
+        const fitX = (x0: number, bw: number) =>
+          Math.max(4, Math.min(x0, w - 4 - bw));
+        ctx.textAlign = "left";
+
         if (stepMode) {
           // a label needs its own vertical room; below that the tail would
           // overprint itself, so those nodes speak through hover instead
@@ -973,16 +1038,17 @@ export function FlowSankey({
           ctx.font = NM_F; const w1 = ctx.measureText(n.nm).width;
           ctx.font = SUB_F; const w2 = ctx.measureText(subTxt).width;
           const bw = Math.max(w1, w2), cy = n.y + n.h / 2;
+          const lx = fitX(tx - bw / 2, bw);
           ctx.globalAlpha = dim ? 0.55 : 0.97;
           ctx.fillStyle = cssVar("--bg");
-          ctx.fillRect(tx - bw / 2 - 6, cy - 14, bw + 12, 31);
+          ctx.fillRect(lx - 6, cy - 14, bw + 12, 31);
           ctx.globalAlpha = dim ? 0.25 : 1;
           ctx.font = NM_F;
           ctx.fillStyle = dim ? cssVar("--ink-3") : cssVar("--ink");
-          ctx.fillText(n.nm, tx, cy - 2);
+          ctx.fillText(n.nm, lx, cy - 2);
           ctx.font = SUB_F;
           ctx.fillStyle = subCol;
-          ctx.fillText(subTxt, tx, cy + 12);
+          ctx.fillText(subTxt, lx, cy + 12);
           ctx.globalAlpha = 1;
           continue;
         }
@@ -997,25 +1063,33 @@ export function FlowSankey({
           // thin ribbon: one line, or stacked labels of adjacent nodes collide
           ctx.font = NM_F; const w1 = ctx.measureText(n.nm).width;
           ctx.font = SUB_F; const w2 = ctx.measureText(subTxt).width;
-          const cy = n.y + n.h / 2;
-          plate(tx - 4, cy - 9, w1 + w2 + 17, 18);
+          const bw = w1 + 9 + w2;
+          const cy = claimY(n.c, n.y + n.h / 2, 10);
+          if (cy == null) { ctx.globalAlpha = 1; continue; }
+          const lx = fitX(tx, bw);
+          plate(lx - 4, cy - 9, bw + 8, 18);
           ctx.font = NM_F;
           ctx.fillStyle = dim ? cssVar("--ink-3") : cssVar("--ink");
-          ctx.fillText(n.nm, tx, cy + 4);
+          ctx.fillText(n.nm, lx, cy + 4);
           ctx.font = SUB_F;
           ctx.fillStyle = subCol;
-          ctx.fillText(subTxt, tx + w1 + 9, cy + 4);
+          ctx.fillText(subTxt, lx + w1 + 9, cy + 4);
+          labelled.add(n.id);
         } else {
           ctx.font = NM_F; const w1 = ctx.measureText(n.nm).width;
           ctx.font = SUB_F; const w2 = ctx.measureText(subTxt).width;
-          const cy = n.y + n.h / 2, bw = Math.max(w1, w2);
-          plate(left ? tx - bw - 4 : tx - 4, cy - 13, bw + 8, 30);
+          const bw = Math.max(w1, w2);
+          const cy = claimY(n.c, n.y + n.h / 2, 16);
+          if (cy == null) { ctx.globalAlpha = 1; continue; }
+          const lx = fitX(left ? tx - bw : tx, bw);
+          plate(lx - 4, cy - 13, bw + 8, 30);
           ctx.font = NM_F;
           ctx.fillStyle = dim ? cssVar("--ink-3") : cssVar("--ink");
-          ctx.fillText(n.nm, tx, cy - 2);
+          ctx.fillText(n.nm, lx, cy - 2);
           ctx.font = SUB_F;
           ctx.fillStyle = subCol;
-          ctx.fillText(subTxt, tx, cy + 12);
+          ctx.fillText(subTxt, lx, cy + 12);
+          labelled.add(n.id);
         }
         ctx.globalAlpha = 1;
       }
@@ -1023,7 +1097,16 @@ export function FlowSankey({
 
       /* tooltip: the full path and its numbers, near the hovered node */
       const hv = hover ? placed.find((p) => p.id === hover) : null;
-      if (hv) {
+      /* A TOOLTIP THAT REPEATS THE LABEL IS NOISE WITH A BORDER.
+       *
+       * The hover box printed the node's name and its numbers — the same two
+       * lines already drawn beside the ribbon — so pointing at a node put a
+       * second copy of its label over the first. The box earns its place only
+       * when it has something the label does not: the FULL mined route, where
+       * the label shows a shortened one, or the text of a label that
+       * collision avoidance decided not to draw. */
+      const says = hv ? (hv.full ?? hv.nm) : "";
+      if (hv && !(labelled.has(hv.id) && says === hv.nm)) {
         /* THE BOX IS CLAMPED BY ITS TEXT, NOT ONLY BY ITS POSITION.
          *
          * This positioned with Math.max(6, Math.min(w - bw - 6, …)) — which is

@@ -2543,10 +2543,17 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   padding: 10px 14px 8px; animation: mchin 220ms ease-out; }
 .svcf__rows { display: flex; flex-direction: column; }
 .svcf__row { display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) minmax(60px, 1fr) auto auto minmax(120px, auto);
+  /* the widths a reader has dragged, if any — header and rows share one
+     property so they can never fall out of step */
+  grid-template-columns: var(--svcf-cols,
+    minmax(120px, 1.4fr) minmax(60px, 1fr) auto auto minmax(120px, auto));
   gap: 14px; align-items: center; padding: 7px 0;
   border-top: 1px solid var(--border); font: 500 12px var(--mono); }
-.svcf__row--warn { background:linear-gradient(90deg, color-mix(in srgb, var(--warn-fill) 9%, transparent), transparent 60%); }
+/* NO TINTED ROW. Every row of a failures table has reached a user, so the
+   amber wash fired on all of them — it stopped separating anything and just
+   made the panel look stained. The numbers in the row already carry the
+   colour, which is where a judgement belongs. */
+.svcf__row--warn { background: none; }
 /* The fatal tag: a crash row names its kind before its exception message.
    Discreet by request — the filled version stretched into a full-width red
    bar on narrow rows and shouted over the list. Outline only, sized to its
@@ -2562,6 +2569,13 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   overflow: hidden; }
 .svcf__bar i { display: block; height: 100%; background: var(--info); border-radius: 3px;
   box-shadow: 0 0 8px color-mix(in srgb, var(--info) 55%, transparent); }
+/* A SQUEEZED CELL CLIPS, IT DOES NOT SPILL. These never wrap, and without a
+   min-width a grid item refuses to shrink below its content — so a narrow
+   track let three latency readings print on top of one another. Clipping is
+   the honest failure: the reader sees a cut number and can widen the column
+   or switch names on. */
+.svcf__v, .svcf__tr, .svcf__f { min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; }
 .svcf__v { color: var(--ink); text-align: right; white-space: nowrap; }
 .svcf__v em { color: var(--ink-3); font-style: normal; font-size: 10px; }
 .svcf__tr { color: var(--ink-3); text-align: right; white-space: nowrap; min-width: 62px; }
@@ -2767,9 +2781,44 @@ a.svcf__bar:hover, a.svcf__bar:focus-visible {
    where there were three, which is exactly what it now delivers. */
 a.svcf__row { text-decoration: none; color: inherit; }
 /* the column names: the rows' own grid, so they cannot drift from the values */
+/* "full names": the row keeps its columns, the name stops being a single
+   clipped line, and the name track takes the width the bar can spare. The
+   rows grow taller rather than the table growing wider, so the numbers stay
+   where the eye expects them. */
+.svcf__wide { background: none; border: 1px solid var(--border);
+  border-radius: 4px; color: var(--ink-3); cursor: pointer;
+  font: 600 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; margin-left: 12px; white-space: nowrap; }
+.svcf__wide:hover, .svcf__wide:focus-visible { color: var(--ink);
+  border-color: var(--ink-3); outline: none; }
+.svcf__wide[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-3); }
+.svcf--wide .svcf__row { align-items: start;
+  grid-template-columns: var(--svcf-cols,
+    minmax(240px, 2.6fr) minmax(50px, 0.7fr) auto auto minmax(110px, auto)); }
+.svcf--wide .svcf__nm { white-space: normal; overflow: visible;
+  overflow-wrap: anywhere; text-overflow: clip; line-height: 1.45; }
+/* EVERY COLUMN, NOT JUST THE NAME. The toggle began as a fix for endpoint
+   names and left the other cells clipped, so "p95 266ms 1 frustrated 18
+   errors" still ended in an ellipsis on a narrow panel. In this mode no cell
+   truncates: they wrap, and the row grows as tall as its tallest cell. */
+.svcf--wide .svcf__v, .svcf--wide .svcf__tr, .svcf--wide .svcf__f {
+  white-space: normal; overflow: visible; overflow-wrap: anywhere;
+  text-overflow: clip; line-height: 1.45; }
+.svcf--wide .svcf__tr { min-width: 0; }
+.svcf--wide .svcf__bar { margin-top: 4px; }
+
 .svcf__hd { font: 700 9px var(--mono); letter-spacing: 0.09em;
   text-transform: uppercase; color: var(--ink-3); padding-bottom: 5px;
   border-bottom: 1px solid var(--border); }
+.svcf__hd > span { position: relative; }
+/* the divider between two columns: a wide invisible grab area over a hairline
+   that only shows when the pointer is on it, so the header stays a header */
+.svcf__grip { position: absolute; top: -4px; bottom: -6px; right: -8px;
+  width: 13px; cursor: col-resize; touch-action: none; }
+.svcf__grip::after { content: ""; position: absolute; top: 0; bottom: 0;
+  left: 6px; width: 1px; background: transparent; }
+.svcf__hd:hover .svcf__grip::after { background: var(--border); }
+.svcf__grip:hover::after { background: var(--ink-3); }
 .svcf__hd > span:nth-child(n+3) { text-align: right; }
 
 /* What Davis detected, under the application's name in the core. Quiet when

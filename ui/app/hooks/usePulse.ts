@@ -10,7 +10,8 @@
 // first page must not bill twice for being looked at twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qPulseBreakdown, qPulseSeries, runDql, type Timeframe } from "../utils/dql";
+import { qPulseBreakdown, qPulseSeries, qSessionSeries, runDql,
+  type Timeframe } from "../utils/dql";
 
 export interface PulsePoint {
   t: string; sessions: number; errors: number; actions: number; requests: number;
@@ -55,9 +56,19 @@ function rollup(
   return [...acc.values()].sort((a, b) => b.sessions - a.sessions).slice(0, 6);
 }
 
-export function usePulse(rumAppId?: string, tf?: Timeframe): PulseData | null {
+/**
+ * `frontendName` moves the SESSIONS line of the trend onto `user.sessions`,
+ * the store the Overview's headline and the sessions hand-off both use. The
+ * errors, actions and requests lines stay on `user.events`, because those are
+ * event counts and that store is where events live. Without a name the trend
+ * is entirely the event scan, as before.
+ */
+export function usePulse(
+  rumAppId?: string, tf?: Timeframe, frontendName?: string,
+): PulseData | null {
   const gen = useMemoGen();
-  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${gen}` : "";
+  const fe = frontendName || "";
+  const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${fe}|${gen}` : "";
   const [data, setData] = useState<PulseData | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -69,13 +80,24 @@ export function usePulse(rumAppId?: string, tf?: Timeframe): PulseData | null {
     (async () => {
       let out: PulseData | null = null;
       try {
-        const [series, tuples] = await Promise.all([
+        const [series, tuples, sess] = await Promise.all([
           runDql<Record<string, unknown>>(qPulseSeries(tf!, rumAppId!), 200),
           runDql<Record<string, unknown>>(qPulseBreakdown(tf!, rumAppId!), 500),
+          fe ? runDql<Record<string, unknown>>(qSessionSeries(tf!, fe), 200)
+                 .catch(() => [] as Record<string, unknown>[])
+             : Promise.resolve([] as Record<string, unknown>[]),
         ]);
+        /* Both legs bin the same window with the same width, so the bin
+           label is the join key. A bin the session store has nothing for is
+           zero rather than missing — the gap is the fact. */
+        const byBin = new Map<string, number>();
+        for (const r of sess) byBin.set(String(r.t ?? ""), Number(r.sessions) || 0);
         out = {
           series: series.map((r) => ({
-            t: String(r.t ?? ""), sessions: Number(r.sessions) || 0,
+            t: String(r.t ?? ""),
+            sessions: byBin.size
+              ? (byBin.get(String(r.t ?? "")) ?? 0)
+              : Number(r.sessions) || 0,
             errors: Number(r.errors) || 0, actions: Number(r.actions) || 0,
             requests: Number(r.requests) || 0,
           })),
