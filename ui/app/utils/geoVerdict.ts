@@ -105,13 +105,28 @@ export const geoJudge = (g: GeoArm, base: number): GeoTone =>
 /** The threshold that fired, spelled out — a verdict never asks to be taken
  *  on faith. Absolute errors first (the loudest finding), deviation second,
  *  slowness third. */
+/** "1 session" / "4 sessions" — the gate's own count, in words that agree. */
+const fmtCount = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
+
 export const geoBecause = (g: GeoArm, base: number): string => {
   const a = geoArms(g, base);
   const pct = `${(a.rate * 100).toFixed(a.rate >= 0.1 ? 0 : 1)}%`;
   if (a.level === 0) {
-    return g.hit === 0
-      ? (a.apx !== null && a.apx < 1 ? `no errors · Apdex ${a.apx.toFixed(2)}` : "no session met an error")
-      : `${pct} of its sessions met an error — under the 10% tolerating line`;
+    if (g.hit === 0) {
+      return a.apx !== null && a.apx < 1
+        ? `no errors · Apdex ${a.apx.toFixed(2)}` : "no session met an error";
+    }
+    /* A GATE IS NOT A THRESHOLD. Level 0 has two very different causes: the
+       rate really is below the line, or there were too few sessions to judge
+       it at all. Saying "under the 10% tolerating line" for the second was
+       a false claim about a measurement — one errored session out of four
+       reads 25%, and the sentence insisted that was under ten. Now the gate
+       says it is a gate. */
+    if (g.sessions < GEO_MIN_SESSIONS && a.rate >= GEO_ABS_WARN) {
+      return `${pct} of its sessions met an error, but ${fmtCount(g.sessions)}`
+        + ` is too few to judge — a verdict needs ${GEO_MIN_SESSIONS}`;
+    }
+    return `${pct} of its sessions met an error — under the 10% tolerating line`;
   }
   if (a.abs === a.level) return a.level === 2
     ? `${pct} of its sessions met an error — frustrated starts at 25%`
