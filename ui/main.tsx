@@ -13,6 +13,21 @@ import { Boundary } from "./app/components/Boundary";
  * to be set BEFORE AppRoot renders, because the theme is resolved once. */
 globalThis.dtVisualRefreshEnabled = true;
 
+/* THE LAST APPLICATION OPENS AGAIN, without a discovery pass. A url with no
+   `app` made the first load rank the whole estate — measured on a production
+   tenant, 374 GB and 11 s — only to land on an application this reader had
+   already chosen yesterday. The last choice is remembered per browser and put
+   into the url before anything reads it. If it has no traffic in the window,
+   the loader's own "scope matched nothing" fallback asks the estate once. */
+try {
+  const u = new URL(window.location.href);
+  const last = window.localStorage.getItem("deliverychain:lastApp");
+  if (!u.searchParams.get("app") && last && /^[\w-]{8,64}$/.test(last)) {
+    u.searchParams.set("app", last);
+    window.history.replaceState(window.history.state, "", u.toString());
+  }
+} catch { /* storage blocked or no url — the discovery pass still works */ }
+
 /* THE MAP'S GEOMETRY STARTS DOWNLOADING WITH THE APP, not with the map.
    Strato's MapView fetches the world's country shapes from the CDN only when
    it mounts — measured on staging at t+6.4 s, 14 MB uncompressed, 7.6 s to

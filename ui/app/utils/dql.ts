@@ -407,17 +407,49 @@ export const scopeApp = (rumAppId?: string | null) =>
  * looking at. It stays estate-wide for the first load, when there is nothing
  * to scope to and the busiest application is what decides the default.
  */
+/** EXACT WHERE THE PLATFORM ALLOWS IT. countDistinctExact has an element
+ *  limit: on a production estate (~5M sessions an hour) the census failed
+ *  with UDF_ELEMENT_LIMIT_WITH_ALTERNATIVE and the verdict waited forever.
+ *  Under the limit the count is exact; over it the caller re-asks with the
+ *  estimate at its highest precision (16: ~0.4% standard error) and the
+ *  screen says the total is estimated. */
+export const distinctFn = (exact: boolean) => (x: string) =>
+  exact ? `countDistinctExact(${x})` : `countDistinct(${x}, precision: 16)`;
+/** Applications known to exceed the exact-count limit. Asking exact first
+ *  costs them a whole failed scan (~265 GB and ~11 s on a production
+ *  application) before the estimate runs, so once one has hit the limit it is
+ *  remembered per browser and asked for the estimate directly. */
+const OVER_KEY = "deliverychain:overExact";
+export const overExactLimit = (appId?: string | null): boolean => {
+  if (!appId) return false;
+  try { return (JSON.parse(window.localStorage.getItem(OVER_KEY) ?? "[]") as string[]).includes(appId); }
+  catch { return false; }
+};
+export const markOverExactLimit = (appId?: string | null): void => {
+  if (!appId) return;
+  try {
+    const xs = JSON.parse(window.localStorage.getItem(OVER_KEY) ?? "[]") as string[];
+    if (!xs.includes(appId)) window.localStorage.setItem(OVER_KEY, JSON.stringify([...xs, appId].slice(-50)));
+  } catch { /* blocked storage: the next open simply asks exact again */ }
+};
+/** True when a query failed on the exact-count element limit. */
+export const isExactLimit = (e: unknown) =>
+  /UDF_ELEMENT_LIMIT/i.test(e instanceof Error ? e.message : String(e));
+
 export const qApps = (tf: Timeframe, session?: string | null,
-  rumAppId?: string | null) => `
+  rumAppId?: string | null,
+  /** Scoped only: false re-asks with the precision-16 estimate after the
+   *  exact count hit the platform's element limit (see distinctFn). */
+  exact = true) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 // EXACT ONCE SCOPED (0.16.0). Scoped to one application this is the
 // verdict's denominator — sessions and real people's sessions — and a
 // stochastic estimate is about 1% off at production scale. The estate-wide
 // discovery pass only ranks applications, so it keeps the estimate.
-| summarize sessions = ${rumAppId ? "countDistinctExact" : "countDistinct"}(dt.rum.session.id),
-    realSessions = ${rumAppId ? "countDistinctExact" : "countDistinct"}(if(coalesce(dt.rum.user_type, "") != "robot"
+| summarize sessions = ${rumAppId && exact ? "countDistinctExact" : "countDistinct"}(dt.rum.session.id${rumAppId && !exact ? ", precision: 16" : ""}),
+    realSessions = ${rumAppId && exact ? "countDistinctExact" : "countDistinct"}(if(coalesce(dt.rum.user_type, "") != "robot"
       and coalesce(dt.rum.user_type, "") != "synthetic" and isNull(dt.synthetic.monitor.id),
-      dt.rum.session.id, else: null)),
+      dt.rum.session.id, else: null)${rumAppId && !exact ? ", precision: 16" : ""}),
     views = countIf(characteristics.classifier == "view_summary"),
     errors = countIf(characteristics.classifier == "error"),
     crashes = countIf(characteristics.classifier == "error" and error.type == "crash"),
@@ -1804,6 +1836,49 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     reqfail = countIf(${FAILED_CALL})`;
 
 /**
+ * THE SERIES AND THE CARD'S TOTALS IN ONE SCAN (0.16.4).
+ *
+ * qPulseSeries (every event, binned) and qPulseBreakdown (request + error,
+ * ungrouped) read the same application over the same window, and on a
+ * production estate the pair cost two scans where one holds both answers.
+ * This is that one scan, built so that NEITHER answer changes:
+ *
+ * - The TOTALS (requests, reqfail) count every event in [from, to), exactly
+ *   as the breakdown did: an event falls in one bin only, so the sum of the
+ *   bins IS the ungrouped count.
+ * - The DRAWN fields (sessions, errors, actions, requests per bin) count only
+ *   events before the series' own end — eventSeriesEnd, the live-lag cut the
+ *   series used as its fetch bound — so the bars are the ones qPulseSeries
+ *   drew, to the event. `early` lets the client drop a bin that holds only
+ *   late events, which the old fetch bound never returned.
+ */
+export const qPulse = (tf: Timeframe, rumAppId: string,
+  /** The series' end, for the comparison panel only: an absolute cut that
+   *  stands in for the live-lag cut on an aligned window. */
+  endOverride?: string) => {
+  const end = endOverride ?? eventSeriesEnd(tf);
+  /* start_time, NOT timestamp: timestamp is null on every user.events row
+     (dql-syntax-gotchas), so `timestamp < …` was false everywhere and 0.16.4
+     drew no bars at all. An absolute end arrives quoted and is a string until
+     toTimestamp makes it a time. */
+  const endT = /^".*"$/.test(end.trim()) ? `toTimestamp(${end})` : end;
+  const cut = end === tf.to ? "true" : `start_time < ${endT}`;
+  return `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| fieldsAdd _in = ${cut}
+| summarize early = countIf(_in),
+    sessions = countDistinct(if(_in, dt.rum.session.id, else: null)),
+    errors = countIf(_in and characteristics.classifier == "error"),
+    actions = countIf(_in and characteristics.classifier == "user_action"),
+    requests = countIf(_in and characteristics.classifier == "request"),
+    reqAll = countIf(characteristics.classifier == "request"),
+    failAll = countIf(${FAILED_CALL}),
+  by: { t = bin(start_time, ${binFor(tf.minutes)}) }
+| sort t asc`;
+};
+
+/**
  * A FAILED CALL - one definition, used by the card and by its drill-down.
  *
  * This was `error.source == "fetch"` alone, measured on one estate where the
@@ -3149,7 +3224,9 @@ export const alignedTf = (minutes: number): Timeframe => {
    that might replace it counts with countDistinctExact. */
 /** Candidate verdict numerator + score: one ungrouped pass over the only two
  *  event kinds that can hurt a person (error, user_action). */
-export const qUxLean = (tf: Timeframe, rumAppId: string) => `
+export const qUxLean = (tf: Timeframe, rumAppId: string, exact = true) => {
+  const D = distinctFn(exact);
+  return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${esc(rumAppId)}"
 | filter characteristics.classifier == "error" or characteristics.classifier == "user_action"
@@ -3162,12 +3239,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | fieldsAdd _robot = coalesce(dt.rum.user_type, "") == "robot"
 | fieldsAdd _synth = coalesce(dt.rum.user_type, "") == "synthetic" or isNotNull(dt.synthetic.monitor.id)
 | fieldsAdd _isErr = characteristics.classifier == "error"
-| summarize hit = countDistinctExact(if(${USER_HIT}, dt.rum.session.id, else: null)),
-    hitReal = countDistinctExact(if(_real and ${USER_HIT}, dt.rum.session.id, else: null)),
+| summarize hit = ${D(`if(${USER_HIT}, dt.rum.session.id, else: null)`)},
+    hitReal = ${D(`if(_real and ${USER_HIT}, dt.rum.session.id, else: null)`)},
     // the reference judges a SESSION robot if any of its events is; this
     // judges the hurting event — the panel says whether the two agree
-    hitRobot = countDistinctExact(if(_robot and ${USER_HIT}, dt.rum.session.id, else: null)),
-    hitSynth = countDistinctExact(if(_synth and ${USER_HIT}, dt.rum.session.id, else: null)),
+    hitRobot = ${D(`if(_robot and ${USER_HIT}, dt.rum.session.id, else: null)`)},
+    hitSynth = ${D(`if(_synth and ${USER_HIT}, dt.rum.session.id, else: null)`)},
     errors = countIf(_isErr),
     realErrors = countIf(_isErr and _real),
     errorsThird = countIf(_isErr and ${THIRD_PARTY}),
@@ -3185,6 +3262,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     satisfied = sum(if(_real and _rated and not(_err) and experience.level == "satisfied", _w, else: 0)),
     tolerating = sum(if(_real and _rated and not(_err) and experience.level == "tolerating", _w, else: 0)),
     frustrated = sum(if(_crash, 1, else: if(_real and _rated and (_err or experience.level == "frustrated"), _w, else: 0)))`;
+};
 
 /** The Overview's verdict and score in one pass over the two event kinds that
  *  can hurt a person (0.16.0, validated beside qUxByApp + qExperience on staging). */

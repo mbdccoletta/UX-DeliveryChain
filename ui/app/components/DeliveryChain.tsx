@@ -1192,8 +1192,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const uxRaw = useUxOverview(data.tf, appId, false, true, leanOk);
   const censusRow = data.apps.find((a) => a.appId === appId);
   const uxMap = React.useMemo(
-    () => (leanOk ? withCensus(uxRaw, appId, censusRow, !!data.censusFinal) : uxRaw),
-    [leanOk, uxRaw, appId, censusRow, data.censusFinal]);
+    () => (leanOk ? withCensus(uxRaw, appId, censusRow, !!data.censusFinal, !!data.censusApprox) : uxRaw),
+    [leanOk, uxRaw, appId, censusRow, data.censusFinal, data.censusApprox]);
   const harm = uxMap?.get(appId);
   /* What the chain is built with: the session COUNT from `impacted` (the
      store Users & Sessions lists), every HIT figure — and the real-user base

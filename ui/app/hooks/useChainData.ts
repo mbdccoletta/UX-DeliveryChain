@@ -164,6 +164,9 @@ export interface ChainData {
   /** True once the scoped census is FINAL (not a preview) — the verdict's
    *  denominator reads it, so the verdict waits on this, not on `partial`. */
   censusFinal?: boolean;
+  /** The census's session totals are the precision-16 estimate, because the
+   *  exact count exceeded the platform's element limit. */
+  censusApprox?: boolean;
   /** True when the census is scoped to ONE session (a session id in the url):
    *  its totals then describe that session, not the window. */
   sessionScoped?: boolean;
@@ -326,7 +329,10 @@ export function useChainData(
            a full per-session scan for a figure it never showed. */
         : Promise.all([
             Promise.resolve([] as Record<string, unknown>[]),
-            safe<Record<string, unknown>>("domains", Q.qDomains(tf, appId), bag, 200, cut),
+            /* NOR DOMAINS: the Delivery Chain and the requests card fetch
+               them when they open (useDomains) — 96 GB and 11 s measured on
+               a production application, for a card that starts closed. */
+            Promise.resolve([] as Record<string, unknown>[]),
           ]);
       const censusTf: Timeframe = discovery
         ? { ...tf, from: `now()-${Math.max(15, Math.min(tf.minutes, 30))}m`, to: "now()" }
@@ -348,13 +354,37 @@ export function useChainData(
       let settleEarly: (rows: Record<string, unknown>[]) => void = () => {};
       const censusEarly = new Promise<Record<string, unknown>[]>(
         (r) => { settleEarly = r; });
-      const censusFinal = safe<Record<string, unknown>>("applications",
-        Q.qApps(censusTf, session, appId), bag, 200, cut,
-        (rows) => { if (rows.length) settleEarly(rows); },
-        false);
+      /* EXACT, AND IF THE PLATFORM REFUSES, ESTIMATED — SAID SO.
+         countDistinctExact has an element limit; a production application
+         with ~5M sessions an hour hit it, the census failed, and the verdict
+         waited on a denominator that never came. Over the limit the census is
+         re-asked with the precision-16 estimate (~0.4%) and carries
+         censusApprox, so the screen can say the total is estimated. Any
+         other failure still lands in the partial-data banner. */
+      let censusApprox = false;
       let censusOk = false;
-      void censusFinal.then((rows) => { censusOk = true; settleEarly(rows); })
-        .catch(() => settleEarly([]));
+      const onCensusPreview = (rows: Record<string, unknown>[]) => { if (rows.length) settleEarly(rows); };
+      const censusFinal = (async () => {
+        if (appId && Q.overExactLimit(appId)) {
+          censusApprox = true;
+          return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId, false), 200,
+            () => { cut.hit = true; }, onCensusPreview);
+        }
+        try {
+          return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId), 200,
+            () => { cut.hit = true; }, onCensusPreview);
+        } catch (e) {
+          if (!appId || !Q.isExactLimit(e)) throw e;
+          Q.markOverExactLimit(appId);
+          censusApprox = true;
+          return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId, false), 200,
+            () => { cut.hit = true; }, onCensusPreview);
+        }
+      })().then((rows) => { censusOk = true; return rows; }, (e: unknown) => {
+        bag.push(`applications: ${e instanceof Error ? e.message : String(e)}`);
+        return [] as Record<string, unknown>[];
+      });
+      void censusFinal.then((rows) => settleEarly(rows));
 
       /* ONLY THE CENSUS AND THE NAMES HOLD THE FIRST PAINT.
        *
@@ -675,8 +705,9 @@ export function useChainData(
       if (!discovery) {
         void censusFinal.then((rows) => {
           if (cancelled) return;
+          if (!censusOk) return;
           setState((cur) => (cur.partial === false ? cur : {
-            ...cur, censusFinal: true,
+            ...cur, censusFinal: true, censusApprox,
             apps: cur.apps.map((a) => {
               const f = rows.find((r) => String(r.appId ?? "") === a.appId);
               return f ? { ...a, sessions: num(f.sessions), realSessions: num(f.realSessions),
@@ -730,6 +761,7 @@ export function useChainData(
         partial: false,
         davisFinal: true,
         censusFinal: censusOk,
+        censusApprox,
         // the census's final figures replace the preview's, row for row
         apps: finalApps.length
           ? whole.apps.map((a) => {

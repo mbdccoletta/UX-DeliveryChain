@@ -11,6 +11,7 @@ import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useOrigins } from "./hooks/useOrigins";
+import { useDomains } from "./hooks/useDomains";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
 import { hasTruncation, subscribeScan, scanTotals, scanByLabel,
@@ -215,7 +216,11 @@ export function App() {
   const d = useChainData(tf, state.session, state.app);
   /* the origin split is the Delivery Chain's alone, fetched when it opens */
   const origins = useOrigins(tf, state.session, state.app, tab === "chain");
-  const chainData = React.useMemo(() => (origins ? { ...d, origins } : d), [d, origins]);
+  /* the contacted domains too: read by the chain's edge layer, fetched when
+     it opens (the Overview's requests card asks for them itself) */
+  const domains = useDomains(tf, state.app, tab === "chain");
+  const chainData = React.useMemo(() => ({ ...d,
+    ...(origins ? { origins } : {}), ...(domains ? { domains } : {}) }), [d, origins, domains]);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   /* NOBODY PAYS FOR THE ESTATE SCAN BY DEFAULT.
      The first cut had the Overview pay for it, which defeats the point: the
@@ -277,6 +282,12 @@ export function App() {
     if (current && state.app !== current) set({ app: current });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
+  /* remembered for the next open (see main.tsx) — only an application the
+     census actually named, never a url's guess */
+  useEffect(() => {
+    if (!current || !d.apps.some((a) => a.appId === current)) return;
+    try { window.localStorage.setItem("deliverychain:lastApp", current); } catch { /* blocked */ }
+  }, [current, d.apps]);
   // the engineer's reading of the same anatomy Business Control speaks in
   // business words — shown on the two technical pages, one scan shared
   // the flow page reads its technical vitals from the INFOGRAPHIC now, where

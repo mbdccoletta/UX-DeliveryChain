@@ -9,7 +9,8 @@
 // final, so the candidates never compete with the page for Grail.
 import { useEffect, useState } from "react";
 import {
-  alignedTf, alignedWindow, qApps, qExperience, qGeo, qShadowCensus, qShadowErrorMetrics,
+  alignedTf, alignedWindow, qApps, qExperience, qGeo, qPulse, qPulseBreakdown, qPulseSeries,
+  qShadowCensus, qShadowErrorMetrics,
   qShadowLean, qShadowLeanGrouped, qShadowSessionsEvents, qShadowSessionsMetric,
   qShadowTtfbEvents, qShadowTtfbMetric, qShadowViews, qUxByApp,
   runDql, type Timeframe,
@@ -182,6 +183,41 @@ export function useShadow(
           { group: `error metrics · ${win}`, measure: "user actions", current: ref.actions, candidate: num(E.actions),
             currentSrc: cur, candidateSrc: "dt.frontend.user_action.count" },
         );
+        /* 1b. ONE SCAN FOR THE PULSE (0.16.4). The merged qPulse beside the two
+           queries it replaces, on the aligned window, with the live-lag cut
+           reproduced as an absolute timestamp three minutes before the end. */
+        {
+          const toMs = Date.parse(at.to.replace(/"/g, ""));
+          const cutIso = `"${new Date(toMs - 3 * 60000).toISOString()}"`;
+          const atCut = { ...at, to: cutIso } as typeof at;
+          const [refSeries, refBreak, merged] = await Promise.all([
+            runDql<Record<string, unknown>>(qPulseSeries(atCut, appId), 1000, undefined, undefined, meta("reference: pulse series (today)")),
+            runDql<Record<string, unknown>>(qPulseBreakdown(at, appId), 1, undefined, undefined, meta("reference: pulse totals (today)")),
+            runDql<Record<string, unknown>>(qPulse(at, appId, cutIso), 1000, undefined, undefined, meta("candidate: one pulse scan")),
+          ]);
+          const drawn = merged.filter((r) => (Number(r.early) || 0) > 0);
+          const S = (rs: Record<string, unknown>[], k: string) => rs.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+          const g = `one pulse scan · ${win}`;
+          const pr = (measure: string, c: number, n: number, src: string) => rows.push({ group: g, measure,
+            current: c, candidate: n, currentSrc: src, candidateSrc: "qPulse" });
+          pr("bins drawn", refSeries.length, drawn.length, "qPulseSeries");
+          pr("Σ sessions per bin", S(refSeries, "sessions"), S(drawn, "sessions"), "qPulseSeries");
+          pr("Σ errors per bin", S(refSeries, "errors"), S(drawn, "errors"), "qPulseSeries");
+          pr("Σ actions per bin", S(refSeries, "actions"), S(drawn, "actions"), "qPulseSeries");
+          pr("Σ requests per bin", S(refSeries, "requests"), S(drawn, "requests"), "qPulseSeries");
+          // bin by bin: the largest gap on any single bar
+          const byT = new Map(drawn.map((r) => [String(r.t), r]));
+          let worst = 0;
+          for (const r of refSeries) {
+            const m = byT.get(String(r.t));
+            for (const k of ["sessions", "errors", "actions", "requests"]) {
+              worst = Math.max(worst, Math.abs((Number(r[k]) || 0) - (Number(m?.[k]) || 0)));
+            }
+          }
+          pr("largest difference on one bar", 0, worst, "every bin, every field");
+          pr("requests (card total)", Number(refBreak[0]?.requests) || 0, S(merged, "reqAll"), "qPulseBreakdown");
+          pr("failed calls (card total)", Number(refBreak[0]?.reqfail) || 0, S(merged, "failAll"), "qPulseBreakdown");
+        }
         if (live) setOut({ rows: [...rows], cost: [...cost], done: false });
 
         /* 2. SESSIONS FROM THE METRIC STORE — same aligned window both sides */
