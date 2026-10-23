@@ -28,6 +28,36 @@ export const OVERVIEW_STARTERS: Starter[] = [
     ask: "If I could fix one thing on this application this week, what does "
       + "this page say it should be, and roughly how many sessions would it "
       + "touch?" },
+  /* THE TWO QUESTIONS A BRAND OWNER ACTUALLY ASKED, on a bank's production
+   * application: "why is the country green and every state red?" and "what
+   * exactly do we do to protect the brand?". Both are answerable only from
+   * what this page measures — the judging rule and the application's own
+   * rate travel with the facts, the errors by name travel when the card is
+   * open — and both demand exactness: a named error, a named screen, a
+   * count, an owner, a way to verify. */
+  { label: "Why is this place that colour",
+    ask: "Explain the map's verdict for the selected country and its states, "
+      + "using the judging rule and the figures supplied. For the country and "
+      + "for each state listed: its error rate, how many times this "
+      + "application's own rate that is, and which arm fired — deviation, "
+      + "speed, or neither. If the country reads as in line while its states "
+      + "do not, or the reverse, say precisely what in the rule or the figures "
+      + "produces that and whether it is a finding or an artefact. Finish with "
+      + "what the absolute rate means for the people using the application, "
+      + "independent of the colour, and which single row to open first." },
+  { label: "How do I protect the brand",
+    ask: "Errors are reaching this application's users. Give an exact, "
+      + "prioritised plan to protect the brand, from the figures supplied and "
+      + "nothing else. For each action: what to do; where — the named error, "
+      + "screen, state or country; who owns it (engineering, product, "
+      + "communications or support); how many sessions or real people it "
+      + "touches; and how to verify it in Dynatrace — which error name to open "
+      + "in the Error Inspector, which Davis problem, which screen's sessions. "
+      + "Separate first-party failures from third-party and robot noise and say "
+      + "which should NOT be escalated. If real people were hit or made to "
+      + "wait, say what the business should tell customers and when; if not, "
+      + "say so plainly. Where an action needs a figure this page did not "
+      + "measure, name what to open to get it instead of estimating." },
 ];
 
 /** Journeys — where people go, and where they stop going. */
@@ -65,6 +95,15 @@ export const BOARD_STARTERS: Starter[] = [
   { label: "What should I tell my exec",
     ask: "Write the three sentences I would say to an executive about this "
       + "board: what is happening, what it costs, and what I am asking for." },
+  { label: "How do I protect the brand",
+    ask: "From this board's figures only, give the exact actions that protect "
+      + "the brand this week: who is affected and how many; which failure to "
+      + "fix first and why that one; who owns each action; what the "
+      + "customer-facing message should say — and whether one is warranted at "
+      + "all — if customers were hit by a failure, made to wait, or lost to a "
+      + "crash; and which number on this board proves each action worked when "
+      + "the board is read again next window. Say plainly when a figure was "
+      + "not measurable rather than filling it." },
 ];
 
 /** Delivery Chain — every layer a request crosses, and which one is at fault. */

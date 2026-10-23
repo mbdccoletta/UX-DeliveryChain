@@ -12,11 +12,11 @@
 // hours beat as an ECG. Colour stays signal-only: origins are neutral light,
 // green is a session that made it, red is one that did not.
 import React, { useEffect, useRef, useState } from "react";
-import { fmtK, fmtMs, fmtN } from "../utils/dql";
+import { fmtK, fmtMs, fmtN, NO_SCREEN } from "../utils/dql";
 import * as Q from "../utils/dql";
 import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
-import { GEO_ABS_BAD, GEO_ABS_WARN, geoCol, GEO_MIN_SESSIONS, GEO_WORD,
+import { geoCol, geoJudgeSub, GEO_MIN_SESSIONS, GEO_WORD,
   geoArms, geoBecause, geoEnName, geoJudge, geoName,
   type GeoArm } from "../utils/geoVerdict";
 import type { ChainData } from "../hooks/useChainData";
@@ -677,33 +677,94 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * figure the page could NOT measure is named as unmeasured rather than
    * quietly omitted, which is how a model ends up inventing one. */
   const overviewFacts = () => {
+    const pc = (r: number) => `${(r * 100).toFixed(r >= 0.1 ? 0 : 1)}%`;
+    const apdex = uxRow ? apdexOf(uxRow) : null;
     const L: string[] = [
       `Application: ${app.name}`,
       `Window: ${data.tf.label}`,
-      `Verdict:  — `,
+      /* the verdict used to print as "—": the card's own status word and the
+         fact that decided it were right there and never made it into the
+         facts, so the model was asked to judge a page whose judgement it
+         could not see */
+      `Verdict: ${verdict.label} — ${verdict.reason}`,
       impacted
         ? `Sessions: ${fmtN(impacted.sessions)} started in this window as Users & Sessions lists them (${fmtN(impacted.realSessions)} from real people, the rest robots or synthetic)`
         : "Sessions: not measured in this window",
       impacted && impacted.realSessions > 0
-        ? `Sessions that met an error: ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} real ones`
+        ? `Sessions that met an error: ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} real ones (${pc(impacted.hitReal / impacted.realSessions)})`
         : "Sessions that met an error: not measurable — no real-user sessions on record",
-      `Errors recorded: ${fmtN(app.errors)}`,
+      apdex === null
+        ? "Apdex: not rated — no rated user actions in this window"
+        : `Apdex: ${fmtApdex(apdex)} (${apdexBand(apdex)}; T = ${APDEX_T_MS / 1000}s)`,
+      `Errors recorded: ${fmtN(app.errors)}`
+        + (uxRow
+          ? ` — ${fmtN(uxRow.errorsThird)} raised by third parties (CSP, external requests, foreign scripts), ${fmtN(Math.max(0, uxRow.errors - uxRow.errorsThird))} by this application's own code; ${fmtN(uxRow.realErrors)} reached a real person`
+          : ""),
+      vitals && (vitals.crashes !== null || vitals.anrs !== null)
+        ? `Crashes: ${fmtN(vitals.crashes ?? 0)} · freezes (ANR, the app killed by the OS): ${fmtN(vitals.anrs ?? 0)}`
+        : "Crashes and freezes: not measured in this window",
       `Views recorded: ${fmtN(app.views)}`,
       problems.length + scopeProblems > 0
         ? `Davis problems on this application or its chain: ${fmtN(problems.length + scopeProblems)}`
-        : "Davis problems: none open on this application or its chain",
+        : "Davis problems: none open on this application or its chain — Davis found no deviation from this application's learned baseline, which is a different fact from 'no errors'",
+      ...[...problems, ...scopeProbs].slice(0, 6).map((pr) =>
+        `  ${pr.display_id} ${pr.name} (${davisCategory(pr.category)})`),
       anomalies > 0
         ? `Davis baselining anomalies on its components: ${fmtN(anomalies)}`
         : "Davis baselining anomalies: none",
       "",
     ];
+    /* THE ERRORS BY NAME, when the reader has them open — the one list that
+       turns "protect the brand" from advice into an action on a named error */
+    if (detail === "errors" && detailRows && detailRows.length) {
+      L.push("Errors by name (the errors card is open; biggest first):");
+      for (const r of detailRows.slice(0, 8)) {
+        L.push(`  ${r.name}: ${fmtN(r.vol)} errors in ${fmtN(r.sessions)} sessions`
+          + (r.third ? `, ${fmtN(r.third)} from a third party` : "")
+          + (r.real !== undefined ? `, ${fmtN(r.real)} reached a real person` : "")
+          + (r.type ? ` · type ${r.type}` : ""));
+      }
+      L.push("");
+    } else {
+      L.push("Errors by name: not loaded — open the errors card on this page to list them, and the Error Inspector drill-down to open one.", "");
+    }
     if (geo && geo.length) {
       const tot = geo.reduce((a, g) => a + g.sessions, 0) || 1;
-      L.push("Where they connect from (sessions, and the share that met an error):");
+      const base = geo.reduce((a, g) => a + g.hit, 0) / tot;
+      /* THE RULE TRAVELS WITH THE FIGURES. A country in line at 85% beside
+         states at 85% is only a contradiction to a reader who assumes the
+         colour is the rate. It is not: it is deviation from this application.
+         Spelled out here so the answer explains the rule the map applies —
+         the rule in utils/geoVerdict — and not one it guessed. */
+      L.push(`How a place is judged on this page: every country, state and city is compared with THIS application's own error rate — ${pc(base)} of its located sessions met an error in this window — and with its own speed. Tolerating starts at 1.15× that rate or Apdex under 0.85; frustrated at 1.5× or Apdex under 0.50. The absolute rate is printed on every row but is NOT the colour: on an application whose normal is ${pc(base)}, a place at ${pc(base)} is "in line", however high that number is for users. The verdict needs substance — at least 30 sessions, 5 of them errored, a 2% rate — so a small place stays green for lack of evidence, not for health. States and cities have no Apdex at this depth, so only the deviation arm can colour them.`);
+      L.push("Where they connect from (sessions · share of the window · met an error · times the application's rate · verdict):");
       for (const g of [...geo].sort((a, b) => b.sessions - a.sessions).slice(0, 8)) {
-        L.push(`  ${g.country}: ${fmtN(g.sessions)} sessions`
-          + ` (${((g.sessions / tot) * 100).toFixed(1)}% of the window)`
-          + `, ${g.sessions > 0 ? ((g.hit / g.sessions) * 100).toFixed(1) : "0"}% met an error`);
+        const rate = g.sessions > 0 ? g.hit / g.sessions : 0;
+        L.push(`  ${geoName(g.country)} (${g.country}): ${fmtN(g.sessions)} sessions`
+          + ` (${((g.sessions / tot) * 100).toFixed(1)}%), ${pc(rate)} met an error`
+          + ` (${base > 0 ? (rate / base).toFixed(2) : "—"}×) — ${GEO_WORD[geoJudge(g, base)]}: ${geoBecause(g, base)}`);
+      }
+      if (geoSel) {
+        L.push(`Selected country: ${geoName(geoSel)} (${geoSel})`);
+        if (regions && regions.length) {
+          L.push("  Its states, judged by the same rule (a session that moves between states is counted in each):");
+          for (const r of [...regions].sort((a, b) => b.sessions - a.sessions).slice(0, 10)) {
+            const rate = r.sessions > 0 ? r.hit / r.sessions : 0;
+            L.push(`    ${r.name}: ${fmtN(r.sessions)} sessions, ${pc(rate)} met an error`
+              + ` (${base > 0 ? (rate / base).toFixed(2) : "—"}×) — ${GEO_WORD[geoJudgeSub(r, base)]}`);
+          }
+        }
+        const rows = regionSel ? regionDetail : geoDetail;
+        if (rows && rows.length) {
+          L.push(`  Top screens across ${regionSel ?? geoSel} (sessions · of which met an error):`);
+          for (const d of rows.slice(0, 8)) {
+            L.push(`    ${d.view}: ${fmtN(d.sessions)} sessions, ${fmtN(d.hit)} met an error`
+              + (d.sessions > 0 ? ` (${pc(d.hit / d.sessions)})` : ""));
+          }
+          if (rows.some((d) => d.view === NO_SCREEN)) {
+            L.push(`  "${NO_SCREEN}" counts sessions whose error belongs to no screen — crashes, freezes (ANR) and request failures raised at application level. One such error marks the whole session, so when this row dominates, the application's own error rate is set by it and not by any screen; it is the first thing to open.`);
+          }
+        }
       }
     } else {
       L.push("Geography: no located sessions in this window");
@@ -1020,9 +1081,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
             .filter((r) => REGION_CENTROID[r.id])
             .map((r) => ({
               latitude: REGION_CENTROID[r.id][0], longitude: REGION_CENTROID[r.id][1],
-              color: COL[r.sessions < GEO_MIN_SESSIONS ? "good"
-                : r.hit / Math.max(r.sessions, 1) >= GEO_ABS_BAD ? "bad"
-                : r.hit / Math.max(r.sessions, 1) >= GEO_ABS_WARN ? "warn" : "good"],
+              color: COL[geoJudgeSub(r, base)],
               country: r.name, sessions: r.sessions, hitByErrors: r.hit,
             }));
           if (rs.length >= 2) return rs;
@@ -1217,9 +1276,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         const c = REGION_CENTROID[r.id];
                         if (!c) return null;
                         const rate = r.hit / Math.max(r.sessions, 1);
-                        const t = r.sessions < GEO_MIN_SESSIONS ? "good"
-                          : rate >= GEO_ABS_BAD ? "bad"
-                          : rate >= GEO_ABS_WARN ? "warn" : "good";
+                        const t = geoJudgeSub(r, base);
                         const sz = r.sessions >= 100 ? 20 : r.sessions >= 10 ? 15 : 11;
                         return (
                           <button type="button" key={r.id}
@@ -1371,9 +1428,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   const under = shownGeo.findIndex((g) => g.country === geoSel) * 100
                     + 1 + ri;
                   const rate = r.hit / Math.max(r.sessions, 1);
-                  const t = r.sessions < GEO_MIN_SESSIONS ? "good"
-                    : rate >= GEO_ABS_BAD ? "bad"
-                    : rate >= GEO_ABS_WARN ? "warn" : "good";
+                  const t = geoJudgeSub(r, base);
                   const c = REGION_CENTROID[r.id];
                   return (
                     <button type="button" key={r.id}
@@ -1520,24 +1575,21 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   const scoped = regionSel ? regionDetail : geoDetail;
                   if (!scoped || scoped.length === 0) return null;
                   const dmax = Math.max(...scoped.map((d) => d.sessions), 1);
-                  /* The drill speaks the same traffic light as the map: each
-                   * screen judged against the COUNTRY's own error rate —
-                   * green satisfied, yellow tolerating, red where the errors
-                   * concentrate (≥2× the country). Bar and word carry the
-                   * same colour, so the eye needs no second read. */
+                  /* The drill speaks the same traffic light as the map —
+                   * green satisfied, yellow tolerating, red frustrated — and
+                   * bar and word carry the same colour, so the eye needs no
+                   * second read. The country's own rate is still COMPUTED,
+                   * for the tooltip's "x% vs y% for the country"; it is a
+                   * comparison the reader can see, not the verdict. */
                   const cTot = scoped.reduce((a, d) => a + d.sessions, 0) || 1;
                   const cRate = scoped.reduce((a, d) => a + d.hit, 0) / cTot;
-                  /* THE MAP'S OWN FLOORS, imported — this drill once had a
-                   * fourth rule (any hit = tolerating, no substance gates)
-                   * that called one error in a thousand "tolerating" while
-                   * the legend above said tolerating starts at 10%. */
-                  const toneOf = (d: { sessions: number; hit: number }) => {
-                    const r = d.hit / Math.max(d.sessions, 1);
-                    if (d.sessions >= GEO_MIN_SESSIONS
-                      && ((cRate > 0 && r >= cRate * 2) || r >= GEO_ABS_BAD)) return "bad";
-                    if (d.sessions >= GEO_MIN_SESSIONS && r >= GEO_ABS_WARN) return "warn";
-                    return "good";
-                  };
+                  /* ONE BASELINE AT EVERY DEPTH. The cities were judged
+                     against their country (≥2×) or the absolute line; the
+                     states against the absolute line; the countries against
+                     the application. Three rules on one map — see
+                     geoJudgeSub. Now every place, at every depth, answers
+                     the same question: worse than this application? */
+                  const toneOf = (d: { sessions: number; hit: number }) => geoJudgeSub(d, base);
                   /* bars are MARKS: the saturated half of the family, like
                      every other mark in the product */
                   const BAR = { good: "var(--good-fill)", warn: "var(--warn-fill)",
