@@ -61,6 +61,7 @@ import type { DeepLink } from "../utils/links";
 import { apdexOf, apdexBand, apdexTone, fmtApdex, scoreExplain, scoreMix } from "../utils/apdex";
 import { useCardDetail, type DetailRow, type DetailMetric } from "../hooks/useCardDetail";
 import { useDomainTraces } from "../hooks/useDomainTraces";
+import { useDomains } from "../hooks/useDomains";
 
 
 /** "BR-SP" → "SP". The map pin is already standing on the country. */
@@ -170,8 +171,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const uxRaw = useUxOverview(data.tf, appId, false, true, leanOk);
   const censusRow = data.apps.find((a) => a.appId === appId);
   const ux = React.useMemo(
-    () => (leanOk ? withCensus(uxRaw, appId, censusRow, !!data.censusFinal) : uxRaw),
-    [leanOk, uxRaw, appId, censusRow, data.censusFinal]);
+    () => (leanOk ? withCensus(uxRaw, appId, censusRow, !!data.censusFinal, !!data.censusApprox) : uxRaw),
+    [leanOk, uxRaw, appId, censusRow, data.censusFinal, data.censusApprox]);
   const uxSelf = ux?.get(appId);
   /* WHO WAS HURT — sessions an error AFFECTED (utils/dql USER_HIT: an error
      during the person's own action, or the app crashing/freezing), from the
@@ -233,10 +234,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   /* Asked only once a country is open — the map's first level is one scan,
    * and these cost another only if a reader goes looking. */
   const regions = useRegions(data.tf, geoSel ? appId : null, geoSel);
-  const shownRegions = React.useMemo(() => {
-    const all = regions ?? [];
-    return geoAll || all.length <= GEO_CAP ? all : all.slice(0, GEO_CAP);
-  }, [regions, geoAll]);
+  /* AN OPENED COUNTRY LISTS EVERY STATE. Opening a country is the reader
+     asking for its states, and the eight-row cap meant for the country list
+     cut Brazil to its eight busiest — the other nineteen were on the map,
+     coloured, and nowhere in the list. The cap stays on the countries only. */
+  const shownRegions = React.useMemo(() => regions ?? [], [regions]);
   const geoHidden = Math.max(0, (geo?.length ?? 0) - shownGeo.length)
     + Math.max(0, (regions?.length ?? 0) - shownRegions.length);
   /* NO CITIES (Marcelo, 2026-10-23). Each opened state paid a full scan of
@@ -596,7 +598,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   /* The page opens on sessions. Clicking a card opens that card's evidence
    * BELOW the grid — the chart and its breakdown — and clicking the open card
    * closes it. Only what is on screen costs an analyzer run. */
-  const [detail, setDetail] = useState<DetailMetric | "services" | null>("sessions");
+  /* …and it now opens on NOTHING (0.16.8). The experience breakdown by screen
+     was open by default and cost a production application 140 GB and 9 s on
+     every load, for a panel below the fold. It runs when a card is clicked;
+     the Intelligence facts already say "open the card" when it is not. */
+  const [detail, setDetail] = useState<DetailMetric | "services" | null>(null);
 
   const mfc = useMetricForecast(appId, data.tf,
     detail && detail !== "services" ? detail : null, feName || undefined);
@@ -668,8 +674,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   // split by origin, so they are aggregated per domain before ranking —
   // otherwise one domain contacted from two origins would appear twice and
   // rank below a quieter one.
+  /* fetched when the requests card opens (useDomains), not on every load */
+  const domRows = useDomains(data.tf, appId, detail === "requests");
   const domNames = Object.entries(
-    data.domains.filter((r) => r.appId === appId)
+    (domRows ?? []).filter((r) => r.appId === appId)
       .reduce<Record<string, number>>((acc, r) => {
         acc[r.domain] = (acc[r.domain] ?? 0) + r.reqs; return acc;
       }, {}))
@@ -1062,9 +1070,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           fru: uxRow.frustrated, ratedActs: uxRow.ratedActs, errActions: uxRow.errActions,
           crashes: uxRow.scoreCrashes } : null}
         verdictLabel={shown.label} verdictReason={shown.reason}
+        estimated={!!ux?.approx}
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
-        services={scopeCount} svcNames={svcNames} svcLinks={svcLinks} domNames={domNames}
+        services={scopeCount} svcNames={svcNames} svcLinks={svcLinks} domNames={domNames} domLoaded={!!domRows}
         onOpenService={(n) => window.open(servicesExplorerHref(data.tf, n), "_blank", "noopener")}
         /* THE PILL FOLLOWS THE CAUSE. When the verdict is the forecast, the
            pill under it shows THAT forecast — the error series — and is the
@@ -2024,6 +2033,8 @@ interface CardProps {
   /** The application's ONE verdict (utils/verdict) — the same word and
    *  reason the page header prints. The hero leads with it. */
   verdictLabel: string; verdictReason: string;
+  /** The session totals behind the verdict are the precision-16 estimate. */
+  estimated?: boolean;
   /** Errors that reached a real person, and the third-party share of all of
    *  them — null while the estate scan is still in flight. */
   realErrors: number | null;
@@ -2058,6 +2069,8 @@ interface CardProps {
   onOpenService?: (name: string) => void;
   /** The domains this application contacts, busiest first, with their volume. */
   domNames: Array<{ short: string; full: string }>;
+  /** False until the requests card has been opened and its hosts fetched. */
+  domLoaded?: boolean;
   fc: Forecast | null;
   /** What the projection is OF — the selected box's metric, in words. */
   fcMetric: string;
@@ -2523,7 +2536,12 @@ function CleanCard(p: CardProps) {
             style={{ color: p.verdictLabel === "Measuring" ? "var(--ink-2)" : TVAR[p.tone] }}
             title={p.verdictReason}>
             {p.verdictLabel}</b>
-          <span className="tk-core__why">{p.verdictReason}</span>
+          {/* AN ESTIMATE SAYS IT IS ONE. Over the platform's exact-count limit
+              the session totals are the precision-16 estimate; the share is
+              then good to about ±0.4% of itself, never presented as exact. */}
+          <span className="tk-core__why"
+            title={p.estimated ? "This application has more sessions than the platform counts exactly in one query, so the session totals are the platform's estimate (about ±0.4%)." : undefined}>
+            {p.verdictReason}{p.estimated ? " · sessions estimated (±0.4%)" : ""}</span>
           {/* ONE LINE FOR THE SCORE. The card carried the score, its band, its
               three shares, its rated count and the share of actions with an
               error — five facts in three lines under the verdict, read as
@@ -2617,6 +2635,10 @@ error series, read at the same width the window is drawn in.`}>
           ))}
           {p.domNames.length > 0 && (
             <div className="tk-note tk-note--go">open for its endpoints →</div>
+          )}
+          {/* not fetched yet is not "no hosts": the card says what a click gives */}
+          {!p.domLoaded && (
+            <div className="tk-note tk-note--go">open for its hosts and endpoints →</div>
           )}
 
         </Module>

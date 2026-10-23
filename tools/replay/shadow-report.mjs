@@ -83,6 +83,30 @@ for (const L of lean) {
   console.log(`action error kinds · ${win(L.query)} · actions ${l.actions} · with error (judged) ${l.errActions}`
     + ` · exception ${l.webActExc} · 4xx ${l.webAct4xx} · 5xx ${l.webAct5xx} · status-0/other ${l.webActOther} · CSP ${l.webActCsp}`);
 }
+// one pulse scan (0.16.4): qPulse beside qPulseSeries + qPulseBreakdown
+for (const M of pick(/summarize early = countIf\(_in\)/)) {
+  const from = (M.query.match(/from: ?"([^"]+)"/) ?? [])[1];
+  if (!from) continue; // the page's own live run, not a comparison
+  const w = win(M.query);
+  const same = (q) => (q.match(/from: ?"([^"]+)"/) ?? [])[1] === from;
+  const ser = S.find((s) => same(s.query) && /requests = countIf\(characteristics\.classifier == "request"\),\s*by: \{ t = bin/.test(s.query) && !/_in/.test(s.query));
+  const brk = S.find((s) => same(s.query) && /reqfail = countIf/.test(s.query));
+  const m = M.final.records, drawn = m.filter((r) => Number(r.early) > 0);
+  const sum = (rs, k) => rs.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  if (ser) {
+    const rs = ser.final.records;
+    add(w, "one pulse scan", "bins drawn", rs.length, drawn.length);
+    for (const k of ["sessions", "errors", "actions", "requests"]) add(w, "one pulse scan", `Σ ${k} per bin`, sum(rs, k), sum(drawn, k));
+    const byT = new Map(drawn.map((r) => [String(r.t), r]));
+    let worst = 0;
+    for (const r of rs) for (const k of ["sessions", "errors", "actions", "requests"]) worst = Math.max(worst, Math.abs((Number(r[k]) || 0) - (Number(byT.get(String(r.t))?.[k]) || 0)));
+    add(w, "one pulse scan", "largest difference on one bar", 0, worst);
+  }
+  if (brk) {
+    add(w, "one pulse scan", "requests (card total)", n(brk.final.records[0]?.requests), sum(m, "reqAll"));
+    add(w, "one pulse scan", "failed calls (card total)", n(brk.final.records[0]?.reqfail), sum(m, "failAll"));
+  }
+}
 // sessions + TTFB from the metric store, aligned windows
 for (const E of pick(/data record\(k = "", b = "", sessions = 0\)/)) {
   const w = win(E.query.replace(/^data record[^|]*\| filter false \| append \[ /, ""));

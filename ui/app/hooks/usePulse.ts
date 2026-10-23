@@ -10,7 +10,7 @@
 // first page must not bill twice for being looked at twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qAppMetricSeries, qPulseBreakdown, qPulseSeries, qSessionSeries, runDql,
+import { qAppMetricSeries, qPulse, qSessionSeries, runDql,
   withinSessionLag, type Timeframe } from "../utils/dql";
 
 export interface PulsePoint {
@@ -21,7 +21,8 @@ export interface PulsePoint {
 export interface PulseData {
   series: PulsePoint[];
   /** Requests in the window, and the calls among them that failed — the
-   *  web-requests card's two numbers, counted exactly (qPulseBreakdown). */
+   *  web-requests card's two numbers, counted exactly — the sum of qPulse's
+   *  bins over the whole window (one event, one bin). */
   requests: number;
   reqFail: number;
 }
@@ -66,9 +67,12 @@ export function usePulse(
           ? runDql<Record<string, unknown>>(qAppMetricSeries(tf!, fe), 1)
               .catch(() => [] as Record<string, unknown>[])
           : Promise.resolve([] as Record<string, unknown>[]);
-        const [series, tuples, sess, metricRows] = await Promise.all([
-          runDql<Record<string, unknown>>(qPulseSeries(tf!, rumAppId!), 200),
-          runDql<Record<string, unknown>>(qPulseBreakdown(tf!, rumAppId!), 1),
+        /* ONE SCAN FOR THE BARS AND THE TOTALS (qPulse). The cap is far above
+           any bin count (binFor keeps a window near 60 bins); a capped answer
+           would make the totals short, so it is refused rather than summed. */
+        let capped = false;
+        const [rows, sess, metricRows] = await Promise.all([
+          runDql<Record<string, unknown>>(qPulse(tf!, rumAppId!), 1000, () => { capped = true; }),
           // not inside the store's lag: there the series would be empty by
           // construction, and the event series is the honest one
           fe && !withinSessionLag(tf!)
@@ -80,6 +84,11 @@ export function usePulse(
         /* Both legs bin the same window with the same width, so the bin
            label is the join key. A bin the session store has nothing for is
            zero rather than missing — the gap is the fact. */
+        if (capped) throw new Error("pulse series capped");
+        // the drawn series: the bins qPulseSeries returned — those holding at
+        // least one event before the series' own end
+        const series = rows.filter((r) => (Number(r.early) || 0) > 0);
+        const sumOf = (k: string) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
         const byBin = new Map<string, number>();
         for (const r of sess) byBin.set(String(r.t ?? ""), Number(r.sessions) || 0);
         /* A `timeseries` answer is ONE record: arrays per field, a start and
@@ -116,8 +125,8 @@ export function usePulse(
               requests: Number(r.requests) || 0,
             };
           }),
-          requests: Number(tuples[0]?.requests) || 0,
-          reqFail: Number(tuples[0]?.reqfail) || 0,
+          requests: sumOf("reqAll"),
+          reqFail: sumOf("failAll"),
         };
       } catch {
         /* the page still renders from the shared data — panels just close */

@@ -9,7 +9,7 @@
 // should not scan twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qExperience, qUxByApp, qUxLean, runDql, type Timeframe } from "../utils/dql";
+import { isExactLimit, markOverExactLimit, overExactLimit, qExperience, qUxByApp, qUxLean, runDql, type Timeframe } from "../utils/dql";
 
 export interface UxRow {
   sessions: number;
@@ -52,7 +52,9 @@ const memo = new Map<string, UxMap>();
 /** A Map of UxRow per app id, plus whether each of its two scans is still a
  *  PREVIEW: `partial` for the per-session impact (the verdict waits on it),
  *  `scorePartial` for the experience score (only the score's caption does). */
-export type UxMap = Map<string, UxRow> & { partial?: boolean; scorePartial?: boolean };
+export type UxMap = Map<string, UxRow> & { partial?: boolean; scorePartial?: boolean;
+  /** Some session count is the precision-16 estimate (see distinctFn). */
+  approx?: boolean };
 
 const ZERO: UxRow = { sessions: 0, hit: 0, realSessions: 0, errors: 0,
   errorsThird: 0, realErrors: 0, hitReal: 0, hitRobot: 0, hitSynth: 0,
@@ -132,10 +134,26 @@ export function useUxOverview(
             m.partial = !final; m.scorePartial = !final;
             setMap(m);
           };
-          const rows = await runDql<Record<string, unknown>>(qUxLean(tf, appId), 1, undefined,
-            (early) => { if (early.length && !final) paint(early); });
+          let approx = false;
+          const ask = (exact: boolean) => runDql<Record<string, unknown>>(qUxLean(tf, appId, exact), 1,
+            undefined, (early) => { if (early.length && !final) paint(early); });
+          // over the exact-count element limit, the estimate — and said so
+          // an application already known to exceed the exact limit — its
+          // census did — is asked for the estimate directly (see overExactLimit)
+          // keyed apart from the census: the affected sessions are far fewer
+          // than all sessions and usually stay exact (157k did, in production)
+          const overKey = `${appId}:hit`;
+          const known = overExactLimit(overKey);
+          if (known) approx = true;
+          const rows = await (known ? ask(false) : ask(true).catch((e: unknown) => {
+            if (!isExactLimit(e)) throw e;
+            markOverExactLimit(overKey);
+            approx = true;
+            return ask(false);
+          }));
           final = true;
           const out = fold(rows.map((r) => ({ ...r, appId })));
+          out.approx = approx;
           memo.set(key, out);
           if (live) setMap(out);
           return;
@@ -208,12 +226,14 @@ export function withCensus(
   map: UxMap | null, appId: string,
   census: { sessions: number; realSessions?: number } | undefined,
   censusFinal: boolean,
+  censusApprox = false,
 ): UxMap | null {
   if (!map) return null;
   const row = map.get(appId);
   const out: UxMap = new Map(map);
   out.partial = !!map.partial || !censusFinal || !census;
   out.scorePartial = map.scorePartial;
+  out.approx = !!map.approx || !!censusApprox;
   if (row && census) {
     out.set(appId, { ...row, sessions: census.sessions,
       realSessions: census.realSessions ?? 0 });
