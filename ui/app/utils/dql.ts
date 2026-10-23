@@ -1741,6 +1741,53 @@ timeseries {
 | limit 1`;
 };
 
+/**
+ * THE COUNTERS' SERIES FROM THE METRIC STORE — the forecast's canonical input.
+ *
+ * The forecasts (and the card's bars behind them) were trained on
+ * `fetch user.events | makeTimeseries …` over three hours: a raw-event scan,
+ * seconds per round, four times over. The platform's own forecasting guide
+ * takes a `timeseries` query with an explicit `interval:` as its input, and
+ * the metric store answers that in ~200 ms (measured: qAppVitals, three
+ * production loads). Same quantities — dt.frontend.error.count,
+ * request.count, user_action.count — pre-aggregated over the whole window,
+ * so a complete value, never a partial scan: integrity-clean as a FINAL.
+ *
+ * Sessions are deliberately NOT here. dt.frontend.session.active.estimated_count
+ * would be a third definition of "sessions" beside the session store and the
+ * event scan — estimated, by its own name — and the headline, the chart and
+ * the hand-off have only just been made to agree. Coherence over speed.
+ *
+ * Trimmed by the same beacon lag as every live series: the newest minutes of
+ * a metric fed by beacons are as incomplete as the events behind it.
+ */
+export const qAppMetricSeries = (tf: Timeframe, frontendName: string) => {
+  const fe = frontendName.replace(/["\\]/g, "");
+  return `
+timeseries {
+    errors = sum(dt.frontend.error.count),
+    requests = sum(dt.frontend.request.count),
+    actions = sum(dt.frontend.user_action.count)
+  },
+  from: ${tf.from}, to: ${eventSeriesEnd(tf)}, interval: ${binFor(tf.minutes)},
+  filter: { frontend.name == "${fe}" }
+| limit 1`;
+};
+
+/** One counter, as the forecast analyzer's input: history [from, to], one
+ *  series, explicit interval — the shape the platform documents. */
+export const qMetricForecastExpr = (
+  metric: "errors" | "requests" | "actions",
+  frontendName: string, from: string, to: string, interval: string,
+) => {
+  const fe = frontendName.replace(/["\\]/g, "");
+  const key = { errors: "dt.frontend.error.count", requests: "dt.frontend.request.count",
+    actions: "dt.frontend.user_action.count" }[metric];
+  return `timeseries ${metric} = sum(${key}), from: ${from}, to: ${to}, interval: ${interval},
+  filter: { frontend.name == "${fe}" }
+| limit 1`;
+};
+
 /** Most requested paths (layers 04/05). */
 export const qPaths = (tf: Timeframe, rumAppId?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
@@ -1829,7 +1876,11 @@ fetch dt.davis.problems, from: ${tf.from}, to: ${tf.to}
 | filter not(dt.davis.is_duplicate)
 | fields eventId = event.id, display_id, name = event.name, category = event.category,
     affected = affected_entity_types, entityIds = affected_entity_ids, start = event.start
-| limit 50`;
+// Newest first, so if an estate ever has more than 500 open problems the ones
+// we drop are the oldest, not an arbitrary slice — and 500 is far above any
+// real active count, so "no problems detected" can never be a cap artefact.
+| sort start desc
+| limit 500`;
 
 /**
  * The backend an application actually reaches.

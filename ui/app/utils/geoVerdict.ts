@@ -1,13 +1,20 @@
 // The ONE rule for judging a location — the map, the board and the poster
 // must speak the same verdict or the product argues with itself.
 //
-// Three arms, worst wins — frustration is errors OR slowness:
+// Two arms colour a location, worst wins — deviation OR slowness. A third is
+// computed and PRINTED but does not colour:
 //
-//   ABSOLUTE errors   ≥25% of the location's sessions met an error → bad,
-//                     ≥10% → warn. A country where a quarter of sessions
-//                     error is frustrated whatever the app average is (the
-//                     relative arm alone painted 31% hit green because the
-//                     WHOLE app ran at 30%).
+//   ABSOLUTE errors   ≥25% / ≥10% of the location's sessions met an error.
+//                     This WAS a colouring arm, added because the relative
+//                     arm alone painted 31% hit green on an app that ran at
+//                     30% overall. It was demoted on a bank's production
+//                     application whose own baseline is 52%: every country
+//                     cleared 25%, every pin was red, and the map said the
+//                     same thing about everywhere — nothing. The rate is
+//                     still stated on every row; it is no longer the colour.
+//                     The trade-off is real and stated: a place that is
+//                     absolutely bad but no worse than its application reads
+//                     as "in line" here, and as bad on the application card.
 //   RELATIVE errors   ≥1.5× / ≥1.15× the application's own rate — who
 //                     deviates. Substance-gated: ≥30 sessions, ≥5 errored,
 //                     ≥2% rate, because one errored session in 696 was 2.4×
@@ -96,15 +103,25 @@ export const geoArms = (g: GeoArm, base: number): GeoArms => {
     : g.sessions >= GEO_MIN_SESSIONS && rate >= GEO_ABS_WARN ? 1 : 0;
   const spd = rated >= 30 && apx !== null
     ? (apx < 0.5 ? 2 : apx < 0.85 ? 1 : 0) : 0;
-  return { rate, lift, apx, rel, abs, spd, level: Math.max(rel, abs, spd) };
+  /* THE ABSOLUTE ERROR LINE NO LONGER COLOURS THE MAP.
+   *
+   * On an application whose own baseline is 52% of sessions meeting an
+   * error, every country clears a 25% line and every pin is red — the map
+   * says nothing, because it says the same thing about everywhere. "Senão
+   * fica tudo vermelho." A pin answers WHERE the worst users are, and
+   * "worse than this application usually is" (the deviation arm) and
+   * "slow" (the Apdex arm) are the two things that vary by place. The
+   * absolute rate is still printed on every row; it just stopped being the
+   * colour. One rule, shared by the pins and the rows. */
+  return { rate, lift, apx, rel, abs, spd, level: Math.max(rel, spd) };
 };
 
 export const geoJudge = (g: GeoArm, base: number): GeoTone =>
   (["good", "warn", "bad"] as const)[geoArms(g, base).level];
 
 /** The threshold that fired, spelled out — a verdict never asks to be taken
- *  on faith. Absolute errors first (the loudest finding), deviation second,
- *  slowness third. */
+ *  on faith. Deviation from the application's own rate first, slowness
+ *  second; the absolute rate is stated but is not a threshold here. */
 /** "1 session" / "4 sessions" — the gate's own count, in words that agree. */
 const fmtCount = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
 
@@ -126,11 +143,9 @@ export const geoBecause = (g: GeoArm, base: number): string => {
       return `${pct} of its sessions met an error, but ${fmtCount(g.sessions)}`
         + ` is too few to judge — a verdict needs ${GEO_MIN_SESSIONS}`;
     }
-    return `${pct} of its sessions met an error — under the 10% tolerating line`;
+    return `${pct} of its sessions met an error — in line with this application`
+      + (a.apx !== null ? ` · Apdex ${a.apx.toFixed(2)}` : "");
   }
-  if (a.abs === a.level) return a.level === 2
-    ? `${pct} of its sessions met an error — frustrated starts at 25%`
-    : `${pct} of its sessions met an error — tolerating starts at 10%`;
   if (a.rel === a.level) return a.level === 2
     ? `${a.lift.toFixed(1)}× the app's error rate — frustrated starts at 1.5×`
     : `${a.lift.toFixed(1)}× the app's error rate — tolerating starts at 1.15×`;

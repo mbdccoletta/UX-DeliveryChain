@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import { forecast, forecastPlan, type Forecast , histWindow } from "../utils/forecast";
-import { seriesEnd, withinSessionLag, type Timeframe } from "../utils/dql";
+import { qMetricForecastExpr, seriesEnd, withinSessionLag, type Timeframe } from "../utils/dql";
 
 /** The metrics that have a real per-bin series behind them. */
 export type Metric = "sessions" | "errors" | "actions" | "requests";
@@ -76,7 +76,14 @@ export function useMetricForecast(
        anchor qSessionSeries uses, so the drawn series and the forecast's
        training series are the one series. */
     // the session store is empty inside its own lag — train on events there
-    const expr = metric === "sessions" && fe && !withinSessionLag(tf!)
+    /* ERRORS, REQUESTS AND ACTIONS TRAIN ON THE METRIC STORE. Measured on
+       production: every analyzer poll blocks ~2 s and the raw-event history
+       behind it is the slow part; the same counter as a `timeseries` answers
+       in ~200 ms and is the analyzer's documented input. The history keeps
+       the plan's length and bin, and ends where the live series ends. */
+    const expr = (metric === "errors" || metric === "requests" || metric === "actions") && fe
+      ? qMetricForecastExpr(metric, fe, win.from, seriesEnd({ ...tf!, to: win.to }), plan.bin)
+      : metric === "sessions" && fe && !withinSessionLag(tf!)
       ? `fetch user.sessions, from: ${win.from}, to: ${seriesEnd({ ...tf!, to: win.to })}
 | expand fe = frontend.name
 | filter fe == "${fe.replace(/["\\]/g, "")}"

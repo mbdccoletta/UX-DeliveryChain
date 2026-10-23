@@ -42,19 +42,43 @@ export interface UxRow {
   fragments: number;
 }
 
-const memo = new Map<string, Map<string, UxRow>>();
+const memo = new Map<string, UxMap>();
 
 /** Impact per application id, or null while loading / when the query failed. */
+/** A Map of UxRow per app id, plus whether it is still a PREVIEW. */
+export type UxMap = Map<string, UxRow> & { partial?: boolean };
+
+const ZERO: UxRow = { sessions: 0, hit: 0, realSessions: 0, errors: 0,
+  errorsThird: 0, realErrors: 0, hitReal: 0, hitRobot: 0, hitSynth: 0,
+  engaged: 0, actions: 0, abandoned: 0, satisfied: 0, tolerating: 0,
+  frustrated: 0, fruErr: 0, fragments: 0 };
+
+/* TWO row kinds share an appId — the main row and the Apdex leg's row — and
+   they are MERGED field by field, never overwritten (see the note that used
+   to live inside the effect). */
+const fold = (rows: Record<string, unknown>[]): UxMap => {
+  const out: UxMap = new Map();
+  for (const r of rows) {
+    const id = String(r.appId);
+    const cur = out.get(id) ?? { ...ZERO };
+    for (const k of Object.keys(ZERO) as Array<keyof UxRow>) {
+      if (r[k] !== null && r[k] !== undefined) cur[k] = Number(r[k]) || 0;
+    }
+    out.set(id, cur);
+  }
+  return out;
+};
+
 export function useUxOverview(
   tf: Timeframe, appId?: string | null,
   /** True when the caller draws the estate comparison and must pay for it. */
   wide = false,
-): Map<string, UxRow> | null {
+): UxMap | null {
   const gen = useMemoGen();
   // the scope is part of the key: a payload that lacked this application
   // must not answer for the request that went and fetched it
   const key = `${tf.from}|${tf.to}|${appId ?? ""}|${wide ? "w" : "s"}|${gen}`;
-  const [map, setMap] = useState<Map<string, UxRow> | null>(memo.get(key) ?? null);
+  const [map, setMap] = useState<UxMap | null>(memo.get(key) ?? null);
 
   useEffect(() => {
     const hit = memo.get(key);
@@ -98,8 +122,19 @@ export function useUxOverview(
            eventually take for everything except the comparison line. */
         if (appId) {  // eslint-disable-line no-constant-condition
           try {
+            /* THE SLOWEST FINAL ON THE PAGE, AND IT HAD NO PREVIEW. Measured
+               on production: this per-session scan is the last to land
+               (25.6s on 30m; still polling when two captures ended). Until
+               it did, the Apdex read "—" with "no rated user actions" under
+               it — a fact asserted before the data existed, identical on
+               screen to an application that truly has none. The preview
+               paints, marked; the final decides; only the final is memoised. */
             rows.push(...await runDql<Record<string, unknown>>(
-              qUxByApp(tf, appId), 8));
+              qUxByApp(tf, appId), 8, undefined, (early) => {
+                if (!live || !early.length) return;
+                const prev = fold(early); prev.partial = true;
+                setMap(prev);
+              }));
           } catch { /* the estate's answer still stands on its own */ }
         }
         // TWO row kinds share an appId: the main per-app row, and the Apdex
@@ -108,19 +143,7 @@ export function useUxOverview(
         // view-instance grain). MERGE them — a plain Map(rows.map(...)) let
         // the later row overwrite the earlier one, which zeroed every main
         // field and put "0 reached a user" beside "86% of sessions hit".
-        const ZERO: UxRow = { sessions: 0, hit: 0, realSessions: 0, errors: 0,
-          errorsThird: 0, realErrors: 0, hitReal: 0, hitRobot: 0, hitSynth: 0,
-          engaged: 0, actions: 0, abandoned: 0, satisfied: 0, tolerating: 0,
-          frustrated: 0, fruErr: 0, fragments: 0 };
-        const out = new Map<string, UxRow>();
-        for (const r of rows) {
-          const id = String(r.appId);
-          const cur = out.get(id) ?? { ...ZERO };
-          for (const k of Object.keys(ZERO) as Array<keyof UxRow>) {
-            if (r[k] !== null && r[k] !== undefined) cur[k] = Number(r[k]) || 0;
-          }
-          out.set(id, cur);
-        }
+        const out = fold(rows);
         memo.set(key, out);
         if (live) setMap(out);
       } catch {

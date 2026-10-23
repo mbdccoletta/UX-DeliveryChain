@@ -2833,6 +2833,11 @@ a.svcf__row { text-decoration: none; color: inherit; }
 .tk-core__prob { font: 600 10px var(--mono); letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--ink-3); margin-top: 6px; }
 .tk-core__prob--on { color: var(--bad); }
+/* The measured half of the line keeps the quiet ink even when the count is
+   large: errors are a fact, not a verdict — the verdict is the Apdex word
+   above and the Davis half beside it. Colouring it would make a normal error
+   level read as an alarm. */
+.tk-core__prob-err { color: var(--ink-3); text-transform: none; letter-spacing: 0.02em; }
 
 /* ─── the application picker, wide enough to read ─────────────────────────
  * The list came out at a fixed 228px and clipped every name — twelve entries
@@ -3190,19 +3195,36 @@ div:has(> header):has(main) > div {
 .gpin__lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   margin-top: 3px; display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
   font: 700 10px var(--sans); color: var(--ink-hi);
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  padding: 1px 7px; border-radius: 999px; }
+  /* haloed, not boxed — the same rule the flow canvas follows: a name on a
+     map is legible by a hairline of ground around the letters, never by a
+     plate behind them. */
+  padding: 1px 2px;
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 2px var(--bg); }
 .gpin__lbl em { font-style: normal; font: 700 10px var(--mono); color: var(--ink-2); }
 /* THEME TOKENS, not the canvas hexes — the HTML pins live in the page and
    must follow the light theme like every other verdict on screen (only the
    canvas DotLayer, which paints outside CSS, resolves the same tokens through
    geoCol()). */
-.gpin--good { background: var(--panel);
-  box-shadow:0 0 10px color-mix(in srgb, var(--good-fill) 45%, transparent); }
-.gpin--warn { background: var(--panel);
-  box-shadow:0 0 12px color-mix(in srgb, var(--warn-fill) 50%, transparent); }
-.gpin--bad { background: var(--panel);
-  box-shadow:0 0 14px color-mix(in srgb, var(--bad-fill) 60%, transparent); }
+/* A MARK IS PAINTED, NOT IMPLIED. The pins were the panel tint — three per
+   cent of ink — with a soft glow around them, which on the dotted ground of
+   the platform's map came out as a faint ring nobody could find: measured in
+   production, Canada, Spain and Argentina were there and invisible. Network
+   Pulse draws its sites the other way round and reads at a glance: the status
+   colour IS the mark, at full strength, with a hairline of ground around it
+   so it separates from the land dots. Same recipe here — the fill carries
+   the tone, a crisp border of the same tone keeps the big marks from reading
+   as blobs, and the ground halo does the separating. Size still encodes
+   sessions; the colour still encodes only the verdict. */
+.gpin { border: 2px solid; }
+.gpin--good { background: color-mix(in srgb, var(--good-fill) 62%, transparent);
+  border-color: var(--good-fill);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 12px color-mix(in srgb, var(--good-fill) 55%, transparent); }
+.gpin--warn { background: color-mix(in srgb, var(--warn-fill) 62%, transparent);
+  border-color: var(--warn-fill);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 14px color-mix(in srgb, var(--warn-fill) 60%, transparent); }
+.gpin--bad { background: color-mix(in srgb, var(--bad-fill) 62%, transparent);
+  border-color: var(--bad-fill);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 16px color-mix(in srgb, var(--bad-fill) 65%, transparent); }
 .gpin--bad::before, .gpin--bad::after { content: ""; position: absolute; inset: 0;
   border-radius: 50%; border:2px solid var(--bad-fill); animation: gsonar 2.2s ease-out infinite; }
 .gpin--bad::after { animation-delay: 1.1s; }
@@ -3467,4 +3489,23 @@ div:has(> header):has(main) > div {
 :root:not([data-theme="dark"]) .tk-block::before,
 :root:not([data-theme="dark"]) .tk-block::after {
   border-color: color-mix(in srgb, var(--c) 40%, transparent);
+}
+
+/* THE APPLICATION PICKER'S OVERLAY, IN PIXELS. Strato computes its max-height
+   from the iframe's viewport, which the app shell sizes to the page — on a
+   tall page the overlay outgrows the screen. The exported class names are
+   hashed, so the Strato containers are matched by their stable base name;
+   `!important` beats the inline value the floating layer writes. Height only:
+   nothing here touches what the list contains. */
+/* THE REAL CLASS NAMES, READ OFF THE INSTALLED PACKAGE. Strato's runtime
+   classes are opaque hashes — the readable names live only in the .d.ts and
+   the mapping file — so a [class*="selectMenuListWrapper"] selector matched
+   nothing at runtime. These are the hashes strato-components 3.11.3 emits
+   (forms/select/styles/Select.sty.js); a Strato upgrade changes them, and
+   the .app-picker layer below is what still holds then. */
+.app-picker,
+._dlenfch-3-11-3,
+._dlenfcg-3-11-3 {
+  max-height: min(420px, calc(100vh - 140px)) !important;
+  overflow-y: auto !important;
 }

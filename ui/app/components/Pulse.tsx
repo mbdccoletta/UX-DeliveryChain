@@ -480,7 +480,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSel, appId, data.tf.from, data.tf.to]);
   const pulse = usePulse(appId, data.tf, feName || undefined);
-  const fc = useAppForecast(appId, data.tf);
+  const fc = useAppForecast(appId, data.tf, feName || undefined);
   const ux = useUxOverview(data.tf, appId);
   const scope = useAppScope(appId, data.apps.find((a) => a.appId === appId)?.entity);
   /* The page opens on sessions. Clicking a card opens that card's evidence
@@ -796,7 +796,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
            there — dividing its total by the whole window would under-report
            the rate by half on a two-hour view. */
         sessionsPerMin={(() => {
-          const pts = pulse?.series ?? [];
+          // a series that has not arrived is "…", never "0.0" — zero is a
+          // measurement and this is the absence of one
+          if (!pulse) return "…";
+          const pts = pulse.series;
           const span = Math.max(1, pts.length * Q.binMinutesFor(data.tf.minutes));
           const n = pts.reduce((a, b) => a + b.sessions, 0);
           return (n / span).toFixed(n / span >= 10 ? 0 : 1);
@@ -817,6 +820,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         hitSessions={impacted?.hit ?? 0}
         loadP50={app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? apdexOf(uxRow) : null}
+        apdexPartial={!!ux?.partial}
         /* AN EMPTY SCORE HAS TO SHOW ITS WORK.
            "—" is the right answer when nothing could be rated, and it is
            indistinguishable from a broken query unless the card says what it
@@ -826,7 +830,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
            With them a reader can tell "this application records no user
            actions" from "the score failed to arrive", which is exactly the
            distinction being asked for. */
-        apdexNote={uxRow && apdexOf(uxRow) === null
+        /* "—" MEANS MEASURED-EMPTY, NEVER NOT-YET. While the UX scan is in
+           flight the slot said "—" with "no rated user actions" under it —
+           asserting a fact before the data existed, identical on screen to
+           an application that truly has none. Loading says loading; a
+           preview says measuring; only a final may say "—". */
+        apdexNote={ux === null
+          ? "Measuring — the user-experience scan is still running."
+          : uxRow && apdexOf(uxRow) === null
           ? (uxRow.realSessions === 0 && uxRow.sessions > 0
             ? "No people to rate: every session this window is robot or synthetic traffic, "
               + "and Apdex scores real users only."
@@ -1727,6 +1738,8 @@ interface CardProps {
   series: Array<{ t: string; sessions: number; errors: number; requests: number }>;
   /** Sessions per minute, read off the same series the bars draw. */
   sessionsPerMin: string;
+  /** True while the Apdex bands came from a preview of the UX scan. */
+  apdexPartial?: boolean;
   /** Which store the headline counted — see useImpacted. */
   sessionBase?: "sessions" | "events";
   /** True when the window sits inside the session store's write lag. */
@@ -2048,7 +2061,7 @@ function CleanCard(p: CardProps) {
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
                 should have to say both out loud. */}
-            <Stat v={fmtApdex(p.apdex)} l="apdex"
+            <Stat v={fmtApdex(p.apdex)} l={p.apdexPartial ? "apdex · measuring" : "apdex"}
               tone={p.apdex === null ? undefined : apdexTone(p.apdex)}
               title={p.apdex === null ? p.apdexNote
                 : `${apdexBand(p.apdex)} · ${APDEX_LABEL}`} />
@@ -2203,13 +2216,24 @@ function CleanCard(p: CardProps) {
               separately because they are fixed by different people. */}
           <span className="tk-core__nm">{p.name}</span>
           {/* What Davis detected, beside what we measured. Silence is stated
-              too — "no problems detected" is a finding, and leaving the line
-              out would make its absence indistinguishable from not looking. */}
+              too — "no Davis problems" is a finding, and leaving the line out
+              would make its absence indistinguishable from not looking.
+              The two halves are deliberately different kinds of fact: a
+              PROBLEM is Davis judging a deviation against the baseline it
+              learned; an ERROR is a thing a user actually received. An
+              application can record thousands of errors and raise no problem
+              when that is its normal level — read in production as "no
+              problems, so no errors", until the drill-down showed otherwise.
+              Naming Davis and printing the error count on the same line is
+              what stops silence from one being read as absence of the other. */}
           <span className={`tk-core__prob${p.problems > 0 ? " tk-core__prob--on" : ""}`}>
             {p.problems > 0
-              ? <>{p.problems} active problem{p.problems > 1 ? "s" : ""}
+              ? <>{p.problems} Davis problem{p.problems > 1 ? "s" : ""}
                   {p.problemCats.length > 0 && ` · ${p.problemCats.slice(0, 2).join(", ")}`}</>
-              : "no problems detected"}
+              : <>no Davis problems
+                  <span className="tk-core__prob-err">
+                    {" · "}{p.errors > 0 ? `${fmtK(p.errors)} errors recorded` : "no errors recorded"}
+                  </span></>}
           </span>
           <span className="tk-core__go">open the delivery chain →</span>
         </button>
@@ -2239,7 +2263,7 @@ error series, read at the same width the window is drawn in.`}>
             {/* Read off the SERIES the bars draw, not off the headline figure —
                 if the two ever disagree the card should show it rather than
                 print one number twice and hide the difference. */}
-            <em className="tk-block__sparkv">{fmtK(reqs.reduce((a, v) => a + v, 0))}
+            <em className="tk-block__sparkv">{p.series.length ? fmtK(reqs.reduce((a, v) => a + v, 0)) : "…"}
               <br />requests</em></>}>
           <div className="tk-row2">
             <Stat v={fmtK(p.requests)} l="web requests" />

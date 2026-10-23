@@ -16,13 +16,16 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import { forecast, forecastPlan, type Forecast , histWindow } from "../utils/forecast";
-import type { Timeframe } from "../utils/dql";
+import { qMetricForecastExpr, type Timeframe } from "../utils/dql";
 
 const memo = new Map<string, Forecast | null>();
 
-export function useAppForecast(appId?: string, tf?: Timeframe): Forecast | null {
+export function useAppForecast(
+  appId?: string, tf?: Timeframe, frontendName?: string,
+): Forecast | null {
   const gen = useMemoGen();
-  const key = appId && tf ? `${appId}|${tf.from}|${tf.to}|${gen}` : "";
+  const fe = frontendName || "";
+  const key = appId && tf ? `${appId}|${tf.from}|${tf.to}|${fe}|${gen}` : "";
   const [ahead, setAhead] = useState<Forecast | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -33,8 +36,11 @@ export function useAppForecast(appId?: string, tf?: Timeframe): Forecast | null 
     const plan = forecastPlan(tf.minutes);
     /* bounded by the SELECTED window, not by now() — see histWindow */
     const win = histWindow(tf!, plan.histMin);
+    // the error series from the metric store when the frontend is known —
+    // ~200 ms instead of a raw-event scan; see qMetricForecastExpr
     forecast(
-      `fetch user.events, from: ${win.from}, to: ${win.to}
+      fe ? qMetricForecastExpr("errors", fe, win.from, win.to, plan.bin)
+         : `fetch user.events, from: ${win.from}, to: ${win.to}
        | filter dt.rum.application.id == "${appId.replace(/"/g, "")}"
        | makeTimeseries errors = countIf(characteristics.classifier == "error"), interval: ${plan.bin}`,
       plan.horizon,

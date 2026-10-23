@@ -10,7 +10,7 @@
 // first page must not bill twice for being looked at twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qPulseBreakdown, qPulseSeries, qSessionSeries, runDql,
+import { qAppMetricSeries, qPulseBreakdown, qPulseSeries, qSessionSeries, runDql,
   withinSessionLag, type Timeframe } from "../utils/dql";
 
 export interface PulsePoint {
@@ -82,7 +82,18 @@ export function usePulse(
       try {
         /* The breakdown scan is the slow one on a large application; its
            preview lets the card's bars and KPIs appear while it finishes. */
-        const [series, tuples, sess] = await Promise.all([
+        /* THE COUNTERS' BARS COME FROM THE SAME SERIES THE FORECAST TRAINS ON.
+           One rule, one source: the forecast band is drawn over these bars,
+           and a band trained on the metric store over bars mined from events
+           would be two populations meeting in the open — the exact
+           incoherence this app spent a morning removing. Sessions keep their
+           base; errors, requests and actions take the metric series when the
+           frontend is known, and the event series otherwise. */
+        const metricP = fe
+          ? runDql<Record<string, unknown>>(qAppMetricSeries(tf!, fe), 1)
+              .catch(() => [] as Record<string, unknown>[])
+          : Promise.resolve([] as Record<string, unknown>[]);
+        const [series, tuples, sess, metricRows] = await Promise.all([
           runDql<Record<string, unknown>>(qPulseSeries(tf!, rumAppId!), 200),
           runDql<Record<string, unknown>>(qPulseBreakdown(tf!, rumAppId!), 500),
           // not inside the store's lag: there the series would be empty by
@@ -91,21 +102,42 @@ export function usePulse(
             ? runDql<Record<string, unknown>>(qSessionSeries(tf!, fe), 200)
                  .catch(() => [] as Record<string, unknown>[])
              : Promise.resolve([] as Record<string, unknown>[]),
+          metricP,
         ]);
         /* Both legs bin the same window with the same width, so the bin
            label is the join key. A bin the session store has nothing for is
            zero rather than missing — the gap is the fact. */
         const byBin = new Map<string, number>();
         for (const r of sess) byBin.set(String(r.t ?? ""), Number(r.sessions) || 0);
+        /* A `timeseries` answer is ONE record: arrays per field, a start and
+           an interval. The i-th value belongs to start + i·interval, so the
+           join with the event series is by timestamp, rounded to the bin —
+           a string compare would break on a stray millisecond. */
+        const m = metricRows[0] as { errors?: number[]; requests?: number[]; actions?: number[];
+          timeframe?: { start?: string }; interval?: number } | undefined;
+        const ivMs = Number(m?.interval ?? 0) / 1e6;
+        const m0 = m?.timeframe?.start ? Date.parse(String(m.timeframe.start)) : NaN;
+        const atBin = (ms: number) => (ivMs > 0 ? Math.round(ms / ivMs) : ms);
+        const byBinM = new Map<number, { errors: number; requests: number; actions: number }>();
+        if (m && Number.isFinite(m0) && ivMs > 0) {
+          const n = Math.max(m.errors?.length ?? 0, m.requests?.length ?? 0, m.actions?.length ?? 0);
+          for (let i = 0; i < n; i++) byBinM.set(atBin(m0 + i * ivMs), {
+            errors: Number(m.errors?.[i]) || 0, requests: Number(m.requests?.[i]) || 0,
+            actions: Number(m.actions?.[i]) || 0 });
+        }
         out = {
-          series: series.map((r) => ({
-            t: String(r.t ?? ""),
-            sessions: byBin.size
-              ? (byBin.get(String(r.t ?? "")) ?? 0)
-              : Number(r.sessions) || 0,
-            errors: Number(r.errors) || 0, actions: Number(r.actions) || 0,
-            requests: Number(r.requests) || 0,
-          })),
+          series: series.map((r) => {
+            const t = String(r.t ?? ""); const mm = byBinM.get(atBin(Date.parse(t)));
+            return {
+              t,
+              sessions: byBin.size
+                ? (byBin.get(t) ?? 0)
+                : Number(r.sessions) || 0,
+              errors: mm ? mm.errors : Number(r.errors) || 0,
+              actions: mm ? mm.actions : Number(r.actions) || 0,
+              requests: mm ? mm.requests : Number(r.requests) || 0,
+            };
+          }),
           appStarts: tuples.reduce((a, r) => a + (Number(r.starts) || 0), 0),
           actions: tuples.reduce((a, r) => a + (Number(r.actions) || 0), 0),
           requests: tuples.reduce((a, r) => a + (Number(r.requests) || 0), 0),
