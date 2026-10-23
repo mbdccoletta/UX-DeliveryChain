@@ -119,6 +119,21 @@ export const geoArms = (g: GeoArm, base: number): GeoArms => {
 export const geoJudge = (g: GeoArm, base: number): GeoTone =>
   (["good", "warn", "bad"] as const)[geoArms(g, base).level];
 
+/** A STATE OR A CITY IS JUDGED BY THE SAME RULE AS ITS COUNTRY.
+ *
+ *  Measured on a bank's production application: Brazil green — 84.7% of
+ *  its sessions met an error, which is exactly that application's own rate,
+ *  so "in line" — and every one of its 27 states red, because the states
+ *  were still coloured by the absolute 25% line the countries had dropped.
+ *  Same fact, two rules, one screen: the map argued with itself. The
+ *  sub-national rows carry sessions and hits but no Apdex bands, so only
+ *  the deviation arm can fire here; the speed arm simply has nothing to
+ *  rate, which is the truth, not a different threshold. */
+export const geoJudgeSub = (r: { sessions: number; hit: number }, base: number): GeoTone =>
+  geoJudge({ sessions: r.sessions, hit: r.hit, sat: 0, tol: 0, fru: 0 }, base);
+export const geoBecauseSub = (r: { sessions: number; hit: number }, base: number): string =>
+  geoBecause({ sessions: r.sessions, hit: r.hit, sat: 0, tol: 0, fru: 0 }, base);
+
 /** The threshold that fired, spelled out — a verdict never asks to be taken
  *  on faith. Deviation from the application's own rate first, slowness
  *  second; the absolute rate is stated but is not a threshold here. */
