@@ -1149,7 +1149,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // narrows the lower layers to what this application's traces actually reach
   const scope = useAppScope(appId,
     data.apps.find((a) => a.appId === appId)?.entity);
-  const ahead = useAppForecast(appId, data.tf);
+
   // Not lazy any more: measured impact now decides colour, so it has to be
   // here before the first paint. Memoised per application and window, and the
   // landing page asks for the same key — arriving from the overview is free.
@@ -1158,6 +1158,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
      user.sessions, the same population the Overview card counts and the
      sessions hand-off opens. One fact, one number, on both screens. */
   const feNames = useFrontendNames(data.tf.minutes);
+  // declared AFTER the names it reads — a hook that read `feNames` above this
+  // line hit the temporal dead zone at runtime, not at typecheck
+  const ahead = useAppForecast(appId, data.tf,
+    feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined);
   const impacted = useImpacted(appId, data.tf, true,
     feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "")
       || undefined);

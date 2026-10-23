@@ -310,8 +310,20 @@ export function App() {
     }
     return [...by.values()].sort((x, y) => x.name.localeCompare(y.name));
   }, [d.inventory, d.apps]);
-  const mobileApps = pick.filter(isMobile);
-  const webApps = pick.filter((a) => !isMobile(a));
+  /* DETECTED, UNNAMED FRONTENDS GO LAST, UNDER THEIR OWN HEADING. The
+     inventory lists every FRONTEND Smartscape knows, and the platform
+     creates some of them on its own, named after the address they were
+     seen on — "10.x.x.x". They are real nodes and may carry traffic,
+     so they are not hidden; but a name that is an IP address is not a name
+     a reader is looking for, and sorted alphabetically the digits led the
+     whole list. They sit at the end, labelled for what they are. */
+  const isDetected = (a: { name: string }) =>
+    /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(a.name.trim())
+    || /^[a-z0-9.-]+\.(com|br|net|io|org)(\.[a-z]{2})?$/i.test(a.name.trim());
+  const named = pick.filter((a) => !isDetected(a));
+  const detected = pick.filter(isDetected);
+  const mobileApps = named.filter(isMobile);
+  const webApps = named.filter((a) => !isMobile(a));
 
   const view = TABS.find(([id]) => id === tab);
 
@@ -406,7 +418,27 @@ export function App() {
                   value={current}
                   onChange={(v) => { if (v) setAppId(v as string); }}>
                   <Select.Trigger placeholder="Application" />
-                  <Select.Content>
+                  {/* A LIST OF HUNDREDS IS A SEARCH, NOT A SCROLL. The picker
+                      now lists every frontend the inventory knows — on a
+                      bank's estate, hundreds — and the open list ran past the
+                      frame. Strato's own Select.Filter does client-side
+                      filtering as the reader types; the list collapses to the
+                      matches and the frame is never the problem again. */}
+                  <Select.Filter />
+                  {/* BOUNDED IN PIXELS, NOT IN THE IFRAME'S IDEA OF A VIEWPORT.
+                      Strato sizes this overlay as max(viewportHeight/2, 320)
+                      minus the trigger — and inside the app shell the
+                      "viewport" is an iframe sized to the page's content, so
+                      a tall page makes a tall overlay that runs past what the
+                      reader can see. An absolute bound (theme.css, .app-picker)
+                      is the only one that means the same thing whatever the
+                      frame's height is. */}
+                  {/* WIDE ENOUGH TO READ. `width` defaults to the trigger's,
+                      which clipped "Abertura de Conta Híbrida A…" the moment
+                      the height was bounded. A CSS width is allowed; this one
+                      fits the long names and never exceeds the frame. */}
+                  <Select.Content className="app-picker" style={{ maxHeight: 420 }}
+                    width="min(560px, 92vw)">
                     {/* Web and mobile read differently in the rest of this app —
                         mobile carries no ingress, no third-party requests, and
                         (where RUM never reported) no measured sessions at all —
@@ -428,6 +460,16 @@ export function App() {
                       <Select.Group>
                         <Select.GroupLabel>Mobile</Select.GroupLabel>
                         {mobileApps.map((a) => (
+                          <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
+                            {a.name}
+                          </Select.Option>
+                        ))}
+                      </Select.Group>
+                    )}
+                    {detected.length > 0 && (
+                      <Select.Group>
+                        <Select.GroupLabel>Detected · unnamed</Select.GroupLabel>
+                        {detected.map((a) => (
                           <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
                             {a.name}
                           </Select.Option>

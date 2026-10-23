@@ -372,7 +372,10 @@ export function useChainData(
         discovery ? none
           : safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
         discovery ? Promise.resolve([] as ProblemRow[])
-          : safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 200, cut),
+          // the client cap must not re-cap what the query is allowed to return:
+          // see qProblems — problems this application has must never fall off
+          // the end of a list sized for a demo
+          : safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 500, cut),
         discovery ? none
           : safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
               Q.DAVIS_ROLLUP_CAP, cut),
@@ -466,6 +469,20 @@ export function useChainData(
         const id = String(a.appId ?? "").toLowerCase();
         if (id) seen.add(id);
         if (a.entity) seen.add(String(a.entity).toLowerCase());
+      }
+      /* THE INVENTORY COUNTS AS SEEN. This set was built from the measured
+         census alone, which was the whole estate — until the census was
+         scoped to one application. From then on `seen` held one app, every
+         classic-model entry passed as "classic only" and was appended beside
+         the same application the inventory had already listed, under the
+         other model's name: "BSPI - PIX-BGS - Web - External" and
+         "BSPI | PIX-BGS | Web | External", twice in the picker. The inventory
+         carries both ids for every frontend, so it decides what is new. */
+      for (const n of appNames) {
+        const rum = String(n.rumId ?? "").toLowerCase();
+        const cid = String(n.id ?? "").toLowerCase();
+        if (rum) seen.add(rum);
+        if (cid) { seen.add(cid); seen.add(cid.replace(/^[a-z_]*application-/, "")); }
       }
       /* The dedupe now has the EXACT rum id to compare (Smartscape's
        * FRONTEND carries it), so the "shares a hex prefix" guess is only the
