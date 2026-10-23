@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import { forecast, forecastPlan, type Forecast , histWindow } from "../utils/forecast";
-import { seriesEnd, type Timeframe } from "../utils/dql";
+import { seriesEnd, withinSessionLag, type Timeframe } from "../utils/dql";
 
 /** The metrics that have a real per-bin series behind them. */
 export type Metric = "sessions" | "errors" | "actions" | "requests";
@@ -75,7 +75,8 @@ export function useMetricForecast(
        belongs to the bin it began in, not to every bin it spanned. The same
        anchor qSessionSeries uses, so the drawn series and the forecast's
        training series are the one series. */
-    const expr = metric === "sessions" && fe
+    // the session store is empty inside its own lag — train on events there
+    const expr = metric === "sessions" && fe && !withinSessionLag(tf!)
       ? `fetch user.sessions, from: ${win.from}, to: ${seriesEnd({ ...tf!, to: win.to })}
 | expand fe = frontend.name
 | filter fe == "${fe.replace(/["\\]/g, "")}"

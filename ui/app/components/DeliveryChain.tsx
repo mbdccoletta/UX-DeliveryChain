@@ -657,7 +657,15 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
           nm: o, mt: ORIGIN_META[o], v: fmtK(n), tone: vd.tone, vol: n,
           det: [["Sessions", fmtN(n)],
                 ["Sessions hit by errors",
-                 hit === null ? "…" : `${fmtN(hit)} of ${fmtN(n)} · ${vd.label}`],
+                 /* THE MARK TRAVELS TO THIS SCREEN TOO. `impacted` is the
+                    same scan the Overview paints on its preview, and the
+                    Overview says "measuring" beside the verdict it computes
+                    from it. This card computed the same verdict from the
+                    same preview and said nothing — the one place the audit
+                    found a judgement on a partial figure without its mark.
+                    Same fact, same word, on every screen. */
+                 hit === null ? "…"
+                   : `${fmtN(hit)} of ${fmtN(n)} · ${vd.label}${impacted?.partial ? " · measuring" : ""}`],
                 ["Share", devSessions ? ((n / devSessions) * 100).toFixed(1) + "%" : "—"],
                 ["Device profiles",
                  String(devices.filter((r) => originOf(r.agent, r.utype) === o)
@@ -1113,7 +1121,8 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       forecastRising: !!ahead && ahead.slope > 0,
     });
     appElo.tone = appVd.tone;
-    appElo.det.push(["Status", `${appVd.label} — ${appVd.reason}`]);
+    appElo.det.push(["Status",
+      `${appVd.label} — ${appVd.reason}${impacted?.partial ? " · measuring" : ""}`]);
     // "Sessions hit by errors" is not pushed either — the Users impacted block
     // renders the same count WITH the real/robot/synthetic split, which is the
     // version worth keeping.
@@ -1148,7 +1157,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
      it decides which store that scan reads: with a name the figures come from
      user.sessions, the same population the Overview card counts and the
      sessions hand-off opens. One fact, one number, on both screens. */
-  const feNames = useFrontendNames();
+  const feNames = useFrontendNames(data.tf.minutes);
   const impacted = useImpacted(appId, data.tf, true,
     feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "")
       || undefined);
@@ -1612,8 +1621,9 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const [routesOpen, setRoutesOpen] = useState(true);
   const [tpickAll, setTpickAll] = useState(false);
   /* the retired "-all" drawer's own data, fetched only if someone opens it */
-  const layerStats = useLayerStats(data.tf, sel !== null && sel.endsWith("-all"));
-  const layerJourneys = useJourneys(data.tf, sel !== null && sel.endsWith("-all"));
+  const layerStats = useLayerStats(data.tf, sel !== null && sel.endsWith("-all"), appId);
+  const layerJourneys = useJourneys(data.tf, sel !== null && sel.endsWith("-all"),
+    null, appId);
   useEffect(() => { setDrawerAll(false); setLedgerOpen(false); setRoutesOpen(true);
     setTpickAll(false); }, [sel]);
   /* Opening a LAYER lands on its most deserving element — the reader kept

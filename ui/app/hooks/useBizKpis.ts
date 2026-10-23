@@ -18,6 +18,9 @@ export interface BizPeriod {
 export interface BizKpis {
   /** Per RUM app id: current and previous period. */
   byApp: Map<string, { cur: BizPeriod; prev: BizPeriod }>;
+  /** True while these came from a PREVIEW: real, measured, not yet whole.
+   *  The cards say so; the final replaces them; only the final is memoised. */
+  partial?: boolean;
 }
 
 const ZERO: BizPeriod = { sessions: 0, realSessions: 0, converted: 0, convertedReal: 0,
@@ -37,8 +40,13 @@ export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs,
     setOut(null);
     let live = true;
     (async () => {
-      try {
-        const rows = await runDql<Record<string, unknown>>(qBizKpis(tf, defs, appId), 200);
+      /* THE HEAVIEST QUERY IN THE APP HAD NO PREVIEW PATH. Two per-session
+         legs over the window and the window before it; on a large
+         application that is the last final to land, and Business Control
+         drew ten empty frames until it did — "não carrega". The Overview's
+         rule applies here unchanged: the preview paints, marked; the final
+         decides; only the final is memoised. */
+      const shape = (rows: Record<string, unknown>[]) => {
         const byApp = new Map<string, { cur: BizPeriod; prev: BizPeriod }>();
         for (const r of rows) {
           const id = String(r.appId ?? "");
@@ -56,7 +64,18 @@ export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs,
           if (r.period === "cur") slot.cur = p; else slot.prev = p;
           byApp.set(id, slot);
         }
-        const res: BizKpis = { byApp };
+        return byApp;
+      };
+      try {
+        const rows = await runDql<Record<string, unknown>>(qBizKpis(tf, defs, appId), 200,
+          undefined, (early) => {
+            if (!live || !early.length) return;
+            // both periods must be present for a comparison to mean anything
+            const by = shape(early);
+            const slot = appId ? by.get(appId) : undefined;
+            if (slot && slot.cur !== ZERO && slot.prev !== ZERO) setOut({ byApp: by, partial: true });
+          });
+        const res: BizKpis = { byApp: shape(rows) };
         memo.set(key, res);
         if (live) setOut(res);
       } catch { if (live) setOut({ byApp: new Map() }); }

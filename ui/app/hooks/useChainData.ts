@@ -151,6 +151,10 @@ export interface ChainData {
   runtime: RuntimeRow[];
   topology: Array<{ type: string; nodes: number }>;
   problems: ProblemRow[];
+  /** True while the screen is drawn from PREVIEW rows — see runDql. */
+  partial?: boolean;
+  /** Every application the inventory knows — the picker's list, free to read. */
+  inventory: Array<{ appId: string; name: string; kind?: string; entity?: string }>;
   providers: ProviderRow[];
   alerts: AlertRow[];
   signals: SignalRow[];
@@ -189,9 +193,14 @@ export function mergeJourneys(rows: Array<Record<string, unknown>>): SeqRow[] {
  *  every restore. */
 async function safe<T>(
   label: string, q: string, bag: string[], limit = 200, cut?: { hit: boolean },
+  /** Partial rows, while the query is still running — see runDql. */
+  onPartial?: (rows: T[]) => void,
+  /** Let it settle on a stable preview — Overview summaries only. */
+  settle = false,
 ): Promise<T[]> {
   try {
-    return await runDql<T>(q, limit, cut ? () => { cut.hit = true; } : undefined);
+    return await runDql<T>(q, limit, cut ? () => { cut.hit = true; } : undefined,
+      onPartial, { settle });
   } catch (e: unknown) {
     bag.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
     return [];
@@ -210,7 +219,8 @@ export function useChainData(
   tf: Timeframe, session?: string | null, appId?: string | null,
 ): ChainData {
   const [state, setState] = useState<Omit<ChainData, "refresh">>({
-    loading: true, errors: [], tf, cachedAt: null, apps: [], views: [], sequences: [],
+    loading: true, errors: [], tf, cachedAt: null, apps: [], inventory: [],
+    views: [], sequences: [],
     transitions: [], friction: [], devices: [], origins: [],
     domains: [], paths: [], calls: [], runtime: [], topology: [],
     problems: [], providers: [], alerts: [], signals: [],
@@ -268,27 +278,132 @@ export function useChainData(
 
       /* collects the truncation of THIS load's own queries — see safe() */
       const cut = { hit: false };
-      const [
-        rawApps, appNames, gen2Apps, origins, domains,
-        calls, runtime, topology, problems, davis, signals,
-      ] = await Promise.all([
-        safe<Record<string, unknown>>("applications", Q.qApps(tf, session), bag, 200, cut),
-        safe<{ id: string; name: string; rumId?: string; kind?: string }>(
-          // names, not measurements: the 200-row cap that protects the
-          // scanning queries was silently truncating the INVENTORY, which
-          // costs nothing to read and is what every picker label depends on
-          "names", Q.qAppNames(), bag, 2000, cut),
-        safe<Record<string, unknown>>("classic applications", Q.qAppsGen2(), bag, 200, cut),
-        safe<Record<string, unknown>>("origins", Q.qOrigins(tf, session, appId), bag, 200, cut),
-        safe<Record<string, unknown>>("domains", Q.qDomains(tf, appId), bag, 200, cut),
-        safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, 200, cut),
-        safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
-        safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
-        safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 200, cut),
-        safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag, Q.DAVIS_ROLLUP_CAP, cut),
-        safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf), bag, 300, cut),
+      /* THE COLD LOAD IS A DISCOVERY LOAD.
+       *
+       * With no application chosen there is nothing to scope to, so the
+       * census reads the estate — and on a production tenant that one scan
+       * reached Grail's 500 GB limit and took the page with it. But the cold
+       * load does not need measurements: it needs to know WHICH application
+       * to measure. Ranking is a far cheaper question than reporting, so it
+       * is asked of a short window — the window is linear in bytes, and
+       * fifteen minutes ranks an estate as well as two hours does.
+       *
+       * The per-application scans sit out this pass entirely: they would read
+       * the estate for an application nobody has chosen yet. The moment the
+       * choice lands in the url (App.tsx writes it), this hook runs again
+       * with a scope and everything is measured properly, once.
+       *
+       * The page stays in its loading state through the discovery pass, so
+       * nothing is ever drawn from the short window and labelled with the
+       * long one. */
+      const discovery = !appId;
+      /** The two slow legs, in flight from the start and awaited at the end. */
+      const slow = discovery
+        ? Promise.resolve([[], []] as [Record<string, unknown>[], Record<string, unknown>[]])
+        : Promise.all([
+            safe<Record<string, unknown>>("origins",
+              Q.qOrigins(tf, session, appId), bag, 200, cut),
+            safe<Record<string, unknown>>("domains", Q.qDomains(tf, appId), bag, 200, cut),
+          ]);
+      const censusTf: Timeframe = discovery
+        ? { ...tf, from: `now()-${Math.max(15, Math.min(tf.minutes, 30))}m`, to: "now()" }
+        : tf;
+      const none = Promise.resolve([] as Record<string, unknown>[]);
+
+      /* THE CENSUS UNBLOCKS THE PAGE ON ITS PREVIEW.
+       *
+       * Measured on production with previews enabled: this query answers with
+       * real rows in about three seconds and keeps polling for its final
+       * figure until t+88s. The page waited for the second one — so the
+       * reader stared at a spinner for a minute and a half while the app had
+       * the application, its name and its numbers in hand the whole time.
+       *
+       * Whichever arrives first settles the barrier; the final lands after as
+       * a patch, exactly like origins and domains. `partial` travels with the
+       * state so the screen can say the figures are still firming rather than
+       * presenting a preview as a measurement. */
+      let settleEarly: (rows: Record<string, unknown>[]) => void = () => {};
+      const censusEarly = new Promise<Record<string, unknown>[]>(
+        (r) => { settleEarly = r; });
+      const censusFinal = safe<Record<string, unknown>>("applications",
+        Q.qApps(censusTf, session, appId), bag, 200, cut,
+        (rows) => { if (rows.length) settleEarly(rows); },
+        false);
+      void censusFinal.then((rows) => settleEarly(rows)).catch(() => settleEarly([]));
+
+      /* ONLY THE CENSUS AND THE NAMES HOLD THE FIRST PAINT.
+       *
+       * Measured on production: with previews the census answers in about
+       * two seconds, and the first landing still waited another five for
+       * Davis, the topology counts and the signal rollups to finish polling.
+       * None of those draws anything the reader is waiting for — the card
+       * needs the application and its name. Everything else patches in.
+       *
+       * They are all started together, as before; the difference is only
+       * which of them the first setState waits for. */
+      /* names are free (Smartscape) and the picker cannot be drawn without
+         them, so they are the one other thing the first paint waits for */
+      const namesP = safe<{ id: string; name: string; rumId?: string; kind?: string }>(
+        "names", Q.qAppNames(), bag, 2000, cut);
+      const rest = Promise.all([
+        discovery ? none
+          : safe<Record<string, unknown>>("classic applications", Q.qAppsGen2(), bag, 200, cut),
+        /* ORIGINS AND DOMAINS DO NOT HOLD THE PAGE.
+           Measured on production: these two are the per-session summarizes
+           over the window, they each ran past the 30-second execute timeout
+           and polled until t+84s — and the nine queries beside them had
+           finished by t+19s and waited. Worse, nothing downstream could
+           start either: the card, the map and the detail all wait for this
+           loader, and the application they needed was known at t+19s.
+           They are started here, with everything else, and awaited AFTER the
+           first state lands. The page draws what it has; these two fill in
+           when they arrive. */
+        none, none,
+        /* DISCOVERY ASKS ONE QUESTION: which application. Everything else on
+           this list is for a page that will not be drawn until the scoped
+           pass lands, and running it here only to run it again a moment
+           later is what turned a cheaper first load into a slower one — two
+           full round trips where there had been one expensive one.
+           Smartscape stays, because it is free and it names the picker. */
+        discovery ? Promise.resolve([] as CallRow[])
+          : safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, 200, cut),
+        discovery ? Promise.resolve([] as RuntimeRow[])
+          : safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
+        discovery ? none
+          : safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
+        discovery ? Promise.resolve([] as ProblemRow[])
+          : safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 200, cut),
+        discovery ? none
+          : safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
+              Q.DAVIS_ROLLUP_CAP, cut),
+        discovery ? none
+          : safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf),
+              bag, 300, cut),
       ]);
+
+      // the first paint waits for these two only
+      const [scopedApps, appNames] = await Promise.all([censusEarly, namesP]);
       if (cancelled) return;
+      /* The rest fill in. They start empty so the payload can be built
+         immediately, and the same builder runs again when they land — one
+         mapping, written once, so the two landings cannot disagree. */
+      type Rec = Record<string, unknown>;
+      let gen2Apps: Rec[] = [], origins: Rec[] = [], domains: Rec[] = [];
+      let calls: CallRow[] = [], runtime: RuntimeRow[] = [], topology: Rec[] = [];
+      let problems: ProblemRow[] = [], davis: Rec[] = [], signals: Rec[] = [];
+
+      /* A SCOPE THAT MATCHED NOTHING IS NOT AN EMPTY ESTATE.
+         The census is scoped to the application in the url, which is the
+         whole saving — but a url can carry an id this window has never seen:
+         a share link from another tenant, a stale pick, an id that was never
+         a RUM application at all. Scoped, that returns zero rows, and the
+         page rendered an estate with no applications in it while the picker
+         sat on a placeholder. When the scope finds nothing, the estate
+         answers once, the way it did before any of this. */
+      const rawApps = scopedApps.length || !appId
+        ? scopedApps
+        : await safe<Record<string, unknown>>(
+            "applications", Q.qApps(tf, session), bag, 200, cut);
 
       /* Names are keyed three ways. A web app's RUM id is the entity id's hex
        * suffix (ea7c… ↔ APPLICATION-EA7C…), while a mobile app's is a UUID
@@ -364,11 +479,46 @@ export function useChainData(
           && ![...seen].some((s2) => s2.startsWith(hex));
       });
 
-      const fresh = {
-        loading: false,
+      const build = () => ({
+        /* STILL LOADING, ON PURPOSE. A discovery pass has ranked the estate
+           over a short window and nothing else; its numbers must never reach
+           a screen labelled with the selected window. The page keeps its
+           loading state until the scoped pass — which App.tsx triggers the
+           moment it writes the resolved choice into the url — comes back. */
+        /* ...and only while there is something to pick. A discovery pass that
+           found no application has nothing to hand the next pass, so staying
+           in loading would be a spinner with no end behind it. */
+        loading: discovery && rawApps.length > 0,
+        /* These figures came from previews and are still firming up. Real,
+           measured, not yet whole — and said so rather than shown as final. */
+        partial: true,
         errors: bag,
         tf,
         cachedAt: null,
+        /* THE PICKER'S OWN LIST, from Smartscape rather than from the scan.
+           Measured in production: five Smartscape queries scanned 0 bytes
+           between them, while the estate's RUM census was most of a 1.12 TB
+           page. The census answers for the application on screen; the list of
+           applications a reader may choose comes from the inventory, which is
+           free. An application the inventory knows and RUM has not reported
+           on still appears — and the app already has a page for exactly that,
+           which is better than hiding it. */
+        /* ONLY ENTRIES THAT CARRY A RUM ID.
+           The first cut fell back to the entity id when Smartscape had no
+           instrumentation id — and every query in this app keys on the RUM
+           application id, so picking one of those entries scoped the whole
+           page to an id that matches nothing: 33 sessions, zero errors, zero
+           requests, an empty picker. A name that cannot be measured is worse
+           than a name that is absent, because the screen fills with zeros
+           instead of saying it does not know. */
+        inventory: appNames
+          .map((n) => ({
+            appId: String(n.rumId ?? "").trim(),
+            name: String(n.name ?? ""),
+            kind: n.kind ? String(n.kind) : undefined,
+            entity: n.id ? String(n.id) : undefined,
+          }))
+          .filter((a) => a.appId && a.name),
         apps: rawApps.map((r) => {
           const appId = String(r.appId ?? "");
           return {
@@ -463,13 +613,70 @@ export function useChainData(
           status: String(r.status ?? ""), etype: String(r.etype ?? ""),
           entityId: String(r.entityId ?? ""), events: num(r.events),
         })),
-      };
+      });
+      /* FIRST PAINT. Census and names only — everything else is empty here
+         and arrives below. */
+      const fresh = build();
       setState(fresh);
+
+      /* THE SECOND LANDING. The page is already on screen; these only add
+         the origin split, the contacted domains and the census's final
+         figures, so they arrive as a patch rather than as a reason to have
+         waited. The cache is written after them, because a cached payload
+         must be the whole answer. */
+      const [[slowOrigins, slowDomains], finalApps, restParts] =
+        await Promise.all([slow, censusFinal.catch(() => scopedApps), rest]);
+      if (cancelled) return;
+      [gen2Apps, origins, domains, calls, runtime, topology, problems, davis, signals]
+        = restParts;
+      // the same builder, now over the complete parts
+      const whole = build();
+      /* mapped exactly as the eager batch maps them — one shape, one place
+         it is written, or the two landings would disagree about a row */
+      const withSlow = {
+        ...whole,
+        loading: false,
+        partial: false,
+        // the census's final figures replace the preview's, row for row
+        apps: finalApps.length
+          ? whole.apps.map((a) => {
+              const f = finalApps.find((r) => String(r.appId ?? "") === a.appId);
+              return f ? {
+                ...a,
+                sessions: num(f.sessions), views: num(f.views),
+                errors: num(f.errors), crashes: num(f.crashes), anrs: num(f.anrs),
+                p50View: num(f.p50View), p90View: num(f.p90View),
+                p95View: num(f.p95View), p50Load: num(f.p50Load),
+                p50Xhr: num(f.p50Xhr), resPerAct: num(f.resPerAct),
+              } : a;
+            })
+          : whole.apps,
+        origins: slowOrigins.map((r) => ({
+          appId: String(r.appId ?? ""),
+          agent: r.agent as string | null, utype: r.utype as string | null,
+          sessions: num(r.sessions), views: num(r.views),
+          profiles: num(r.profiles),
+          late: r.late == null ? null : num(r.late),
+          hit: r.hitSessions == null ? null : num(r.hitSessions),
+        })),
+        domains: slowDomains.map((r) => ({
+          appId: String(r.appId ?? ""),
+          utype: (r.utype as string | null) ?? null,
+          agent: (r.agent as string | null) ?? null,
+          domain: String(r.domain ?? ""), provider: r.provider as string | null,
+          reqs: num(r.reqs), p50: num(r.p50), p90: num(r.p90), err: num(r.err),
+          bytes: num(r.bytes),
+          late: r.late == null ? null : num(r.late),
+        })),
+      };
+      setState(withSlow);
       // store what was just measured; failure here never reaches the user
-      const { loading: _l, cachedAt: _c, ...payload } = fresh;
+      const { loading: _l, cachedAt: _c, ...payload } = withSlow;
       /* the window's LENGTH decides how long this keeps — the cache key is
          its identity, which is a different question (see ttlFor) */
-      void cache.write(cacheKey, { ...payload, truncated: cut.hit }, tf.minutes);
+      // a discovery payload is not an answer about this window; caching it
+      // would serve short-window numbers under the long window's label
+      if (!discovery) void cache.write(cacheKey, { ...payload, truncated: cut.hit }, tf.minutes);
     })();
 
     return () => { cancelled = true; };

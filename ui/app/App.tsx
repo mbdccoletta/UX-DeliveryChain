@@ -12,7 +12,8 @@ import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
-import { hasTruncation, subscribeScan } from "./utils/cost";
+import { hasTruncation, subscribeScan, scanTotals, scanByLabel,
+  fmtBytes, fmtMoney } from "./utils/cost";
 /* THE FOUR PAGES ARRIVE WHEN THEY ARE OPENED.
  *
  * They used to arrive together: one bundle, 4.0 MB, every route's code loaded
@@ -65,7 +66,26 @@ const TABS: Array<[Tab, string, string]> = [
 ];
 /** Everything a link has to carry for someone else to see the same screen. */
 /** The window the app opens on, in the selector's own grammar. */
-const TF0 = { from: "-2h", to: "now" };
+/* ONE HOUR BY DEFAULT — chosen, not imposed.
+ *
+ * Measured on a bank's production application: a two-hour window was 67
+ * seconds of Grail wait on the first load, and cost scales linearly with the
+ * window; thirty minutes was a quarter of both, but it hid an incident from
+ * forty-five minutes ago until the reader widened the view. An hour is the
+ * trade Marcelo chose: half the cost and wait of two hours, 2-minute bins (so
+ * the beacons' ~3-minute lag is a bin and a half, not three), a forecast
+ * twenty minutes out instead of ten, and the last hour in view. This is a
+ * DEFAULT, which is the whole difference from narrowing a window the reader
+ * picked: the selector says "Last 1 hour", every figure on screen says one
+ * hour, and two hours is one click away in the same list.
+ *
+ * One thing this window does NOT change, and the card says it on screen: an
+ * hour sits exactly inside the ~60 minutes the session store is written
+ * behind live traffic, so the session count still comes from the event scan
+ * and the sessions list will show fewer until they are written — see
+ * useImpacted and withinSessionLag. The promise "the number the button
+ * opens" returns above one hour. */
+const TF0 = { from: "-1h", to: "now" };
 const URL_DEFAULTS = {
   tab: "home", from: TF0.from, to: TF0.to,
   app: null, sel: null, session: null,
@@ -78,6 +98,33 @@ export function App() {
      and cached incomplete figures in silence. */
   const [truncatedScan, setTruncatedScan] = React.useState(false);
   React.useEffect(() => subscribeScan(() => setTruncatedScan(hasTruncation())), []);
+  /* WHAT THIS WINDOW COST, ON THE WINDOW'S OWN SCREEN.
+     cost.ts has counted bytes since the beginning and nothing read the
+     counter, so the one number the reader actually controls — the
+     timeframe — was the one fact the app would not state. Grail reports
+     scannedBytes with every result, so this is free: it is the number the
+     platform already sent, kept rather than discarded, and the tooltip ranks
+     it by what each query read. */
+  /* THE READOUT IS BEHIND A SWITCH, NOT GONE.
+     Removing it entirely cost us the only way to tell whether a saving
+     worked — every claim after that was my estimate rather than a
+     measurement. `?cost=1` in the url brings it back for whoever is tuning
+     the app, and nobody else ever types it. The counting itself never
+     stopped; this only decides who sees it. */
+  const showCost = typeof window !== "undefined"
+    && /[?&]cost=1(&|$)/.test(window.location.search);
+  const [cost, setCost] = React.useState(() => scanTotals());
+  React.useEffect(() => {
+    if (!showCost) return;
+    return subscribeScan(() => setCost(scanTotals()));
+  }, [showCost]);
+
+  /* The cost readout is NOT on screen by default. It was built to answer one question —
+     where does the bill go — and it answered it: 1.12 TB for a two-hour
+     window, 918 GB of it in four estate-wide scans. That is a number for
+     whoever is tuning the app, not a number to put in front of a customer
+     looking at their own experience data. cost.ts keeps counting and
+     labelling, and scanByLabel() is there when it is needed again. */
   const { state, set } = useUrlState<{
     tab: string; from: string; to: string; app: string | null; sel: string | null;
     /** Validation: pin every RUM query to one session. */
@@ -144,7 +191,11 @@ export function App() {
   /* What this window has read stays counted even though nothing prints it any
    * more: the readout is gone, the accounting is not. It is what a ceiling
    * reads before deciding a query is too wide to run. */
-  useEffect(() => { resetScan(`${tf.from}|${tf.to}`); }, [tf.from, tf.to]);
+  /* The page clock (and the bill) restart on a new window AND on a new
+     application: to the reader an application switch is a first load, and
+     the ten-second objective applies to it the same way. */
+  useEffect(() => { resetScan(`${tf.from}|${tf.to}|${state.app ?? ""}`); },
+    [tf.from, tf.to, state.app]);
 
   /** A journey handed back to the flow to be re-picked; saving replaces it. */
   /* Pressing "define a conversion journey" anywhere must START the process,
@@ -162,17 +213,23 @@ export function App() {
      changes what is scanned. */
   const d = useChainData(tf, state.session, state.app);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
-  const uxMap = useUxOverview(tf, state.app);
+  /* NOBODY PAYS FOR THE ESTATE SCAN BY DEFAULT.
+     The first cut had the Overview pay for it, which defeats the point: the
+     Overview is the page everyone lands on. That scan was ~500 GB — Grail
+     truncated it — and it bought one comparison sentence. The sentence is
+     gone; every number on the card is still measured, and the card no longer
+     claims a comparison it did not pay for. */
+  const uxMap = useUxOverview(tf, state.app, false);
   /* Users & Sessions filters by frontend.name, not the inventory name —
    * see useFrontendNames for the measured mismatch. */
-  const feNames = useFrontendNames();
+  const feNames = useFrontendNames(tf.minutes);
   /* journeys data only where journeys are read (Journeys + Business
    * Control) — four user.events scans Overview and the chain stopped paying */
   /* warmed the moment the pointer TOUCHES the Journeys/Business Control
    * tab — by the click, the four scans are usually already in flight */
   const [warmJourneys, setWarmJourneys] = useState(false);
   const jd = useJourneys(tf,
-    warmJourneys || tab === "flow" || tab === "report", state.session);
+    warmJourneys || tab === "flow" || tab === "report", state.session, state.app);
   // the customer's own conversion definitions — taught on Journeys, read by
   // every screen that speaks of conversion
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
@@ -183,11 +240,36 @@ export function App() {
    * reader's screenshot. Unknown falls back exactly like null does: to the
    * busiest application. While loading, the url's choice stands so the
    * selection does not flicker away and back. */
-  const current = d.loading
-    ? (appId ?? "")
-    : appId && d.apps.some((a) => a.appId === appId)
-      ? appId
-      : d.apps[0]?.appId ?? "";
+  /* THE CHOICE HAS TO EXIST BEFORE THE LOAD FINISHES.
+     The cold load is a discovery pass now: it ranks the estate cheaply and
+     stays in its loading state on purpose, because its numbers belong to a
+     short window. The pass that measures properly is triggered by the url
+     gaining an application — and the effect below used to wait for loading
+     to END before writing it. Neither could move: the load waited for a
+     choice, the choice waited for the load.
+     So a resolved application counts the moment the census names one, loaded
+     or not. While there are no rows at all, the url's own choice stands, so
+     the selection does not flicker away and back. */
+  const current = appId && d.apps.some((a) => a.appId === appId)
+    ? appId
+    : d.apps[0]?.appId ?? (d.loading ? (appId ?? "") : "");
+  /* THE AUTO-PICK HAS TO REACH THE SCANS.
+   *
+   * Measured in production: a two-hour window cost 1.12 TB, and 918 GB of it
+   * was four estate-wide scans of user.events. Two of those four are
+   * qOrigins and qDomains, which were scoped in 0.9.77 — scoped to
+   * `state.app`. On a first load nobody has picked anything: the app on
+   * screen is the busiest one, chosen here, and the url still says null, so
+   * the scans kept reading the whole estate for an application the reader
+   * could already see named in the header.
+   *
+   * Writing the resolved choice back into the url closes that gap: the
+   * selection becomes explicit, the scans scope to it, the link is
+   * shareable, and the reader sees no difference at all. */
+  useEffect(() => {
+    if (current && state.app !== current) set({ app: current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
   // the engineer's reading of the same anatomy Business Control speaks in
   // business words — shown on the two technical pages, one scan shared
   // the flow page reads its technical vitals from the INFOGRAPHIC now, where
@@ -201,8 +283,35 @@ export function App() {
    * prefix stays as the fallback for apps that have no such node. */
   const isMobile = (a: { kind?: string; entity?: string }) =>
     a.kind ? a.kind === "mobile" : !!a.entity?.startsWith("MOBILE_APPLICATION-");
-  const mobileApps = d.apps.filter(isMobile);
-  const webApps = d.apps.filter((a) => !isMobile(a));
+  /* THE PICKER READS THE INVENTORY, NOT THE SCAN.
+     Smartscape lists every frontend for nothing — measured in production,
+     five topology queries scanned zero bytes between them — while the RUM
+     census that used to fill this list was most of a 1.12 TB page. The
+     census now answers for the application on screen; the list of
+     applications a reader may choose is free.
+     An application the inventory knows and RUM has not reported on now
+     appears. That is a gain, not a leak: the app has a page that measures
+     what such an environment DOES send and says which half of the product it
+     supports, which beats a name that silently does not exist. */
+  /* THE MEASURED ROWS ALWAYS BELONG IN THE LIST.
+     The inventory is the cheap source, not the authoritative one: an
+     application RUM is reporting on right now but Smartscape has not
+     catalogued would vanish from the picker — including, on a bad day, the
+     one already on screen, which is how the select ended up on its
+     placeholder. Union, keyed by the RUM id, inventory first for the name. */
+  const pick = React.useMemo(() => {
+    const by = new Map<string, { appId: string; name: string;
+      kind?: string; entity?: string }>();
+    for (const a of d.inventory) by.set(a.appId.toLowerCase(), a);
+    for (const a of d.apps) {
+      const k = a.appId.toLowerCase();
+      if (!by.has(k)) by.set(k, { appId: a.appId, name: a.name,
+        kind: a.kind, entity: a.entity });
+    }
+    return [...by.values()].sort((x, y) => x.name.localeCompare(y.name));
+  }, [d.inventory, d.apps]);
+  const mobileApps = pick.filter(isMobile);
+  const webApps = pick.filter((a) => !isMobile(a));
 
   const view = TABS.find(([id]) => id === tab);
 
@@ -230,13 +339,30 @@ export function App() {
           ))}
         </AppHeader.Navigation>
         <AppHeader.ActionItems>
+          {showCost && cost.queries > 0 && (
+            <AppHeader.ActionButton
+              aria-label="What this window has cost to measure"
+              title={`${cost.queries} queries scanned ${fmtBytes(cost.bytes)} for the `
+                + `window on screen — about ${fmtMoney(cost.bytes)} at the published `
+                + `DPS list rate. Grail bills by BYTES SCANNED, so the timeframe is the `
+                + `biggest lever and it is linear.\n\nWhere it went:\n`
+                + scanByLabel().slice(0, 8)
+                  .map((r) => `  ${fmtBytes(r.bytes)}  ${r.label}  (${r.n}`
+                    + `${r.cut ? `, ${r.cut} truncated` : ""})`)
+                  .join("\n")}>
+              {fmtBytes(cost.bytes)} scanned
+            </AppHeader.ActionButton>
+          )}
           {/* app-wide action: how old the numbers are, and how to refresh them */}
           <AppHeader.ActionButton
             onClick={d.refresh}
-            aria-label={d.cachedAt
-              ? "These numbers came from the cache. Re-query Grail."
-              : "Measured just now. Re-query Grail."}>
+            aria-label={d.partial
+              ? "Preview figures — real, measured, and still firming up as Grail finishes."
+              : d.cachedAt
+                ? "These numbers came from the cache. Re-query Grail."
+                : "Measured just now. Re-query Grail."}>
             {d.loading ? "loading…"
+              : d.partial ? "measuring…"
               : d.cachedAt ? `cached ${Math.round((Date.now() - d.cachedAt) / 1000)}s ago` : "live"}
           </AppHeader.ActionButton>
         </AppHeader.ActionItems>
@@ -275,7 +401,7 @@ export function App() {
               {/* the estate line (apps · sessions · problems · env alerts)
                   was removed by request — the pages themselves carry their
                   numbers, and the bar keeps only the controls */}
-              {!d.loading && d.apps.length > 0 && (
+              {!d.loading && pick.length > 0 && (
                 <Select
                   value={current}
                   onChange={(v) => { if (v) setAppId(v as string); }}>

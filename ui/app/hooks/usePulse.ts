@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import { qPulseBreakdown, qPulseSeries, qSessionSeries, runDql,
-  type Timeframe } from "../utils/dql";
+  withinSessionLag, type Timeframe } from "../utils/dql";
 
 export interface PulsePoint {
   t: string; sessions: number; errors: number; actions: number; requests: number;
@@ -80,10 +80,15 @@ export function usePulse(
     (async () => {
       let out: PulseData | null = null;
       try {
+        /* The breakdown scan is the slow one on a large application; its
+           preview lets the card's bars and KPIs appear while it finishes. */
         const [series, tuples, sess] = await Promise.all([
           runDql<Record<string, unknown>>(qPulseSeries(tf!, rumAppId!), 200),
           runDql<Record<string, unknown>>(qPulseBreakdown(tf!, rumAppId!), 500),
-          fe ? runDql<Record<string, unknown>>(qSessionSeries(tf!, fe), 200)
+          // not inside the store's lag: there the series would be empty by
+          // construction, and the event series is the honest one
+          fe && !withinSessionLag(tf!)
+            ? runDql<Record<string, unknown>>(qSessionSeries(tf!, fe), 200)
                  .catch(() => [] as Record<string, unknown>[])
              : Promise.resolve([] as Record<string, unknown>[]),
         ]);
