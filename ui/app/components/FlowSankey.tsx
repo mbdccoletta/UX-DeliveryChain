@@ -71,6 +71,34 @@ const TONE: Record<Tone, string> = {
 };
 const cssVar = (n: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
 
+/* THE FLOW PALETTE. Six hues that are deliberately NOT the status trio, so a
+ * coloured ribbon can never be mistaken for a verdict. Picked for separation
+ * at low saturation on both grounds, and kept stable per destination so the
+ * same stage wears the same colour on every render. */
+const FLOW_HUE = ["#5b7cfa", "#8b5cf6", "#2aa8b8", "#9a6cff",
+  "#4f8fd1", "#b06ab3"];
+const hueSeen = new Map<string, number>();
+const hueOf = (id: string): number => {
+  const hit = hueSeen.get(id);
+  if (hit !== undefined) return hit;
+  const n = hueSeen.size % FLOW_HUE.length;
+  hueSeen.set(id, n);
+  return n;
+};
+
+/** Text that reads over anything, without a box under it. */
+function stepHalo(ctx2: CanvasRenderingContext2D, txt: string, x: number, y: number,
+  dim: boolean): void {
+  ctx2.save();
+  ctx2.lineJoin = "round";
+  ctx2.lineWidth = 3.5;
+  ctx2.strokeStyle = cssVar("--bg");
+  ctx2.globalAlpha = dim ? 0.5 : 0.92;
+  ctx2.strokeText(txt, x, y);
+  ctx2.restore();
+  ctx2.fillText(txt, x, y);
+}
+
 /* ONE ALPHA CANNOT SERVE TWO GROUNDS.
  * A ribbon is drawn translucent so the ones behind it still read. Over white,
  * 26% of amber composites to a pale wash — fine. Over near-black the SAME 26%
@@ -884,6 +912,9 @@ export function FlowSankey({
 
       const col = (t: Tone) => cssVar(TONE[t]);
       const darkGround = groundIsDark();
+      /* The ribbons were desaturated status colours for one version. That
+         was the wrong problem: the issue is not that red was too loud, it is
+         that a ribbon is not a status. See the neutral below. */
       ctx.font = "700 11px monospace";
       ctx.fillStyle = cssVar("--ink-2");
       cols.forEach((t, i) => {
@@ -943,12 +974,48 @@ export function FlowSankey({
         // path, near-invisible when dimmed — labels must win over ribbons
         /* see groundIsDark: over black a ribbon needs most of its colour to
            read as that colour at all; over white it needs a third of it */
-        const a = dim ? (darkGround ? "1f" : "0d")
-          : sel ? (darkGround ? "f2" : "8c")
-          : darkGround ? "c4" : "59";
+        /* QUIET, NOT BRIGHT. The first neutral pass kept the opacity that a
+           saturated colour needed and the chart turned into a wall of light
+           grey — the ribbons out-shouting the labels drawn on top of them,
+           which is the same mistake as before wearing a different colour.
+           A ribbon is the quietest thing here: it recedes toward the ground
+           and the marks and the words sit above it. Grey can be dropped this
+           far without the muddiness a hue would pick up, because there is no
+           hue left to shift. */
+        const a = dim ? (darkGround ? "1a" : "0d")
+          : sel ? (darkGround ? "cc" : "8c")
+          : darkGround ? "9e" : "4d";
+        /* RED, AMBER AND GREEN ARE STATUS. THEY ARE NOT FLOW.
+         *
+         * The ribbons carried the status palette, so a third of the screen
+         * was painted in the three colours the rest of the product reserves
+         * for a judgement — and the judgement was about the STAGE a session
+         * reached, which the node bar and the label already state. A reader
+         * scanning for trouble found red everywhere and had no way to know
+         * that most of it meant "went two views in".
+         *
+         * A ribbon says HOW MANY and WHERE TO, never HOW BAD. It is drawn in
+         * one neutral, with its width carrying the only quantity it owns. The
+         * status colour stays on the bar at each end and in the words beside
+         * it, where it is a verdict about one named thing.
+         *
+         * The lit path takes the accent — identity, not status: it marks what
+         * the reader picked, which is not a health claim. */
+        /* IDENTITY HUES, NOT STATUS ONES — and not a grey desert either.
+           Stripping the colour out made the point and lost the picture: a
+           Sankey with one tone is a pile of ribbons nobody can follow across
+           three columns. The flow is coloured by WHERE IT GOES, from a palette
+           that contains no red, no amber and no green, so a hue here names a
+           destination and never grades it. Ribbons landing on the same stage
+           share a colour, which is what makes a route traceable; the stage's
+           own bar keeps the status token beside it. */
+        const field = (t: Tone, id: string) =>
+          (sel ? cssVar("--accent") : FLOW_HUE[hueOf(id)] ?? FLOW_HUE[0]) || (void t, "#888");
         const g = ctx.createLinearGradient(x0, 0, x1, 0);
-        g.addColorStop(0, col(s.tone) + a);
-        g.addColorStop(1, col(l.tone) + a);
+        // both stops take the DESTINATION's hue: a ribbon is one thing going
+        // one place, and a gradient between two identities reads as a third
+        g.addColorStop(0, field(s.tone, l.t) + a);
+        g.addColorStop(1, field(l.tone, l.t) + a);
         ctx.fillStyle = g;
         ctx.fill();
       }
@@ -1039,26 +1106,35 @@ export function FlowSankey({
           ctx.font = SUB_F; const w2 = ctx.measureText(subTxt).width;
           const bw = Math.max(w1, w2), cy = n.y + n.h / 2;
           const lx = fitX(tx - bw / 2, bw);
-          ctx.globalAlpha = dim ? 0.55 : 0.97;
-          ctx.fillStyle = cssVar("--bg");
-          ctx.fillRect(lx - 6, cy - 14, bw + 12, 31);
           ctx.globalAlpha = dim ? 0.25 : 1;
           ctx.font = NM_F;
           ctx.fillStyle = dim ? cssVar("--ink-3") : cssVar("--ink");
-          ctx.fillText(n.nm, lx, cy - 2);
+          stepHalo(ctx, n.nm, lx, cy - 2, !!dim);
           ctx.font = SUB_F;
           ctx.fillStyle = subCol;
-          ctx.fillText(subTxt, lx, cy + 12);
+          stepHalo(ctx, subTxt, lx, cy + 12, !!dim);
           ctx.globalAlpha = 1;
           continue;
         }
-        // backing plate: labels must stay readable over any ribbon behind them
-        const plate = (bx: number, by: number, bw: number, bh: number) => {
-          ctx.globalAlpha = dim ? 0.55 : 0.97;
-          ctx.fillStyle = cssVar("--bg");
-          ctx.fillRect(bx, by, bw, bh);
-          ctx.globalAlpha = dim ? 0.25 : 1;
+        /* NO BOXES. A label used to sit on a filled rectangle so it would
+           read over any ribbon behind it — nineteen little dark panels
+           scattered across the picture, each one punching a hole in the flow
+           it was describing. The text is haloed instead: the same glyphs
+           stroked in the background colour first and filled on top, which
+           buys the same legibility and leaves the diagram whole.
+           Drawn per label because the stroke has to follow the text, so
+           there is nothing to position and nothing to size. */
+        const halo = (txt: string, x: number, y: number) => {
+          ctx.save();
+          ctx.lineJoin = "round";
+          ctx.lineWidth = 3.5;
+          ctx.strokeStyle = cssVar("--bg");
+          ctx.globalAlpha = dim ? 0.5 : 0.92;
+          ctx.strokeText(txt, x, y);
+          ctx.restore();
+          ctx.fillText(txt, x, y);
         };
+        const plate = (_bx: number, _by: number, _bw: number, _bh: number) => {};
         if (!left && n.h < 24) {
           // thin ribbon: one line, or stacked labels of adjacent nodes collide
           ctx.font = NM_F; const w1 = ctx.measureText(n.nm).width;
@@ -1070,10 +1146,10 @@ export function FlowSankey({
           plate(lx - 4, cy - 9, bw + 8, 18);
           ctx.font = NM_F;
           ctx.fillStyle = dim ? cssVar("--ink-3") : cssVar("--ink");
-          ctx.fillText(n.nm, lx, cy + 4);
+          halo(n.nm, lx, cy + 4);
           ctx.font = SUB_F;
           ctx.fillStyle = subCol;
-          ctx.fillText(subTxt, lx + w1 + 9, cy + 4);
+          halo(subTxt, lx + w1 + 9, cy + 4);
           labelled.add(n.id);
         } else {
           ctx.font = NM_F; const w1 = ctx.measureText(n.nm).width;
@@ -1085,10 +1161,10 @@ export function FlowSankey({
           plate(lx - 4, cy - 13, bw + 8, 30);
           ctx.font = NM_F;
           ctx.fillStyle = dim ? cssVar("--ink-3") : cssVar("--ink");
-          ctx.fillText(n.nm, lx, cy - 2);
+          halo(n.nm, lx, cy - 2);
           ctx.font = SUB_F;
           ctx.fillStyle = subCol;
-          ctx.fillText(subTxt, lx, cy + 12);
+          halo(subTxt, lx, cy + 12);
           labelled.add(n.id);
         }
         ctx.globalAlpha = 1;

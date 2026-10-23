@@ -14,9 +14,11 @@ export interface LayerStats { devices: DeviceRow[]; paths: PathRow[] }
 
 const memo = new Map<string, LayerStats>();
 
-export function useLayerStats(tf: Timeframe, active: boolean): LayerStats | null {
+export function useLayerStats(
+  tf: Timeframe, active: boolean, appId?: string | null,
+): LayerStats | null {
   const gen = useMemoGen();
-  const key = active ? `${tf.from}|${tf.to}|${gen}` : "";
+  const key = active ? `${tf.from}|${tf.to}|${appId ?? ""}|${gen}` : "";
   const [out, setOut] = useState<LayerStats | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -26,8 +28,8 @@ export function useLayerStats(tf: Timeframe, active: boolean): LayerStats | null
     (async () => {
       try {
         const [devices, paths] = await Promise.all([
-          runDql<Record<string, unknown>>(qDevices(tf), 200),
-          runDql<Record<string, unknown>>(qPaths(tf), 200),
+          runDql<Record<string, unknown>>(qDevices(tf, null, appId), 200),
+          runDql<Record<string, unknown>>(qPaths(tf, appId), 200),
         ]);
         const res: LayerStats = {
           devices: devices.map((r) => ({
@@ -50,7 +52,7 @@ export function useLayerStats(tf: Timeframe, active: boolean): LayerStats | null
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, appId]);
 
   return out;
 }

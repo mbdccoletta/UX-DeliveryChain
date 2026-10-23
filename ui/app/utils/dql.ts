@@ -2,7 +2,7 @@
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import { FC_HIST_CAP_MIN, histWindow } from "./forecast";
-import { isScanLimit, noteScan, noteScanStart } from "./cost";
+import { isScanLimit, noteScan, noteScanStart, pageBudgetMs } from "./cost";
 import { APDEX_T_NS, APDEX_4T_NS } from "./apdex";
 
 /**
@@ -118,7 +118,65 @@ export function binFor(minutes: number): string {
 }
 
 /** Runs DQL, polling until the result is ready. */
-export async function runDql<T = Record<string, unknown>>(
+/* ONE QUERY, ONE SCAN — however many callers ask for it.
+ *
+ * Measured on a production load: four queries were executed TWICE within two
+ * seconds of each other, including the two heaviest. Nothing in the app asks
+ * for the same thing twice on purpose; it happens because a memo key firms up
+ * late — a frontend name resolving, an application id landing in the url —
+ * and the hook that depends on it re-asks a question already in flight. The
+ * hooks cannot see each other, so the dedupe belongs here, where the question
+ * itself is visible.
+ *
+ * Keyed on the query text and the row cap, which together ARE the question.
+ * A second caller gets the first caller's promise and its previews; the scan
+ * is counted, billed and polled once. The entry is dropped as soon as it
+ * settles, so this is a dedupe of concurrent work, never a cache — a later
+ * ask of the same question still re-measures, which is what every caller's
+ * own memo is for.
+ */
+const inFlightDql = new Map<string, {
+  p: Promise<unknown[]>;
+  subs: Array<(rows: unknown[]) => void>;
+}>();
+
+export interface DqlOptions {
+  /**
+   * Retained for call-site compatibility; it no longer changes behaviour.
+   * There was, for a few versions, a mode that let a query SETTLE on a
+   * preview that had come back identical on consecutive polls, cancelling
+   * the scan behind it. It was removed on a data-integrity rule: a preview
+   * is the answer over a PARTIAL scan — for a count, a floor — and stability
+   * between two polls does not prove completeness. A figure that might be
+   * low must never be the figure, however it is labelled. Every query now
+   * runs to its final answer; previews only let the screen paint sooner.
+   */
+  settle?: boolean;
+}
+
+export function runDql<T = Record<string, unknown>>(
+  query: string,
+  maxResultRecords = 200,
+  onTruncated?: () => void,
+  onPartial?: (rows: T[]) => void,
+  opts: DqlOptions = {},
+): Promise<T[]> {
+  const key = `${maxResultRecords}\u0000${query}`;
+  const hit = inFlightDql.get(key);
+  if (hit) {
+    if (onPartial) hit.subs.push(onPartial as (rows: unknown[]) => void);
+    return hit.p as Promise<T[]>;
+  }
+  const subs: Array<(rows: unknown[]) => void> = [];
+  if (onPartial) subs.push(onPartial as (rows: unknown[]) => void);
+  const p = runDqlOnce<T>(query, maxResultRecords, onTruncated, (rows) => {
+    for (const f of subs) { try { f(rows as unknown[]); } catch { /* a draw must never break a fetch */ } }
+  }, opts).finally(() => { inFlightDql.delete(key); });
+  inFlightDql.set(key, { p: p as Promise<unknown[]>, subs });
+  return p;
+}
+
+async function runDqlOnce<T = Record<string, unknown>>(
   query: string,
   maxResultRecords = 200,
   /**
@@ -131,11 +189,54 @@ export async function runDql<T = Record<string, unknown>>(
    * or caches a result needs the fact for that result, so it can ask for it.
    */
   onTruncated?: () => void,
+  /**
+   * Called with PARTIAL rows while the query is still running, whenever the
+   * platform has a preview to give. May fire several times, always with the
+   * best answer so far, and is always followed by the real return value.
+   * Callers that take it must say on screen that the figure is not final.
+   */
+  onPartial?: (rows: T[]) => void,
+  _opts: DqlOptions = {},
 ): Promise<T[]> {
   noteScanStart();
+  /* PREVIEW RESULTS: THE PLATFORM OFFERS THEM AND WE WERE NOT ASKING.
+   *
+   * Measured on a bank's production tenant: a scoped two-hour scan of one
+   * large application takes 20 to 30 seconds, and the page had nothing to
+   * show for the whole of it. `enablePreview` is documented as returning a
+   * partial answer as part of the response whenever one is available inside
+   * the request timeout — so the cost of not asking was a blank screen for
+   * half a minute while the platform already had numbers in hand.
+   *
+   * It changes the contract: a caller can be handed a figure that is REAL
+   * but not yet whole. Nothing is drawn as final on that basis — onPartial
+   * is opt-in, and the hooks that take it mark what they show as still
+   * measuring. A number that firms up in front of the reader is honest; a
+   * partial number wearing a final number's clothes is the one thing this
+   * app refuses to do. */
+  /* THE EXECUTE RETURNS FAST SO THE DEADLINE BELOW CAN GOVERN. At 30s a
+     query with no early preview could block the whole budget inside this one
+     call. At four seconds it comes back RUNNING, and the loop — which owns
+     the clock — takes over. */
+  const started = Date.now();
+  /* THE PAGE'S REMAINING BUDGET CAPS THIS QUERY. During the first load every
+     query shares the page's ten seconds: a query that starts at t+6 has four
+     left, not eight. Once the load's budget has elapsed, a query is a user
+     interaction and gets the per-query bound on its own — a drill opened a
+     minute later must not fail on sight. */
+  const pageLeft = pageBudgetMs();
+  const HARD_DEADLINE_MS = pageLeft == null ? 8000 : Math.max(1200, Math.min(8000, pageLeft - 500));
   let res = await queryExecutionClient.queryExecute({
-    body: { query, requestTimeoutMilliseconds: 30000, maxResultRecords },
+    body: {
+      query, requestTimeoutMilliseconds: Math.min(4000, HARD_DEADLINE_MS), maxResultRecords,
+      enablePreview: true,
+    } as never,
   });
+  /* The execute itself can come back with a preview attached. */
+  if (onPartial && res.state !== "SUCCEEDED") {
+    const early = (res.result?.records ?? []) as T[];
+    if (early.length) { try { onPartial(early); } catch { /* a draw must never break a fetch */ } }
+  }
   /* THE TOKEN COMES FROM THE EXECUTE, AND ONLY FROM IT.
    *
    * This polled with `res.requestToken` — the token off the LATEST response.
@@ -157,15 +258,63 @@ export async function runDql<T = Record<string, unknown>>(
    * wait on a query that never finishes is a page that never loads, which is
    * exactly what a large estate was showing. */
   const token = res.requestToken;
-  const MAX_POLLS = 150; // 400ms apart — a minute of patience, then an answer
+  /* THE POLL BACKS OFF, because the preview already answered.
+   *
+   * At a flat 400ms a thirty-second query costs seventy-five round trips, and
+   * a production page load spent 391 of them — all on the same connection as
+   * the queries still being issued, and each one about half a second of
+   * latency in its own right. That cadence was buying responsiveness the app
+   * no longer needs from polling: the preview puts numbers on screen in a few
+   * seconds, so what is left to wait for is the FINAL figure, which nobody is
+   * staring at a spinner for.
+   * Quick at first, because most queries finish almost at once; slower after,
+   * where the only cost of waiting is a number firming up a second later. */
+  const waitFor = (i: number) => (i < 6 ? 400 : 800);
+  const MAX_POLLS = 60;
+  /* SETTLING ON A STABLE PREVIEW — the definitive answer to "still slow".
+   *
+   * Measured on a bank's production application: with previews, every
+   * query had real rows on screen inside two seconds — and then polled for
+   * another fifty while the figure did not move, because the final answer
+   * of a per-session scan over millions of sessions is simply slow to
+   * compute. Sixty-seven of a page's seventy seconds were the server
+   * finishing work whose result the reader already had. And the platform
+   * finishes — and bills — that scan whether or not anyone is still waiting.
+   *
+   * So a caller that opts in gets this rule: once a preview has come back
+   * IDENTICAL on consecutive polls, and enough time has passed that the
+   * sameness is not an accident of two polls landing on one checkpoint, the
+   * preview is the answer. The scan is cancelled on the server, so the bytes
+   * it would still have read are not read and not charged. The rows are
+   * marked, so the screen can say "preview" rather than claiming a final.
+   *
+   * Opt-in only. The Overview takes it — it is a summary, and a summary that
+   * is stable to the last poll is a summary. A drill-down does not: opening
+   * a table is an explicit "measure this", and it measures to the end. */
+  /* THE PAGE'S TEN SECONDS GOVERN THE CADENCE, NEVER THE ANSWER.
+   *
+   * Inside the budget the loop polls quickly, so a final that is ready lands
+   * at once and a preview reaches the screen the moment Grail has one. Past
+   * it, the loop is patient: whatever is still running will be a late final
+   * replacing a marked preview, and nobody is staring at a spinner for it.
+   * Nothing is cancelled on the clock. The only cancel is the runaway guard
+   * at MAX_POLLS, for a query that will never answer. */
   for (let i = 0; res.state === "RUNNING" || res.state === "NOT_STARTED"; i++) {
     if (!token) { noteScan(0); throw new Error("DQL started with no request token"); }
     if (i >= MAX_POLLS) {
+      try { await queryExecutionClient.queryCancel({ requestToken: token }); } catch { /* best effort */ }
       noteScan(0);
-      throw new Error("DQL still running after 60s — narrow the window or the scope");
+      throw new Error("DQL still running after two minutes — narrow the window or the scope");
     }
-    await new Promise((r) => setTimeout(r, 400));
+    const elapsed = Date.now() - started;
+    const past = elapsed >= HARD_DEADLINE_MS;
+    await new Promise((r) => setTimeout(r, past ? 1500 : Math.min(waitFor(i), Math.max(50, HARD_DEADLINE_MS - elapsed))));
     res = await queryExecutionClient.queryPoll({ requestToken: token });
+    // a poll can carry a better preview than the last one — it paints, it decides nothing
+    if (onPartial && res.state !== "SUCCEEDED") {
+      const partial = (res.result?.records ?? []) as T[];
+      if (partial.length) { try { onPartial(partial); } catch { /* never break the fetch */ } }
+    }
   }
   if (res.state !== "SUCCEEDED") { noteScan(0); throw new Error(`DQL ${res.state}`); }
   /* What this query cost — and whether Grail finished it. A fetch stopped at
@@ -178,7 +327,16 @@ export async function runDql<T = Record<string, unknown>>(
     ?.metadata?.grail;
   const notes = grail?.notifications ?? [];
   const cut = notes.some((n) => isScanLimit(n?.message));
-  noteScan(Number(grail?.scannedBytes ?? 0), cut);
+  /* WHAT THIS QUERY READ, in four words, derived from the query itself so no
+     call site has to be told. The source is most of the cost story, and
+     whether it was scoped to one application is the rest. */
+  const src = /fetch\s+([a-z0-9._]+)/i.exec(query)?.[1]
+    ?? (/^\s*timeseries/i.test(query) ? "metrics"
+      : /smartscape(Nodes|Edges)/i.test(query) ? "smartscape" : "query");
+  const scoped = /dt\.rum\.application\.id\s*==/.test(query)
+    || /frontend\.name/.test(query) || /dt\.entity\.service\s*==/.test(query);
+  noteScan(Number(grail?.scannedBytes ?? 0), cut,
+    `${src}${scoped ? " · one app" : " · estate"}`);
   if (cut) onTruncated?.();
   const rows = (res.result?.records ?? []) as T[];
   /* A WARNING PLUS AN EMPTY ANSWER IS NOT AN ANSWER.
@@ -228,8 +386,22 @@ export const onlySession = (id?: string | null) =>
 export const scopeApp = (rumAppId?: string | null) =>
   rumAppId ? `\n| filter dt.rum.application.id == "${String(rumAppId).replace(/["\\]/g, "")}"` : "";
 
-export const qApps = (tf: Timeframe, session?: string | null) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+/**
+ * SCOPED ONCE THERE IS A CHOICE.
+ *
+ * This is the estate's own census: every application, with the sessions,
+ * views, errors and percentiles the window holds. The picker was built from
+ * it, which is why it had to read everything — and measured on a bank's
+ * production tenant, the estate-wide RUM scans were 918 GB of a 1.12 TB page.
+ *
+ * The picker is built from Smartscape now (a topology read: 0 bytes scanned,
+ * measured), so this query no longer has to answer for applications nobody is
+ * looking at. It stays estate-wide for the first load, when there is nothing
+ * to scope to and the busiest application is what decides the default.
+ */
+export const qApps = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 | summarize sessions = countDistinct(dt.rum.session.id),
     views = countIf(characteristics.classifier == "view_summary"),
     errors = countIf(characteristics.classifier == "error"),
@@ -374,9 +546,17 @@ fetch user.sessions, from: ${tf.from}, to: ${tf.to}
  * sessions hand-off opens unfiltered, and the impact scan, the trend and the
  * forecast all fall back from the session store to the event store. The
  * failure is invisible, which is the worst kind, so the ceiling is sized for
- * a real estate. */
-export const qFrontendNames = () => `
-fetch user.sessions, from: now()-24h
+ * a real estate.
+ *
+ * THE WINDOW WAS A FLAT 24 HOURS, and it cost 128 GB of a production
+ * tenant's 1.12 TB page — the single most expensive query on the screen,
+ * for a lookup table of names. It follows the selected window now, with a
+ * three-hour floor so a short selection still names the applications the
+ * reader can choose. An application with no session in that window has no
+ * sessions to hand off either, so the name it loses was not going to be
+ * used. */
+export const qFrontendNames = (minutes = 180) => `
+fetch user.sessions, from: now()-${Math.max(180, Math.round(minutes))}m
 | expand ent = dt.rum.application.entities
 | expand fe = frontend.name
 | summarize n = count(), by: {ent, fe}
@@ -384,8 +564,9 @@ fetch user.sessions, from: now()-24h
 | limit 1000`;
 
 /** Detected views per application (journeys). */
-export const qViews = (tf: Timeframe, session?: string | null) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+export const qViews = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 | filter characteristics.classifier == "view_summary" and isNotNull(${VIEW_NAME})
 // Normalised before the aggregation, for the same reason the journeys are: the
 // limit is applied after grouping, so one uncollapsed id splits a real view
@@ -445,8 +626,9 @@ const COLLAPSE_IDS = `
 | fieldsAdd v = if(arraySize(_seg) > 3, concat("/", _seg[1], "/", _seg[2], "/*"), else: v)
 | fieldsRemove _seg, _n, _last`;
 
-export const qSequences = (tf: Timeframe, session?: string | null) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+export const qSequences = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 // UNION of navigation and view_summary, because coverage inverts between
 // environments: on one estate navigation covered 100% of sessions and
 // view_summary 76%; on another, 72 sessions carried ONLY view_summary. Both
@@ -1133,8 +1315,9 @@ const norm = (src: string, out = "v") => `
  * whether it ended in the tab being closed or the action timing out.
  * Web only: user_action is not emitted by OneAgent for Mobile.
  */
-export const qTransitions = (tf: Timeframe, session?: string | null) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+export const qTransitions = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 | filter characteristics.classifier == "user_action" and isNotNull(view.source.detected_name)
 ${norm("view.source.detected_name", "s")}
 ${norm(VIEW_NAME, "d")}
@@ -1155,8 +1338,9 @@ ${norm(VIEW_NAME, "d")}
  * element's own text is masked by the privacy settings — the tag and the xpath
  * are what the platform exposes.
  */
-export const qFriction = (tf: Timeframe, session?: string | null) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+export const qFriction = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 | filter characteristics.classifier == "user_action"
 | filter user_action.complete_reason == "page_hide"
      or user_action.complete_reason == "timeout" or cls.value > 0.1
@@ -1183,8 +1367,9 @@ ${norm(VIEW_NAME)}
  * Astroshop over 24h: 8,911 sessions shown against 11,910 real, a quarter of
  * the audience missing from the layer that exists to show the audience.
  */
-export const qDevices = (tf: Timeframe, session?: string | null) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}
+export const qDevices = (tf: Timeframe, session?: string | null,
+  rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
 | summarize res = takeAny(concat(device.screen.width, "×", device.screen.height)),
     dpr = takeAny(toString(browser.window.device_pixel_ratio)),
     orient = takeAny(device.orientation),
@@ -1411,7 +1596,39 @@ export const SESSION_LAG_MIN = 60;
 
 /** The series' end: pulled back off a LIVE window, untouched on a past one. */
 export const seriesEnd = (tf: Timeframe): string =>
-  /^now\(?\)?$/i.test(tf.to.trim()) ? `now()-${SESSION_LAG_MIN}m` : tf.to;
+  /^now\(?\)?$/i.test(tf.to.trim()) && tf.minutes > SESSION_LAG_MIN
+    ? `now()-${SESSION_LAG_MIN}m` : tf.to;
+
+/**
+ * True when a live window sits entirely inside the session store's lag — a
+ * 30-minute default, say. Pulling the series' end back by an hour on such a
+ * window would make `from` later than `to`, and the store has nothing yet for
+ * the window anyway. Consumers switch to the event store for the window's
+ * duration and say so.
+ */
+/**
+ * HOW FAR BEHIND LIVE THE EVENT STREAM ITSELF RUNS.
+ *
+ * Measured on a bank's production application, a 30-minute window binned by
+ * the minute: 170k, 144k, 134k, 91k, 54k, then 819 sessions in the newest
+ * bin. Nothing happened to the traffic — RUM beacons arrive minutes after
+ * the thing they report, so the last few bins of any live window are still
+ * filling. On a 2-hour window that is one partial 5-minute bin and nobody
+ * sees it. On a 30-minute window with 1-minute bins it is a cliff: the chart
+ * paints a collapse that is not there, and a forecast trained on it
+ * extrapolates zeros — VALID to the analyzer, nonsense to the reader.
+ *
+ * So a live series stops a few minutes short of now, exactly as the session
+ * series stops an hour short: the bins that cannot be complete are not drawn
+ * as measured, and not trained on.
+ */
+export const EVENT_LAG_MIN = 3;
+export const eventSeriesEnd = (tf: Timeframe): string =>
+  /^now\(?\)?$/i.test(tf.to.trim()) && tf.minutes > EVENT_LAG_MIN * 3
+    ? `now()-${EVENT_LAG_MIN}m` : tf.to;
+
+export const withinSessionLag = (tf: Timeframe): boolean =>
+  /^now\(?\)?$/i.test(tf.to.trim()) && tf.minutes <= SESSION_LAG_MIN;
 
 export const qSessionSeries = (tf: Timeframe, frontendName: string) => `
 fetch user.sessions, from: ${tf.from}, to: ${seriesEnd(tf)}
@@ -1422,7 +1639,7 @@ fetch user.sessions, from: ${tf.from}, to: ${seriesEnd(tf)}
 | sort t asc`;
 
 export const qPulseSeries = (tf: Timeframe, rumAppId: string) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+fetch user.events, from: ${tf.from}, to: ${eventSeriesEnd(tf)}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
 | summarize sessions = countDistinct(dt.rum.session.id),
     errors = countIf(characteristics.classifier == "error"),
@@ -1481,9 +1698,52 @@ export const FAILED_CALL = `characteristics.classifier == "error"
       and (error.type == "request" or error.source == "fetch"
         or coalesce(toLong(http.response.status_code), 0) >= 400)`;
 
+/**
+ * THE CARD'S HEADLINE NUMBERS, FROM THE METRIC STORE.
+ *
+ * Everything on the Overview card was computed by scanning raw `user.events`
+ * — sessions, errors, crashes, ANRs, requests, user actions. On a bank's
+ * production application those scans take tens of seconds, and the platform
+ * has had the same figures pre-aggregated the whole time:
+ *
+ *   dt.frontend.session.active.estimated_count   sessions (a cardinality
+ *                                                metric: countDistinct)
+ *   dt.frontend.error.count                      errors, with error.type as
+ *                                                a dimension (crash, anr…)
+ *   dt.frontend.request.count                    requests
+ *   dt.frontend.user_action.count                user actions
+ *
+ * A metric read answers in milliseconds and scans no Grail bytes, so this is
+ * faster AND cheaper than what it replaces. `scalar: true` collapses each
+ * series to one number, which is what a headline is.
+ *
+ * IT DOES NOT REPLACE THE MEASUREMENTS, IT ARRIVES BEFORE THEM. The event
+ * scans still run and still decide the final figures, because they answer
+ * questions a counter cannot: which sessions met an error, which view, which
+ * endpoint. This is what the card shows while that is happening, and the
+ * reader is told it is still firming. Where the two disagree, the measured
+ * one wins — a metric is an estimate by its own name.
+ */
+export const qAppVitals = (tf: Timeframe, frontendName: string) => {
+  const fe = frontendName.replace(/["\\]/g, "");
+  return `
+timeseries {
+    sessions = countDistinct(dt.frontend.session.active.estimated_count, scalar: true),
+    users = countDistinct(dt.frontend.user.active.estimated_count, scalar: true),
+    errors = sum(dt.frontend.error.count, scalar: true),
+    crashes = sum(dt.frontend.error.count, filter: { error.type == "crash" }, scalar: true),
+    anrs = sum(dt.frontend.error.count, filter: { error.type == "anr" }, scalar: true),
+    requests = sum(dt.frontend.request.count, scalar: true),
+    actions = sum(dt.frontend.user_action.count, scalar: true)
+  },
+  from: ${tf.from}, to: ${tf.to},
+  filter: { frontend.name == "${fe}" }
+| limit 1`;
+};
+
 /** Most requested paths (layers 04/05). */
-export const qPaths = (tf: Timeframe) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+export const qPaths = (tf: Timeframe, rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
 | filter characteristics.classifier == "request" and isNotNull(url.path)
 | summarize reqs = count(), p50 = percentile(toLong(duration), 50),
     p90 = percentile(toLong(duration), 90),
@@ -1493,8 +1753,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | sort reqs desc | limit 80`;
 
 /** Browser and transport protocol (layers 01/02). */
-export const qTransport = (tf: Timeframe) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+export const qTransport = (tf: Timeframe, rumAppId?: string | null) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
 | filter characteristics.classifier == "request"
 | summarize reqs = count(), ttfb = percentile(toLong(web_vitals.time_to_first_byte), 50),
   by: { browser = browser.name, protocol = performance.next_hop_protocol, provider = url.provider }

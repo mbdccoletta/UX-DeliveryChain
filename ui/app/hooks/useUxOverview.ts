@@ -45,11 +45,15 @@ export interface UxRow {
 const memo = new Map<string, Map<string, UxRow>>();
 
 /** Impact per application id, or null while loading / when the query failed. */
-export function useUxOverview(tf: Timeframe, appId?: string | null): Map<string, UxRow> | null {
+export function useUxOverview(
+  tf: Timeframe, appId?: string | null,
+  /** True when the caller draws the estate comparison and must pay for it. */
+  wide = false,
+): Map<string, UxRow> | null {
   const gen = useMemoGen();
   // the scope is part of the key: a payload that lacked this application
   // must not answer for the request that went and fetched it
-  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${gen}`;
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${wide ? "w" : "s"}|${gen}`;
   const [map, setMap] = useState<Map<string, UxRow> | null>(memo.get(key) ?? null);
 
   useEffect(() => {
@@ -68,11 +72,34 @@ export function useUxOverview(tf: Timeframe, appId?: string | null): Map<string,
            answer does not contain the application being shown, it is asked
            for on its own. One extra query, only where the cap actually bit,
            and a fraction of the scan the estate costs. */
-        const rows = await runDql<Record<string, unknown>>(qUxByApp(tf), 100);
-        if (appId && !rows.some((r) => String(r.appId ?? "") === appId)) {
+        /* THE ESTATE SCAN ONLY WHEN THE ESTATE IS THE QUESTION.
+           Measured in production: this is the per-session summarize over
+           every application, it is the query that hit Grail's 500 GB limit,
+           and the page used it to fill ONE card's Apdex bands plus a single
+           comparison line. Scoped, it is a fraction of that. The comparison
+           line is the only thing that needs the whole estate, so it is the
+           only thing that pays for it — and when it cannot be drawn, it says
+           so rather than comparing an application with itself. */
+        const rows = wide
+          ? await runDql<Record<string, unknown>>(qUxByApp(tf), 100)
+          : [] as Record<string, unknown>[];
+        /* ALWAYS, NOT ONLY WHEN THE ROW IS MISSING.
+           The first cut asked for the application on its own when the estate
+           answer did not contain it — and the Apdex stayed blank, because
+           this query returns TWO rows per application and only one of them
+           carries the bands. The main row survived the hundred-row cap while
+           its Apdex row did not, so the application looked present and its
+           score did not exist. A presence test that can be half right is
+           worse than no test: it fails quietly on exactly the estates the cap
+           was going to hurt.
+           So the scoped rows are always fetched when an application is
+           selected, and they are merged LAST, which makes them win. It is the
+           cheap query of the two — and it is the shape the estate scan should
+           eventually take for everything except the comparison line. */
+        if (appId) {  // eslint-disable-line no-constant-condition
           try {
             rows.push(...await runDql<Record<string, unknown>>(
-              qUxByApp(tf, appId), 2));
+              qUxByApp(tf, appId), 8));
           } catch { /* the estate's answer still stands on its own */ }
         }
         // TWO row kinds share an appId: the main per-app row, and the Apdex

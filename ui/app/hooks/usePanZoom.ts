@@ -31,8 +31,22 @@ export function usePanZoom(
     if (!stage || !canvas) return t;
     const cw = canvas.scrollWidth * t.z, ch = canvas.scrollHeight * t.z;
     const sw = stage.clientWidth, sh = stage.clientHeight;
-    const axis = (pos: number, content: number, view: number) =>
-      content <= view ? (view - content) / 2 : Math.min(0, Math.max(view - content, pos));
+    /* PANNING IS ALLOWED AT EVERY ZOOM.
+     *
+     * This hard-centred the diagram whenever it fitted the stage — so zooming
+     * OUT took the drag away: the reader could see the whole chain and could
+     * not move it an inch, which reads as a frozen canvas. And when it did
+     * not fit, the clamp pinned it exactly to the edges, so there was never
+     * any room around a node at the border.
+     *
+     * The rule now is the one rule that actually matters: a quarter of the
+     * diagram must stay on screen. Inside that, it moves freely in both
+     * directions at any zoom — and it can never be dragged away entirely,
+     * which is the only thing the clamp was ever protecting against. */
+    const axis = (pos: number, content: number, view: number) => {
+      const keep = Math.min(content, view) * 0.25 + 40;
+      return Math.min(view - keep, Math.max(keep - content, pos));
+    };
     return { z: t.z, x: axis(t.x, cw, sw), y: axis(t.y, ch, sh) };
   }, [stageRef, canvasRef]);
 

@@ -23,6 +23,7 @@ import type { ChainData } from "../hooks/useChainData";
 import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted } from "../hooks/useImpacted";
+import { useAppVitals } from "../hooks/useAppVitals";
 import { useGeo } from "../hooks/useGeo";
 import { useCities, useRegions } from "../hooks/useGeoDetail";
 import { Intelligence } from "./Intelligence";
@@ -127,7 +128,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * on frontend.name, not the inventory name — "Astroshop Android" the
    * entity, "Astroshop_Android" the frontend — and the wrong one is accepted
    * silently and matches nothing. */
-  const feNames = useFrontendNames();
+  const feNames = useFrontendNames(data.tf.minutes);
   /* the RESOLVED frontend name, or "" — callers gate their sessions links
    * on it, because the inventory-name fallback re-created the documented
    * empty-list failure while the name scan was still in flight */
@@ -136,6 +137,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      the impact scan read the session store instead of the event store, so
      the card counts what its own button opens. */
   const impacted = useImpacted(appId, data.tf, true, feName || undefined);
+  /* THE METRIC STORE ANSWERS FIRST. Pre-aggregated counts for this frontend
+     — errors, crashes, ANRs, requests, actions — in milliseconds and for no
+     Grail bytes. They hold the card up while the event scans that decide
+     the final figures are still running; once those land, measured wins.
+     Null when this environment does not publish them, in which case nothing
+     below changes. */
+  const vitals = useAppVitals(data.tf, feName || null);
+  /* While the page is on preview figures, a metric is the better early
+     number: a preview is a partial scan and can only be LOW, a metric is the
+     whole window. Once the measurement is final, it is the measurement. */
+  const early = <T,>(metric: T | null | undefined, measured: T): T =>
+    data.partial && metric != null ? metric : measured;
   const geo = useGeo(data.tf, appId);
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
@@ -273,35 +286,78 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
       window.removeEventListener("resize", on);
     };
   }, [geoAll, geoSel]);
+  /* RE-FIT WHEN THE DATA ARRIVES, NOT ONLY WHEN THE BOX CHANGES.
+   *
+   * Measured on production: the geo scan answered at about t+96s, a minute
+   * and a half after this component mounted. Every zoomToFit had already run
+   * and found empty layers, so the map sat there framing nothing — and since
+   * MapView emits no view until it is touched, the overlay had nothing to
+   * project against either. The first mouse movement over the map made it
+   * report, and everything appeared at once. The reader described it exactly:
+   * "o mapa só carrega ao movimentar o mouse".
+   *
+   * So the fit follows the DATA. Two attempts, because the first can land
+   * before the layer has taken its rows. */
+  const geoCount = geo?.length ?? 0;
   useEffect(() => {
-    const t = setTimeout(() => {
-      try { mapRef.current?.zoomToFit(); } catch { /* not mounted */ }
-    }, 120);
-    return () => clearTimeout(t);
-  }, [mapH]);
+    const fire = () => { try { mapRef.current?.zoomToFit(); } catch { /* not mounted */ } };
+    const a = setTimeout(fire, 120);
+    const b = setTimeout(fire, 700);
+    return () => { clearTimeout(a); clearTimeout(b); };
+  }, [mapH, geoCount, geoSel]);
   const reported = useRef(false);
+  const geoSig = (geo ?? []).map((g) => g.country).join(",");
   useEffect(() => {
     if (!geo || geo.length === 0) return;
     reported.current = false;
-    const fit = () => { try { mapRef.current?.zoomToFit(); } catch { /* not mounted yet */ } };
-    const t1 = setTimeout(fit, 80);
-    const t2 = setTimeout(fit, 600);
-    /* THE NUDGE IS UNCONDITIONAL NOW, and the reason is a real estate with
-       traffic on every continent: zoomToFit() had nothing to do there — the
-       data already filled the default world view — so it moved nothing and
-       therefore emitted nothing, and the overlay, which refuses to draw
-       against a view the map has not confirmed, stayed empty. Marks on the
-       map simply were not there.
-       A zoom in followed by a zoom out has to move the view twice whatever
-       the data looks like, and it lands back where it started. */
-    const t3 = setTimeout(() => {
+    /* WE ASK UNTIL IT ANSWERS.
+     *
+     * The overlay refuses to draw against a view the map has not confirmed —
+     * that rule is right and it is what stopped the marks landing in the
+     * Atlantic. The problem is the other half: MapView emits nothing until
+     * something actually MOVES it, and a single nudge is not reliable.
+     * zoomToFit() moves nothing when the data already fits the default world
+     * view; a zoomIn/zoomOut pair can be coalesced by the animation and net
+     * to zero; and on a slow page the whole sequence can run before the
+     * layer has even taken its rows. Every one of those ends the same way:
+     * a silent map that springs to life the first time the reader touches
+     * it — "o mapa só carrega com zoom in ou out", twice reported.
+     *
+     * So this stops being a timed guess and becomes a loop with a condition.
+     * It nudges, checks whether the map has reported, and nudges again,
+     * alternating fit with a zoom pair because the two fail in different
+     * circumstances. It stops the moment the map speaks, and gives up after
+     * a few seconds rather than spinning forever. */
+    let tries = 0;
+    let stop = false;
+    const timers: number[] = [];
+    const after = (ms: number, f: () => void) =>
+      timers.push(window.setTimeout(f, ms));
+    const nudge = () => {
+      if (stop || reported.current) return;
+      const m = mapRef.current;
+      if (!m) { if (tries < 14) { tries += 1; after(350, nudge); } return; }
       try {
-        mapRef.current?.zoomIn();
-        setTimeout(() => { try { mapRef.current?.zoomOut(); } catch { /* gone */ } }, 160);
-      } catch { /* gone */ }
-    }, 1100);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, [geo, appId, data.tf.from, data.tf.to]);
+        if (tries % 2 === 0) {
+          m.zoomToFit();
+        } else {
+          m.zoomIn();
+          after(180, () => { try { mapRef.current?.zoomOut(); } catch { /* gone */ } });
+        }
+      } catch { /* not mounted yet */ }
+      tries += 1;
+      if (tries < 14) after(tries < 4 ? 250 : 500, nudge);
+    };
+    after(60, nudge);
+    return () => {
+      stop = true;
+      timers.forEach((t) => clearTimeout(t));
+    };
+    // keyed on the country set, not the array: the preview→final swap keeps
+    // the same countries and must not restart a nudge on a map that already
+    // answered, or the marks would blink out and back for nothing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geoSig, appId, data.tf.from, data.tf.to]);
   /* AND AGAIN WHENEVER THE SELECTION CHANGES. The layer's data narrows to the
    * selected country and its states (see layerData), so re-fitting is what
    * carries the map into it — and back out when the selection clears. The
@@ -561,7 +617,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const tone: Tone = verdict.tone;
   // Real people, the same population the estate table's headline counts — the
   // two lines quote the same estate and must not disagree about it.
-  const estate = ux ? [...ux.values()].reduce((acc, u) => {
+  /* One row means the scan was scoped to this application, so there is no
+     estate to compare against — and an application compared with itself
+     would read as a finding. Absent beats invented. */
+  const estate = ux && ux.size > 1 ? [...ux.values()].reduce((acc, u) => {
     acc.s += u.sessions; acc.h += u.hit;
     acc.real += u.realSessions; acc.realHit += u.hitReal; return acc;
   }, { s: 0, h: 0, real: 0, realHit: 0 }) : null;
@@ -679,7 +738,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           <h2>{app.name}</h2>
           <span>{isMobile ? "Mobile application" : "Web application"} · {data.tf.label}
             {" · "}<b style={{ color: TVAR[tone], fontWeight: 600 }}>
-              {verdict.label} — {verdict.reason}</b></span>
+              {verdict.label} — {verdict.reason}
+              {/* A JUDGEMENT ON A PARTIAL FIGURE SAYS SO. The header already
+                  reads "measuring…" while the impact scan is on a preview,
+                  but the verdict is the loudest sentence on the page and it
+                  was printing "Critical — 98% hit" off a partial scan with
+                  nothing beside it. Data-integrity rule: the mark travels
+                  with the number it qualifies. */}
+              {impacted?.partial ? <em className="dim"> · measuring</em> : null}</b></span>
         </div>
         <div className="tk-hd__a">
           {/* The errors this page counts, opened in the platform's own Error
@@ -715,6 +781,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 
       <CleanCard
         sessions={impacted?.sessions ?? app.sessions}
+        sessionBase={impacted?.base}
+        shortWindow={Q.withinSessionLag(data.tf)}
         realSessions={impacted?.realSessions ?? null}
         clean={clean} tone={tone} name={app.name} isMobile={!!isMobile}
         series={pulse?.series ?? []}
@@ -733,8 +801,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           const n = pts.reduce((a, b) => a + b.sessions, 0);
           return (n / span).toFixed(n / span >= 10 ? 0 : 1);
         })()}
-        errors={app.errors} errorsPerMin={perMin(app.errors)}
-        crashes={app.crashes} anrs={app.anrs}
+        errors={early(vitals?.errors, app.errors)}
+        errorsPerMin={perMin(early(vitals?.errors, app.errors))}
+        crashes={early(vitals?.crashes, app.crashes)}
+        anrs={early(vitals?.anrs, app.anrs)}
 
         /* The core shows an Apdex, which is a speed reading and says nothing
            about what Davis detected. The problems belong beside it — named by
@@ -743,14 +813,33 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         problems={problems.length + scopeProblems}
         problemCats={[...new Set([...problems, ...scopeProbs]
           .map((pr) => davisCategory(pr.category)))]}
-        requests={pulse?.requests ?? 0} reqFail={pulse?.reqFail ?? 0}
+        requests={pulse?.requests ?? vitals?.requests ?? 0} reqFail={pulse?.reqFail ?? 0}
         hitSessions={impacted?.hit ?? 0}
         loadP50={app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? apdexOf(uxRow) : null}
+        /* AN EMPTY SCORE HAS TO SHOW ITS WORK.
+           "—" is the right answer when nothing could be rated, and it is
+           indistinguishable from a broken query unless the card says what it
+           counted. Apdex rates USER ACTIONS belonging to real people, so the
+           two numbers that settle it are how many actions the window held and
+           how many of them were rated — both already measured, neither shown.
+           With them a reader can tell "this application records no user
+           actions" from "the score failed to arrive", which is exactly the
+           distinction being asked for. */
         apdexNote={uxRow && apdexOf(uxRow) === null
           ? (uxRow.realSessions === 0 && uxRow.sessions > 0
-            ? "No people to rate: every session this window is robot or synthetic traffic, and Apdex scores real users only."
-            : "No rated user actions in this window.")
+            ? "No people to rate: every session this window is robot or synthetic traffic, "
+              + "and Apdex scores real users only."
+            : uxRow.actions === 0
+              ? `No user actions recorded in this window — ${fmtN(uxRow.sessions)} sessions, `
+                + `and not one navigation or interaction among them. Apdex rates user actions, `
+                + `so there is nothing to score. This is a fact about the instrumentation, not `
+                + `about the speed: RUM is reporting requests and errors for this application `
+                + `and not what people do on the screen.`
+              : `${fmtN(uxRow.actions)} user actions in this window and none of them rated. `
+                + `Apdex scores real users only, so actions belonging to robots or synthetic `
+                + `monitors are excluded — if that is all of them, the score has nothing left `
+                + `to measure.`)
           : undefined}
         apdexBands={uxRow ? { sat: uxRow.satisfied, tol: uxRow.tolerating,
           fru: uxRow.frustrated, fruErr: uxRow.fruErr } : null}
@@ -944,7 +1033,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         return (
           <div className="panel geo">
             <div className="panel__hd"><span className="lbl">Where they connect from</span>
-              <span className="hint">sessions and health by country · {data.tf.label}</span></div>
+              <span className="hint">sessions and health by country · {data.tf.label}
+                {/* PREVIEW ROWS SAY SO. The tile now paints the moment the
+                    query has a first answer; until the final replaces it the
+                    figures are a floor, and the header carries the mark the
+                    same way the card and the verdict do. */}
+                {geo?.partial ? <em className="dim"> · measuring…</em> : null}</span></div>
             <div className="pad geo__wrap">
               {/* THE MAP ITSELF WAITS TOO. Holding only the marks back was
                   half the fix: the map still painted its default view and
@@ -1633,6 +1727,10 @@ interface CardProps {
   series: Array<{ t: string; sessions: number; errors: number; requests: number }>;
   /** Sessions per minute, read off the same series the bars draw. */
   sessionsPerMin: string;
+  /** Which store the headline counted — see useImpacted. */
+  sessionBase?: "sessions" | "events";
+  /** True when the window sits inside the session store's write lag. */
+  shortWindow?: boolean;
   errors: number; errorsPerMin: string;
   /** The fatal subset of `errors` — crashes end the session, ANRs freeze it
    *  until Android kills it. Mobile only, by what the types can occur on. */
@@ -1962,6 +2060,24 @@ function CleanCard(p: CardProps) {
               error-free percentage beside it has to share a base; this line
               carries the base the explorer uses. Two numbers a reader can
               compare are worth more than one they have to defend. */}
+          {/* WHICH BASE, SAID ON THE CARD. The headline promises to be the
+              number the sessions button opens — and on a short window the
+              session store is still being written, so the count comes from
+              the event scan instead and the list WILL show fewer. That is a
+              fact about the platform's write lag, and it belongs next to the
+              number it qualifies, not in a tooltip. */}
+          {p.sessionBase === "events" && p.shortWindow && (
+            <div className="tk-note"
+              title={`Sessions are written to the platform's session store about `
+                + `an hour after they go quiet. Inside a window this short the store `
+                + `holds almost none of them yet, so this counts every session ACTIVE `
+                + `in the window from the event stream. Users & Sessions reads the `
+                + `store and will list fewer until they are written. Widen the window `
+                + `past an hour and the two agree again.`}>
+              active in this window
+              <em className="tk-note__k"> the list fills in as sessions are written</em>
+            </div>
+          )}
           {p.realSessions != null && p.realSessions !== p.sessions && (
             <div className="tk-note"
               title={`The headline counts every session the platform listed `
@@ -2303,12 +2419,25 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
     const root = rootRef.current;
     if (!root) return null;
     let best: number[] | null = null;
+    let budget = 0;
     for (const r of root.querySelectorAll<HTMLElement>(".svcf__row")) {
       const t = getComputedStyle(r).gridTemplateColumns.split(" ").map(parseFloat);
       if (!t.length || t.some((n) => !Number.isFinite(n))) continue;
+      // the first row read gives the width the table ACTUALLY has to spend;
+      // every row resolves to the same total, gaps excluded
+      if (!budget) budget = t.reduce((a, b) => a + b, 0);
       best = best ? best.map((w, i) => Math.max(w, t[i] ?? 0)) : t;
     }
-    return best && best.length >= 2 ? best : null;
+    if (!best || best.length < 2 || !budget) return null;
+    /* THE WIDTHS MUST STILL ADD UP TO THE TABLE.
+       Taking the widest track of every row gives each column the room its
+       longest row wanted — and their SUM is then wider than the table, so
+       freezing those numbers pushed the last columns off the right edge.
+       Dragging looked like it broke the layout; the layout was already
+       over-committed and the drag only made it visible. The proportions are
+       kept and scaled back into the budget. */
+    const total = best.reduce((a, b) => a + b, 0);
+    return total > budget ? best.map((w) => (w * budget) / total) : best;
   };
 
   const drag = (i: number) => (e: React.PointerEvent) => {
@@ -2319,12 +2448,18 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
     const base = [...start];
     const x0 = e.clientX;
     const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - x0;
       const next = [...base];
-      // the dragged column takes the width; its right-hand neighbour gives
-      // it up, so the table does not grow a horizontal scrollbar
-      next[i] = Math.max(48, base[i] + dx);
-      if (base[i + 1] != null) next[i + 1] = Math.max(40, base[i + 1] - dx);
+      /* A ZERO-SUM DRAG. What one column gains its neighbour gives, and the
+         movement is bounded by what the neighbour can actually spare — so the
+         total never changes and no column can be pushed out of the table.
+         Clamping the two sides independently, as this did, let the sum drift
+         on every drag that hit a floor. */
+      const MIN = 56;
+      const room = (base[i + 1] ?? 0) - MIN;
+      const give = base[i] - MIN;
+      const dx = Math.max(-give, Math.min(ev.clientX - x0, room));
+      next[i] = base[i] + dx;
+      if (base[i + 1] != null) next[i + 1] = base[i + 1] - dx;
       setCols(next);
     };
     const up = () => {

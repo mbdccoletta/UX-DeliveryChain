@@ -10,7 +10,8 @@
 // per application and timeframe for the life of the session.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qImpacted, qImpactedSessions, runDql, type Timeframe } from "../utils/dql";
+import { qImpacted, qImpactedSessions, runDql, withinSessionLag,
+  type Timeframe } from "../utils/dql";
 
 export interface Impacted {
   /** Distinct sessions in the window — the denominator. */
@@ -24,6 +25,12 @@ export interface Impacted {
   hitSynth: number;
   /** The worst-hit session, carrying what the session intents require. */
   ex?: { sid: string; start: string; inst?: string; errs: number };
+  /** True while these came from a PREVIEW: real, measured, not yet whole. */
+  partial?: boolean;
+  /** Which store counted: "sessions" is what Users & Sessions lists;
+   *  "events" is every session active in the window, which the list will
+   *  not match. The card says which one it is showing. */
+  base?: "sessions" | "events";
 }
 
 const memo = new Map<string, Impacted | null>();
@@ -42,7 +49,13 @@ export function useImpacted(
   rumAppId?: string, tf?: Timeframe, active = false, frontendName?: string,
 ): Impacted | null {
   const gen = useMemoGen();
-  const fe = frontendName || "";
+  /* THE KEY NAMES ONLY WHAT CHANGES THE QUERY. Inside the session store's
+     lag (a 30-minute window) the frontend name is irrelevant — the event scan
+     runs whether or not the name has resolved — yet it was part of the key,
+     so the scan ran once with the name empty and once again when it landed:
+     the one duplicate left in a production load, and a full per-session
+     scan paid twice for the same answer. */
+  const fe = frontendName && !withinSessionLag(tf!) ? frontendName : "";
   const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${fe}|${gen}` : "";
   const [imp, setImp] = useState<Impacted | null>(key ? memo.get(key) ?? null : null);
 
@@ -79,11 +92,26 @@ export function useImpacted(
         }
         return o;
       };
+      /* A FIGURE THAT FIRMS UP BEATS A BLANK ONE.
+         This scan is 20-30 seconds on a large application, and the card is
+         the first thing a reader looks at. The preview lands in a few
+         seconds; `partial` marks it so the card can say it is still
+         measuring, and the final answer replaces it. */
       const ask = async (q: string) =>
-        shape((await runDql<Record<string, unknown>>(q, 1))[0]);
+        shape((await runDql<Record<string, unknown>>(q, 1, undefined, (rows) => {
+          const early = shape(rows[0]);
+          if (early && live) setImp({ ...early, partial: true });
+        }))[0]);
       try {
-        if (fe) {
+        /* INSIDE THE STORE'S LAG, THE STORE IS NOT THE ANSWER. On a window
+           shorter than the ~60 minutes the aggregator takes to write a
+           session, user.sessions holds a handful of rows for it — not zero,
+           which the guard below would catch, but a small true number that
+           would read as the application's traffic. The event scan is the
+           base there, and the card is told which base it got. */
+        if (fe && !withinSessionLag(tf!)) {
           out = await ask(qImpactedSessions(tf!, fe));
+          if (out) out.base = "sessions";
           /* NOTHING SERIALIZED IS NOT NOTHING HAPPENED. The session store
              trails live traffic by the aggregation service's 30-minute
              inactivity timeout, so a short or very recent window can hold
@@ -92,9 +120,13 @@ export function useImpacted(
              share over an application that is plainly busy, so the event
              scan answers instead — fewer promises about the hand-off, but a
              page that still describes what is happening. */
-          if (!out || out.sessions === 0) out = await ask(qImpacted(tf!, rumAppId!));
+          if (!out || out.sessions === 0) {
+            out = await ask(qImpacted(tf!, rumAppId!));
+            if (out) out.base = "events";
+          }
         } else {
           out = await ask(qImpacted(tf!, rumAppId!));
+          if (out) out.base = "events";
         }
       } catch {
         // no scope or the query failed — the row and the steps are not offered
