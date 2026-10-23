@@ -19,7 +19,7 @@ import { Intelligence } from "./Intelligence";
 import { CHAIN_STARTERS } from "../utils/starters";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
-import { useUxOverview } from "../hooks/useUxOverview";
+import { useUxOverview, withCensus } from "../hooks/useUxOverview";
 import { apdexOf } from "../utils/apdex";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
@@ -28,7 +28,7 @@ import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
 import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone, failTone} from "../utils/verdict";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import { useDomainTraces } from "../hooks/useDomainTraces";
-import { aheadOf, type Forecast } from "../utils/forecast";
+import { aheadOf, riseIsReal, type Forecast } from "../utils/forecast";
 import type { SvgIconProps } from "@dynatrace/strato-icons";
 import { XmarkIcon,
   ApplicationsIcon, AutomationEngineIcon, ContainerIcon, DatabaseIcon, DesktopIcon, TerminalIcon,
@@ -254,7 +254,8 @@ function gen2CardKept(g: Gen2Service, stores: DataStore[] | null): boolean {
   });
 }
 
-function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecast | null,
+function buildTiers(d: ChainData, appId: string, scope: AppScope,
+  ahead: (Forecast & { rising?: boolean }) | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
   stores: DataStore[] | null, gen2: Gen2Service[] | null,
   /** store address → resolved DB entity ids (batched Smartscape lookup),
@@ -752,7 +753,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
     L(unlinked ? [noLink] : runtimeRows.length ? (() => {
         // replicas of one workload collapse into one node — twelve pods named
         // checkout-7d89…-xxxxx are one thing scaled, not twelve things
-        const wlOf = (pod: string) => pod.replace(/-[a-z0-9]{7,10}-[a-z0-9]{5}$/, "")
+        const wlOf = (pod: string | null | undefined) => String(pod ?? "").replace(/-[a-z0-9]{7,10}-[a-z0-9]{5}$/, "")
           .replace(/-[a-z0-9]{5}$/, "");
         const groups = new Map<string, typeof runtimeRows>();
         for (const r of runtimeRows) {
@@ -768,8 +769,8 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
             ids: [rows[0].podId, rows[0].nodeId, rows[0].podClassic, rows[0].nodeClassic]
               .filter(Boolean) as string[],
             det: [["Smartscape", "K8S_POD runs_on K8S_NODE"], ["Node", rows[0].node],
-                  ["Cloud", rows[0].node.startsWith("gke") ? "GKE"
-                    : rows[0].node.startsWith("aks") ? "AKS" : "—"]],
+                  ["Cloud", String(rows[0].node ?? "").startsWith("gke") ? "GKE"
+                    : String(rows[0].node ?? "").startsWith("aks") ? "AKS" : "—"]],
           } : {
             nm: wl, mt: `${rows.length} pods · workload`, v: `×${rows.length}`,
             tone: "info", vol: rows.length * 40,
@@ -1100,7 +1101,9 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
   // the fourth signal: the analyzer projects this application's errors rising
   const appElo = layers[2]?.items[0];
   if (appElo && ahead) {
-    appElo.spark = { pts: ahead.point, rising: ahead.slope > 0 };
+    // rising only when the verdict's rule says so — the arrow and the
+    // Warning are one fact (riseIsReal on the error rate, see useAppForecast)
+    appElo.spark = { pts: ahead.point, rising: !!ahead.rising };
     // NOT pushed as a detail row: the Vitals block below already prints the
     // same forecast, coloured. The drawer was stating it twice, three lines
     // apart, with identical numbers.
@@ -1120,7 +1123,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       sessions: impacted?.sessions, hit: impacted?.hit,
       // the same people-first rule the landing page and the estate table use
       realSessions: impacted?.realSessions, realHit: impacted?.hitReal,
-      forecastRising: !!ahead && ahead.slope > 0,
+      forecastRising: !!ahead?.rising,
       score: impacted?.score ?? null,
     });
     appElo.tone = appVd.tone;
@@ -1163,21 +1166,34 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const feNames = useFrontendNames(data.tf.minutes);
   // declared AFTER the names it reads — a hook that read `feNames` above this
   // line hit the temporal dead zone at runtime, not at typecheck
-  const ahead = useAppForecast(appId, data.tf,
-    feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined);
+  const aheadFe = feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined;
+  const aheadCount = useAppForecast(appId, data.tf, aheadFe);
+  // the verdict judges the error RATE's forecast, with the real-rise rule
+  const aheadRate = useAppForecast(appId, data.tf, aheadFe, "errorRate");
+  const ahead = React.useMemo(
+    () => (aheadCount ? { ...aheadCount, rising: riseIsReal(aheadRate) } : null),
+    [aheadCount, aheadRate]);
   /* Inside the session store's lag the impact would be ANOTHER per-session
      scan of user.events — the same one useUxOverview below already makes
      (memoised, shared with the Overview): 81 GB and 14 s twice on a bank's
      estate. There the UX scan answers alone; past the lag, the session store
      still gives the headline count Users & Sessions lists. */
-  const impacted = useImpacted(appId, data.tf, !withinSessionLag(data.tf),
-    feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "")
-      || undefined);
+  /* the session-store count (what Users & Sessions lists), once the frontend
+     name is known — the same headline the Overview shows */
+  const chainFe = feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined;
+  const impacted = useImpacted(appId, data.tf, !!chainFe || !withinSessionLag(data.tf), chainFe);
   /* WHO WAS HURT, judged exactly as the Overview judges it: sessions an
      error AFFECTED (utils/dql USER_HIT), from the same per-session scan —
      memoised, so arriving from the Overview costs nothing. The session
      headline and the origin scaling keep `impacted`. */
-  const uxMap = useUxOverview(data.tf, appId);
+  // the same lean pass + exact census as the Overview (0.16.0), so arriving
+  // from it costs nothing and the two screens cannot disagree
+  const leanOk = !data.sessionScoped;
+  const uxRaw = useUxOverview(data.tf, appId, false, true, leanOk);
+  const censusRow = data.apps.find((a) => a.appId === appId);
+  const uxMap = React.useMemo(
+    () => (leanOk ? withCensus(uxRaw, appId, censusRow, !!data.censusFinal) : uxRaw),
+    [leanOk, uxRaw, appId, censusRow, data.censusFinal]);
   const harm = uxMap?.get(appId);
   /* What the chain is built with: the session COUNT from `impacted` (the
      store Users & Sessions lists), every HIT figure — and the real-user base

@@ -3426,15 +3426,8 @@ div:has(> header):has(main) > div {
 .geo__sub-r--on { border-color: var(--ink-3); color: var(--ink-hi); }
 .geo__sub-r b.num { color: var(--ink-hi); font-weight: 700;
   font-variant-numeric: tabular-nums; }
-.geo__sub-r em.num, .geo__sub-city em.num { font-style: normal;
+.geo__sub-r em.num { font-style: normal;
   font: 400 var(--fs-mini) var(--mono); color: var(--ink-3);
-  font-variant-numeric: tabular-nums; }
-.geo__sub-cities { display: flex; flex-direction: column; gap: 3px;
-  padding-top: 8px; margin-top: 4px; border-top: 1px dashed var(--border); }
-.geo__sub-city { display: flex; align-items: baseline; gap: 8px;
-  font: 400 var(--fs-small) var(--mono); color: var(--ink-2); }
-.geo__sub-city > span:first-child { flex: 1 1 auto; min-width: 0; }
-.geo__sub-city b.num { color: var(--ink-hi); font-weight: 700;
   font-variant-numeric: tabular-nums; }
 .geo__sub-none { font: 400 var(--fs-small) var(--sans); color: var(--ink-3); }
 
@@ -3524,3 +3517,20 @@ div:has(> header):has(main) > div {
   max-height: min(420px, calc(100vh - 140px)) !important;
   overflow-y: auto !important;
 }
+
+/* Shadow comparison (?compare=1) — a working table, not a card: mono numbers,
+   hairline rows, the verdict word carries the only colour. */
+.shadow__t { width: 100%; border-collapse: collapse; font: 500 11.5px var(--mono); }
+.shadow__t th { text-align: left; font-weight: 600; color: var(--ink-3); padding: 4px 8px;
+  border-bottom: 1px solid var(--border); }
+.shadow__t td { padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.shadow__t td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.shadow__cost { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px;
+  font: 400 11px var(--mono); color: var(--ink-3); }
+
+/* The map's no-place note: the application is amber or red for a reason
+   that has no location (forecast, Davis problem, anomaly). Neutral ink —
+   the hero already carries the colour; this only says where it came from. */
+.geo__why { padding: 8px 16px; font: 400 12px var(--sans); line-height: 1.45;
+  color: var(--ink-2); border-bottom: 1px solid var(--border); }
+.geo__why b { color: var(--ink-hi); font-weight: 600; }

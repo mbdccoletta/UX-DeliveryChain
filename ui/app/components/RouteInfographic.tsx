@@ -229,8 +229,10 @@ function typicalOf(rows: InfoRow[], k: "p50dur" | "p50views", inCohort: boolean)
 
 
 export function RouteInfographic({ rows, path, appName, cohort, total, biz, vitals,
-  convDef, stops, approx, onClose }: {
+  convDef, stops, approx, onClose, mobile = false }: {
   rows: InfoRow[] | "loading";
+  /** A mobile application — only then does the crash / ANR line exist. */
+  mobile?: boolean;
   /** The picked waypoints, in order, in words. */
   path: string[];
   appName: string;
@@ -408,7 +410,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
             <section className="rinfo__strip">
               {([
                 ["hit by errors", rate(rows, "hit", true), rate(rows, "hit", false), fmtPct, true],
-                ["crash / ANR", rate(rows, "fatal", true), rate(rows, "fatal", false), fmtPct, true],
+                ...(mobile ? [["crash / ANR", rate(rows, "fatal", true), rate(rows, "fatal", false), fmtPct, true] as const] : []),
                 ["typical session", typicalOf(rows, "p50dur", true), typicalOf(rows, "p50dur", false), fmtMs, false],
                 ["typical views", typicalOf(rows, "p50views", true), typicalOf(rows, "p50views", false),
                   (v: number) => v.toFixed(1), false],

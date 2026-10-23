@@ -184,3 +184,19 @@ export const geoEnName = (() => {
     return (c: string) => dn.of(c) ?? c;
   } catch { return (c: string) => c; }
 })();
+
+
+/* WHAT THE ROW PRINTS IS WHAT COLOURED IT. A place is judged on two arms —
+   the share of sessions an error affected, and the experience score — and
+   the row printed the error share whichever arm decided. the busiest state on staging
+   was amber on its score with "3.7% hit" in amber beside it, and its screens
+   all read Healthy: the row named a cause it did not have. When the score
+   decides, the row shows the score. */
+export const geoTag = (g: GeoArm, base: number): string => {
+  const a = geoArms(g, base);
+  if (a.level > 0 && a.spd >= a.abs && a.apx !== null) return `score ${fmtApdex(a.apx)}`;
+  const pop = geoPop(g);
+  return pop.h === 0 ? "clean" : `${(a.rate * 100).toFixed(1)}% hit`;
+};
+export const geoTagSub = (r: SubArm, base: number): string =>
+  geoTag({ ...r, sat: r.sat ?? 0, tol: r.tol ?? 0, fru: r.fru ?? 0 }, base);

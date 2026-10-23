@@ -41,7 +41,7 @@ import { edgeHealth, frictionFor } from "../utils/friction";
 import { Button } from "@dynatrace/strato-components/buttons";
 import { Intelligence } from "./Intelligence";
 import { JOURNEY_STARTERS } from "../utils/starters";
-import { HIT_BAD, HIT_WARN, SAMPLE_MIN} from "../utils/verdict";
+import { isMobileApp, HIT_BAD, HIT_WARN, SAMPLE_MIN} from "../utils/verdict";
 import { XmarkIcon } from "@dynatrace/strato-icons";
 
 type Tone = "good" | "warn" | "bad" | "info";
@@ -2063,6 +2063,7 @@ export function FlowSankey({
               : ["every journey on screen"]}
             key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
+            mobile={isMobileApp(app)}
             biz={infoBiz} vitals={infoVitals} stops={infoStops} approx={infoApprox}
             /* the rule every rate on the poster rests on, from the same source
                the queries compile from — never a list retyped into the view */

@@ -151,6 +151,10 @@ export interface DqlOptions {
    * runs to its final answer; previews only let the screen paint sooner.
    */
   settle?: boolean;
+  /** What the query cost once it finished — Grail's own scanned bytes and
+   *  execution time, and the wall time this client waited. Used by the
+   *  comparison panel; nothing that decides a figure reads it. */
+  onMeta?: (m: { scannedBytes: number; execMs: number; elapsedMs: number }) => void;
 }
 
 export function runDql<T = Record<string, unknown>>(
@@ -195,7 +199,7 @@ async function runDqlOnce<T = Record<string, unknown>>(
    * Callers that take it must say on screen that the figure is not final.
    */
   onPartial?: (rows: T[]) => void,
-  _opts: DqlOptions = {},
+  opts: DqlOptions = {},
 ): Promise<T[]> {
   noteScanStart();
   /* PREVIEW RESULTS: THE PLATFORM OFFERS THEM AND WE WERE NOT ASKING.
@@ -336,6 +340,11 @@ async function runDqlOnce<T = Record<string, unknown>>(
     || /frontend\.name/.test(query) || /dt\.entity\.service\s*==/.test(query);
   noteScan(Number(grail?.scannedBytes ?? 0), cut,
     `${src}${scoped ? " · one app" : " · estate"}`);
+  try {
+    opts.onMeta?.({ scannedBytes: Number(grail?.scannedBytes ?? 0),
+      execMs: Number((grail as { executionTimeMilliseconds?: number } | undefined)?.executionTimeMilliseconds ?? 0),
+      elapsedMs: Date.now() - started });
+  } catch { /* a readout never breaks a fetch */ }
   if (cut) onTruncated?.();
   const rows = (res.result?.records ?? []) as T[];
   /* A WARNING PLUS AN EMPTY ANSWER IS NOT AN ANSWER.
@@ -401,7 +410,14 @@ export const scopeApp = (rumAppId?: string | null) =>
 export const qApps = (tf: Timeframe, session?: string | null,
   rumAppId?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeApp(rumAppId)}
-| summarize sessions = countDistinct(dt.rum.session.id),
+// EXACT ONCE SCOPED (0.16.0). Scoped to one application this is the
+// verdict's denominator — sessions and real people's sessions — and a
+// stochastic estimate is about 1% off at production scale. The estate-wide
+// discovery pass only ranks applications, so it keeps the estimate.
+| summarize sessions = ${rumAppId ? "countDistinctExact" : "countDistinct"}(dt.rum.session.id),
+    realSessions = ${rumAppId ? "countDistinctExact" : "countDistinct"}(if(coalesce(dt.rum.user_type, "") != "robot"
+      and coalesce(dt.rum.user_type, "") != "synthetic" and isNull(dt.synthetic.monitor.id),
+      dt.rum.session.id, else: null)),
     views = countIf(characteristics.classifier == "view_summary"),
     errors = countIf(characteristics.classifier == "error"),
     crashes = countIf(characteristics.classifier == "error" and error.type == "crash"),
@@ -514,8 +530,8 @@ export const qImpactedSessions = (tf: Timeframe, frontendName: string) => {
   // The same real-user rule the event scan used, written the same way: a
   // negative test, so a user_type this app has not met counts as a person
   // rather than silently emptying the denominator.
-  const real = `not(dt.rum.user_type == "robot")
-      and not(dt.rum.user_type == "synthetic")`;
+  const real = `coalesce(dt.rum.user_type, "") != "robot"
+      and coalesce(dt.rum.user_type, "") != "synthetic"`;
   // null is not zero — a session with no error field must not be read as
   // "has errors" by a null-propagating comparison
   const err = `coalesce(error.count, 0) > 0`;
@@ -984,10 +1000,11 @@ export type OutcomeDefs = Record<string, string[]>;
  * AN ERROR THAT AFFECTED A PERSON — the only kind allowed to change a
  * classification (verdict, map colour, experience score), by Marcelo's rule
  * of 2026-10-23. Two kinds, both read off Gen3 fields:
- *   - an error during the person's own action: the user_action event counts
- *     the errors of its lifespan (error.count) and whether it crashed
- *     (error.has_crash) — a failed request, an exception, a crash while they
- *     were doing something;
+ *   - an error during the person's own action: on mobile the user_action
+ *     event counts the errors of its lifespan (error.count) and whether it
+ *     crashed (error.has_crash); on web, which carries no error.count, a
+ *     JavaScript exception or an HTTP 4xx/5xx during the action (see
+ *     WEB_ACT_ERR);
  *   - the app crashing or freezing (mobile crash / ANR), which ends or stalls
  *     the session whatever the person was doing.
  * Everything else — a background request failing, an analytics beacon, a
@@ -1002,11 +1019,35 @@ export type OutcomeDefs = Record<string, string[]>;
    (semantic dictionary, user events) — so the arm is guarded by it rather
    than by trusting that a web agent never reports a crash type. */
 const MOBILE = `coalesce(dt.rum.agent.type, "") != "javascript"`;
+/* "REAL" IS NULL-SAFE EVERYWHERE. The per-session rule has always counted
+   an unlabelled session as a person (countIf(user_type == "robot") is 0 when
+   the type is null). The per-event form not(user_type == "robot") is null on
+   an unlabelled event, and a null condition drops the event — the opposite
+   rule. Every event-level test is written coalesce(type, "") != "robot". */
+/* WHAT COUNTS AS AN ERROR ON THE PERSON'S OWN ACTION — per agent, because
+   the two agents do not carry the same fields (semantic dictionary, user
+   actions). Mobile actions carry error.count (every error the action saw)
+   and error.has_crash. Web actions carry NO error.count: they carry
+   error.exception_count, error.http_4xx_count, error.http_5xx_count,
+   error.http_other_count and error.csp_violation_count. Reading error.count
+   on web found nothing — measured: a web app with 11,153 errors in 24 h and
+   459 in an hour showed 0 sessions affected and 100% unaffected.
+   On web the action is hurt by what RUM Classic's Apdex counts by default:
+   a JavaScript exception, and a request that returned an HTTP error (4xx or
+   5xx) during it. Left out: status-0 failures (blocked or cancelled
+   requests — an ad-blocked analytics beacon is the busiest "error" on a
+   real estate and nobody sees it) and CSP violations, which the Classic
+   only counts when a rule says so. */
+const WEB_ACT_ERR = `(coalesce(error.exception_count, 0) > 0
+      or coalesce(error.http_4xx_count, 0) > 0
+      or coalesce(error.http_5xx_count, 0) > 0)`;
+const ACT_ERR_ANY = `(coalesce(error.count, 0) > 0
+      or (coalesce(error.has_crash, false) == true and ${MOBILE})
+      or (not(${MOBILE}) and ${WEB_ACT_ERR}))`;
 export const USER_HIT = `((characteristics.classifier == "error"
     and (error.type == "crash" or error.type == "anr") and ${MOBILE})
   or (characteristics.classifier == "user_action"
-    and (coalesce(error.count, 0) > 0
-      or (coalesce(error.has_crash, false) == true and ${MOBILE}))))`;
+    and ${ACT_ERR_ANY}))`;
 /** A crash or freeze of the app — USER_HIT's second arm on its own. */
 const CRASH = `(characteristics.classifier == "error"
     and (error.type == "crash" or error.type == "anr") and ${MOBILE})`;
@@ -1017,8 +1058,7 @@ const CRASH = `(characteristics.classifier == "error"
    the else branch — so the satisfied and tolerating sums were ZERO for every
    clean action and the score read 0.00 in production. Every operand is
    coalesced to a real boolean before it is combined. */
-const ACT_ERR = `(coalesce(error.count, 0) > 0
-    or (coalesce(error.has_crash, false) == true and ${MOBILE}))`;
+const ACT_ERR = ACT_ERR_ANY;
 
 const esc = (x: string) => x.replace(/["\\]/g, "");
 /** The DQL contains-any over a lowercased view-name variable (fallback). */
@@ -1108,7 +1148,7 @@ fetch user.events, from: ${from}, to: ${to}${appFilter}
 | fieldsAdd _rend = if(_vs and _lcp > _ttfb, _lcp - _ttfb, else: 0.0)
 | summarize
     // deterministic, like every other session verdict in this file
-    real = min(if(not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
+    real = min(if(coalesce(dt.rum.user_type, "") != "robot" and coalesce(dt.rum.user_type, "") != "synthetic", 1, else: 0)),
     conv = max(_done),
     // the session was HIT when an error affected the person (USER_HIT);
     // the origin buckets below still count every error, for "where it lives"
@@ -1283,8 +1323,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
       dur = max(toLong(duration)),
       /* min, not takeAny — 157 measured sessions carry two user_type values
        * and takeAny flips the customer count between runs */
-      isReal = min(if(not(dt.rum.user_type == "robot")
-        and not(dt.rum.user_type == "synthetic"), 1, else: 0)),
+      isReal = min(if(coalesce(dt.rum.user_type, "") != "robot"
+        and coalesce(dt.rum.user_type, "") != "synthetic", 1, else: 0)),
     by: { sid = dt.rum.session.id }
 | fields sid, reached, errs, waited, crash, views, dur, isReal,
     measured, ttfbMs, lcpMs, fcpMs,
@@ -1550,7 +1590,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${esc(rumAppId)}"
 | filter ((characteristics.classifier == "user_action" and isNotNull(experience.level))
     or ${CRASH})
-  and not(dt.rum.user_type == "robot") and not(dt.rum.user_type == "synthetic")
+  and coalesce(dt.rum.user_type, "") != "robot" and coalesce(dt.rum.user_type, "") != "synthetic"
   and isNull(dt.synthetic.monitor.id)
 | fieldsAdd _w = coalesce(experience.weight, 1)
 | fieldsAdd _act = characteristics.classifier == "user_action"
@@ -1569,8 +1609,13 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     errActions = countIf(_err),
     scoreCrashes = countIf(not(_act))`;
 
-const PLACE_SCORE_FIELDS = `| fieldsAdd _xreal = not(dt.rum.user_type == "robot")
-    and not(dt.rum.user_type == "synthetic") and isNull(dt.synthetic.monitor.id)
+/** An error a third party owns — claimed only when the data SAYS so. */
+const THIRD_PARTY = `(isNotNull(http.request.provider) or exception.file.provider == "third_party"
+        or (error.type == "csp" and isNotNull(csp.blocked_uri.provider)
+          and csp.blocked_uri.provider != "first_party"))`;
+
+const PLACE_SCORE_FIELDS = `| fieldsAdd _xreal = coalesce(dt.rum.user_type, "") != "robot"
+    and coalesce(dt.rum.user_type, "") != "synthetic" and isNull(dt.synthetic.monitor.id)
 | fieldsAdd _xact = _xreal and characteristics.classifier == "user_action"
     and isNotNull(experience.level)
 | fieldsAdd _xcrash = _xreal and ${CRASH}
@@ -1606,10 +1651,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
     // a live estate's events (measured); the only third-party attribution the
     // data actually carries is the CSP blocked-uri provider — counted when it
     // names anyone but first_party. Unattributed still counts as our own.
-    errsThird = countIf(characteristics.classifier == "error"
-      and (isNotNull(http.request.provider) or exception.file.provider == "third_party"
-        or (error.type == "csp" and isNotNull(csp.blocked_uri.provider)
-          and csp.blocked_uri.provider != "first_party"))),
+    errsThird = countIf(characteristics.classifier == "error" and ${THIRD_PARTY}),
     // Errors that reached a person, split the same way.
     // DISTINCT SCREENS, not view_summary events — the median session emits
     // one view_summary while walking two screens, and 42% emit none
@@ -1878,6 +1920,33 @@ export const qMetricForecastExpr = (
 | limit 1`;
 };
 
+/** ERRORS PER USER ACTION, for the verdict's forecast. The error COUNT rises
+ *  with traffic, and more people is not a degradation; the rate per action
+ *  does not. Both metrics come from the metric store (no Grail scan), and the
+ *  action metric matched the events exactly in every staging capture. Bins with
+ *  no action are null, not infinite. */
+export const qMetricErrorRateExpr = (
+  frontendName: string, from: string, to: string, interval: string,
+) => {
+  const fe = frontendName.replace(/["\\]/g, "");
+  return `timeseries { e = sum(dt.frontend.error.count), a = sum(dt.frontend.user_action.count) },
+  from: ${from}, to: ${to}, interval: ${interval},
+  filter: { frontend.name == "${fe}" }
+| fieldsAdd rate = if(a[] > 0, toDouble(e[]) / a[], else: null)
+| fields timeframe, interval, rate
+| limit 1`;
+};
+
+/** The same rate from events, for an application with no frontend name. */
+export const qEventErrorRateExpr = (rumAppId: string, from: string, to: string, interval: string) => `
+fetch user.events, from: ${from}, to: ${to}
+| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
+| filter characteristics.classifier == "error" or characteristics.classifier == "user_action"
+| makeTimeseries { e = countIf(characteristics.classifier == "error"),
+    a = countIf(characteristics.classifier == "user_action") }, interval: ${interval}
+| fieldsAdd rate = if(a[] > 0, toDouble(e[]) / a[], else: null)
+| fields timeframe, interval, rate`;
+
 /** Most requested paths (layers 04/05). */
 export const qPaths = (tf: Timeframe, rumAppId?: string | null) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
@@ -1901,8 +1970,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
 
 /** Row ceilings for the free (Smartscape) and cheap (open signals) legs —
  *  shared with the client caps in useChainData so neither can cut the other. */
-export const TOPOLOGY_CAP = 5000;
-export const SIGNALS_CAP = 2000;
+export const TOPOLOGY_CAP = 50000;
+export const SIGNALS_CAP = 20000;
 
 /** Service-to-service call graph — the backbone of the delivery chain. */
 export const qServiceCalls = () => `
@@ -1926,8 +1995,13 @@ smartscapeEdges "runs_on"
 // is what lets a route open the pod instead of an error page.
 | lookup [smartscapeNodes "K8S_POD" | fields id, name, id_classic], sourceField: source_id, lookupField: id, prefix: "p_"
 | lookup [smartscapeNodes "K8S_NODE" | fields id, name, id_classic], sourceField: target_id, lookupField: id, prefix: "n_"
-| fields podId = source_id, pod = p_name, podClassic = p_id_classic,
-    nodeId = target_id, node = n_name, nodeClassic = n_id_classic
+// A pod or node with no name in Smartscape (measured on staging: the lookup
+// returned null for some pods) still has an id — the name falls back to it,
+// so every row names its thing and no consumer meets a null.
+| fields podId = source_id, pod = coalesce(p_name, p_id_classic, source_id),
+    podClassic = p_id_classic,
+    nodeId = target_id, node = coalesce(n_name, n_id_classic, target_id),
+    nodeClassic = n_id_classic
 | limit ${TOPOLOGY_CAP}`;
 
 /** Frontends registered in Smartscape. */
@@ -2334,8 +2408,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     concat("unnamed ", error.type),
     "unnamed error")
 | summarize vol = count(), sessions = countDistinct(dt.rum.session.id),
-    real = countIf(not(dt.rum.user_type == "robot")
-      and not(dt.rum.user_type == "synthetic")),
+    real = countIf(coalesce(dt.rum.user_type, "") != "robot"
+      and coalesce(dt.rum.user_type, "") != "synthetic"),
     third = countIf(isNotNull(http.request.provider)
       or exception.file.provider == "third_party"),
     // BOTH, and they are not interchangeable: these 404s are
@@ -2945,22 +3019,6 @@ ${PLACE_SCORE_FIELDS}
 | sort sessions desc
 | limit 40`;
 
-/** The cities of one state — a list, because a city has no code and no
- *  coordinate to put it anywhere on a map. */
-export const qGeoCities = (tf: Timeframe, rumAppId: string, iso: string,
-  region: string) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
-| filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
-| filter geo.country.iso_code == "${iso.replace(/["\\]/g, "")}"
-| filter geo.region.iso_code == "${region.replace(/["\\]/g, "")}"
-| filter isNotNull(geo.city.name)
-| summarize
-    sessions = countDistinct(dt.rum.session.id),
-    hit = countDistinct(if(${USER_HIT},
-      dt.rum.session.id, else: null)),
-  by: { city = geo.city.name }
-| sort sessions desc
-| limit 20`;
 
 /** What ONE COUNTRY does inside this application: its screens, and where it
  *  meets errors — the geo tile's drilldown, one leg per click, memoised. */
@@ -2980,10 +3038,16 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | fieldsAdd vn = ${VIEW_NAME}
 | filter isNotNull(vn) or characteristics.classifier == "error"
 | fieldsAdd vn = if(isNull(vn), "${NO_SCREEN}", else: vn)
+// THE SCREEN IS JUDGED BY THE PLACE'S OWN TWO ARMS. A place turns amber on
+// its errors OR its experience score; a screen list that carried only the
+// errors could not show why a slow state was amber (the busiest state on staging:
+// Warning on its score, every screen "Healthy").
+${PLACE_SCORE_FIELDS}
 | summarize
     sessions = countDistinct(dt.rum.session.id),
     hit = countDistinct(if(${USER_HIT},
       dt.rum.session.id, else: null)),
+    ${PLACE_SCORE_SUMS},
   by: { view = vn }
 | sort sessions desc
 | limit 8`;
@@ -3008,10 +3072,16 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | fieldsAdd vn = ${VIEW_NAME}
 | filter isNotNull(vn) or characteristics.classifier == "error"
 | fieldsAdd vn = if(isNull(vn), "${NO_SCREEN}", else: vn)
+// THE SCREEN IS JUDGED BY THE PLACE'S OWN TWO ARMS. A place turns amber on
+// its errors OR its experience score; a screen list that carried only the
+// errors could not show why a slow state was amber (the busiest state on staging:
+// Warning on its score, every screen "Healthy").
+${PLACE_SCORE_FIELDS}
 | summarize
     sessions = countDistinct(dt.rum.session.id),
     hit = countDistinct(if(${USER_HIT},
       dt.rum.session.id, else: null)),
+    ${PLACE_SCORE_SUMS},
   by: { view = vn }
 | sort sessions desc
 | limit 8`;
@@ -3042,3 +3112,173 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 /* A deterministic sample of sessions (sampleRate) rather than "the first
    10,000" of millions, which the country-vs-rest rates were read off. */
 | limit 10000`;
+
+
+/* ── SHADOW CANDIDATES (?compare=1) ──────────────────────────────────────────
+ * Queries that MIGHT replace current ones, run beside them so the difference is
+ * measured before anything is swapped (Marcelo, 2026-10-23: "what does not
+ * match cannot be substituted"). Nothing on screen reads them; the comparison
+ * panel does. Aligned windows use absolute minute-floored timestamps, so the
+ * metric store and the event store cover exactly the same span. */
+
+/** Minute-floored absolute window — the metric store's own grain — that ends
+ *  SHADOW_SETTLE_MIN before now. Ending at now left the newest minutes still
+ *  filling while the queries ran: on staging the reference read 50,494 errors and
+ *  the candidate, seconds later, 50,503 over the very same window — the late
+ *  beacons, not the definitions. A settled window gives both sides the same
+ *  events, so any difference left is a real one. */
+export const SHADOW_SETTLE_MIN = 10;
+export const alignedWindow = (minutes: number) => {
+  const end = Math.floor(Date.now() / 60000) * 60000 - SHADOW_SETTLE_MIN * 60000;
+  return { from: new Date(end - minutes * 60000).toISOString(), to: new Date(end).toISOString() };
+};
+/** The same window as a Timeframe every builder accepts: quoted absolute
+ *  timestamps, so a reference and a candidate run seconds apart still read
+ *  EXACTLY the same events (a relative now()-1h slides between them, and a
+ *  comparison would measure the slide — measured: ±1 session, ±1 action). */
+export const alignedTf = (minutes: number): Timeframe => {
+  const w = alignedWindow(minutes);
+  return { from: `"${w.from}"`, to: `"${w.to}"`, minutes, label: `aligned ${minutes}m` } as Timeframe;
+};
+
+/* EXACT, NOT ESTIMATED. countDistinct is a stochastic estimate (HLL,
+   precision 14: about 1% standard error at production cardinalities). On staging,
+   a few hundred sessions an hour, the estimate is still exact, which is why
+   the first comparisons matched to the unit; on a production estate they
+   would not. The per-session reference counts exactly, so every candidate
+   that might replace it counts with countDistinctExact. */
+/** Candidate verdict numerator + score: one ungrouped pass over the only two
+ *  event kinds that can hurt a person (error, user_action). */
+export const qUxLean = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${esc(rumAppId)}"
+| filter characteristics.classifier == "error" or characteristics.classifier == "user_action"
+| fieldsAdd _real = coalesce(dt.rum.user_type, "") != "robot" and coalesce(dt.rum.user_type, "") != "synthetic"
+    and isNull(dt.synthetic.monitor.id)
+| fieldsAdd _rated = characteristics.classifier == "user_action" and isNotNull(experience.level)
+| fieldsAdd _w = coalesce(experience.weight, 1)
+| fieldsAdd _err = _rated and ${ACT_ERR}
+| fieldsAdd _crash = _real and ${CRASH}
+| fieldsAdd _robot = coalesce(dt.rum.user_type, "") == "robot"
+| fieldsAdd _synth = coalesce(dt.rum.user_type, "") == "synthetic" or isNotNull(dt.synthetic.monitor.id)
+| fieldsAdd _isErr = characteristics.classifier == "error"
+| summarize hit = countDistinctExact(if(${USER_HIT}, dt.rum.session.id, else: null)),
+    hitReal = countDistinctExact(if(_real and ${USER_HIT}, dt.rum.session.id, else: null)),
+    // the reference judges a SESSION robot if any of its events is; this
+    // judges the hurting event — the panel says whether the two agree
+    hitRobot = countDistinctExact(if(_robot and ${USER_HIT}, dt.rum.session.id, else: null)),
+    hitSynth = countDistinctExact(if(_synth and ${USER_HIT}, dt.rum.session.id, else: null)),
+    errors = countIf(_isErr),
+    realErrors = countIf(_isErr and _real),
+    errorsThird = countIf(_isErr and ${THIRD_PARTY}),
+    actions = countIf(characteristics.classifier == "user_action"),
+    ratedActs = countIf(_real and _rated),
+    errActions = countIf(_real and _err),
+    scoreCrashes = countIf(_crash),
+    // what each web arm contributes (evidence for the WEB_ACT_ERR choice):
+    // actions carrying each error kind, counted whether or not it judges
+    webActExc = countIf(characteristics.classifier == "user_action" and coalesce(error.exception_count, 0) > 0),
+    webAct4xx = countIf(characteristics.classifier == "user_action" and coalesce(error.http_4xx_count, 0) > 0),
+    webAct5xx = countIf(characteristics.classifier == "user_action" and coalesce(error.http_5xx_count, 0) > 0),
+    webActOther = countIf(characteristics.classifier == "user_action" and coalesce(error.http_other_count, 0) > 0),
+    webActCsp = countIf(characteristics.classifier == "user_action" and coalesce(error.csp_violation_count, 0) > 0),
+    satisfied = sum(if(_real and _rated and not(_err) and experience.level == "satisfied", _w, else: 0)),
+    tolerating = sum(if(_real and _rated and not(_err) and experience.level == "tolerating", _w, else: 0)),
+    frustrated = sum(if(_crash, 1, else: if(_real and _rated and (_err or experience.level == "frustrated"), _w, else: 0)))`;
+
+/** The Overview's verdict and score in one pass over the two event kinds that
+ *  can hurt a person (0.16.0, validated beside qUxByApp + qExperience on staging). */
+export const qShadowLean = (tf: Timeframe, rumAppId: string) => qUxLean(tf, rumAppId);
+
+/** Candidate verdict denominator: the census's countDistinct, with real people. */
+export const qShadowCensus = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${esc(rumAppId)}"
+| summarize sessions = countDistinctExact(dt.rum.session.id),
+    realSessions = countDistinctExact(if(coalesce(dt.rum.user_type, "") != "robot"
+      and coalesce(dt.rum.user_type, "") != "synthetic" and isNull(dt.synthetic.monitor.id),
+      dt.rum.session.id, else: null))`;
+
+/** Reference for the metric candidate: sessions from EVENTS over the same
+ *  aligned window — total, per user type, per country, per 2-minute bin. */
+export const qShadowSessionsEvents = (w: { from: string; to: string }, rumAppId: string) => {
+  const base = `fetch user.events, from: "${w.from}", to: "${w.to}"
+  | filter dt.rum.application.id == "${esc(rumAppId)}"`;
+  return `
+data record(k = "", b = "", sessions = 0)
+| filter false
+| append [ ${base}
+  | summarize sessions = countDistinct(dt.rum.session.id), by: { k = "total", b = "" } ]
+| append [ ${base}
+  | summarize sessions = countDistinct(dt.rum.session.id), by: { k = "user type", b = dt.rum.user_type } ]
+| append [ ${base}
+  | summarize sessions = countDistinct(dt.rum.session.id), by: { k = "country", b = geo.country.iso_code }
+  | sort sessions desc | limit 12 ]
+| append [ ${base}
+  | summarize sessions = countDistinct(dt.rum.session.id), by: { k = "bin", b = toString(bin(start_time, 2m)) } ]
+| limit 200`;
+};
+
+/** The metric candidate over the same aligned window. */
+export const qShadowSessionsMetric = (w: { from: string; to: string }, frontendName: string,
+  by: "total" | "user type" | "country" | "bin") => {
+  const fe = esc(frontendName);
+  const dim = by === "user type" ? ", by: { dt.rum.user_type }" : by === "country" ? ", by: { geo.country.iso_code }" : "";
+  return by === "bin"
+    ? `timeseries sessions = countDistinct(dt.frontend.session.active.estimated_count), from: "${w.from}", to: "${w.to}", interval: 2m, filter: { frontend.name == "${fe}" }`
+    : `timeseries sessions = countDistinct(dt.frontend.session.active.estimated_count, scalar: true), from: "${w.from}", to: "${w.to}", filter: { frontend.name == "${fe}" }${dim}`;
+};
+
+/** Candidate: the lean pass GROUPED by country and user type — one scan for
+ *  the verdict, the score, the origins and the map's per-country harm. */
+export const qShadowLeanGrouped = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${esc(rumAppId)}"
+| filter characteristics.classifier == "error" or characteristics.classifier == "user_action"
+| fieldsAdd _real = coalesce(dt.rum.user_type, "") != "robot" and coalesce(dt.rum.user_type, "") != "synthetic"
+    and isNull(dt.synthetic.monitor.id)
+| fieldsAdd _rated = characteristics.classifier == "user_action" and isNotNull(experience.level)
+| fieldsAdd _w = coalesce(experience.weight, 1)
+| fieldsAdd _err = _rated and ${ACT_ERR}
+| fieldsAdd _crash = _real and ${CRASH}
+| summarize hitReal = countDistinctExact(if(_real and ${USER_HIT}, dt.rum.session.id, else: null)),
+    satisfied = sum(if(_real and _rated and not(_err) and experience.level == "satisfied", _w, else: 0)),
+    tolerating = sum(if(_real and _rated and not(_err) and experience.level == "tolerating", _w, else: 0)),
+    frustrated = sum(if(_crash, 1, else: if(_real and _rated and (_err or experience.level == "frustrated"), _w, else: 0))),
+    crashes = countIf(characteristics.classifier == "error" and error.type == "crash"),
+    anrs = countIf(characteristics.classifier == "error" and error.type == "anr"),
+  by: { cc = geo.country.iso_code, ut = dt.rum.user_type }
+| limit 2000`;
+
+/** Candidate: views and view times read off view_summary alone — the census
+ *  reads every event to get them. */
+export const qShadowViews = (tf: Timeframe, rumAppId: string) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${esc(rumAppId)}"
+| filter characteristics.classifier == "view_summary"
+| summarize views = count(),
+    p50View = percentile(toLong(duration), 50),
+    p90View = percentile(toLong(duration), 90),
+    p95View = percentile(toLong(duration), 95)`;
+
+/** Candidate: errors, crashes and ANRs from the metric store, window as the
+ *  census asks it (the census is the comparison). */
+export const qShadowErrorMetrics = (tf: Timeframe, frontendName: string) => `
+timeseries errors = sum(dt.frontend.error.count, scalar: true),
+  crashes = sum(dt.frontend.error.count, filter: { error.type == "crash" }, scalar: true),
+  anrs = sum(dt.frontend.error.count, filter: { error.type == "anr" }, scalar: true),
+  actions = sum(dt.frontend.user_action.count, scalar: true),
+  from: ${tf.from}, to: ${tf.to}, filter: { frontend.name == "${esc(frontendName)}" }`;
+
+/** Reference and candidate for first-byte time per country (web), aligned. */
+export const qShadowTtfbEvents = (w: { from: string; to: string }, rumAppId: string) => `
+fetch user.events, from: "${w.from}", to: "${w.to}"
+| filter dt.rum.application.id == "${esc(rumAppId)}"
+| filter isNotNull(geo.country.iso_code) and isNotNull(ttfb.value)
+| summarize ttfbMs = percentile(toDouble(ttfb.value), 75), by: { cc = geo.country.iso_code }
+| sort ttfbMs desc
+| limit 30`;
+export const qShadowTtfbMetric = (w: { from: string; to: string }, frontendName: string) => `
+timeseries ttfb = percentile(dt.frontend.web.navigation.time_to_first_byte, 75, scalar: true),
+  from: "${w.from}", to: "${w.to}", filter: { frontend.name == "${esc(frontendName)}" },
+  by: { geo.country.iso_code }`;

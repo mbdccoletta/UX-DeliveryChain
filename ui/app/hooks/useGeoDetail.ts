@@ -12,7 +12,7 @@
 // that is a fact about the data, not a shortcut.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qGeoCities, qGeoRegions, runDql, type Timeframe } from "../utils/dql";
+import { qGeoRegions, runDql, type Timeframe } from "../utils/dql";
 
 export interface PlaceRow {
   /** ISO 3166-2 for a state ("US-CA"); the plain name for a city. */
@@ -91,26 +91,6 @@ export function useRegions(tf: Timeframe, appId?: string | null,
     }));
     const rows = await runDql<Record<string, unknown>>(
       qGeoRegions(tf, appId as string, iso as string), 40, undefined,
-      (early) => onPartial(shape(early)));
-    return shape(rows);
-  });
-}
-
-/** The cities of one state. */
-export function useCities(tf: Timeframe, appId?: string | null,
-  iso?: string | null, region?: string | null): PlaceRows | null {
-  const gen = useMemoGen();
-  const key = appId && iso && region
-    ? `c|${tf.from}|${tf.to}|${appId}|${iso}|${region}|${gen}` : "";
-  return usePlaces(key, async (onPartial) => {
-    const shape = (rows: Record<string, unknown>[]): PlaceRows => rows.map((r) => ({
-      id: String(r.city ?? "?"),
-      name: String(r.city ?? "?"),
-      sessions: Number(r.sessions) || 0,
-      hit: Number(r.hit) || 0,
-    }));
-    const rows = await runDql<Record<string, unknown>>(
-      qGeoCities(tf, appId as string, iso as string, region as string), 20, undefined,
       (early) => onPartial(shape(early)));
     return shape(rows);
   });
