@@ -124,7 +124,7 @@ export function NoRumState() {
             <div className="norum__col norum__col--no">
               <span className="norum__col-l">no data for it here</span>
               <ul>
-                <li><b>Overview</b> — Apdex, sessions, crashes</li>
+                <li><b>Overview</b> — experience score, sessions, crashes</li>
                 <li><b>Journeys</b> — the session flow</li>
                 <li><b>Business Control</b> — conversion and what failure costs</li>
               </ul>

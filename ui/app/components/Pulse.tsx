@@ -12,17 +12,17 @@
 // hours beat as an ECG. Colour stays signal-only: origins are neutral light,
 // green is a session that made it, red is one that did not.
 import React, { useEffect, useRef, useState } from "react";
-import { fmtK, fmtMs, fmtN, NO_SCREEN } from "../utils/dql";
+import { fmtK, fmtMs, fmtN, NO_SCREEN, withinSessionLag } from "../utils/dql";
 import * as Q from "../utils/dql";
 import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
-import { geoCol, geoJudgeSub, GEO_MIN_SESSIONS, GEO_WORD,
+import { geoCol, geoJudgeSub, geoPop, GEO_MIN_SESSIONS, GEO_WORD,
   geoArms, geoBecause, geoEnName, geoJudge, geoName,
-  type GeoArm } from "../utils/geoVerdict";
+  type GeoArm, type GeoTone } from "../utils/geoVerdict";
 import type { ChainData } from "../hooks/useChainData";
 import type { Timeframe as TimeframeT } from "../utils/dql";
 import { useAppForecast } from "../hooks/useForecast";
-import { useImpacted } from "../hooks/useImpacted";
+import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useAppVitals } from "../hooks/useAppVitals";
 import { useGeo } from "../hooks/useGeo";
 import { useCities, useRegions } from "../hooks/useGeoDetail";
@@ -52,12 +52,12 @@ import { XmarkIcon,
   MobileIcon, ServicesIcon, UserSessionsIcon, WarningIcon,
 } from "@dynatrace/strato-icons";
 
-import { verdictOf, VERDICT_LEGEND, HIT_WARN, davisCategory,
+import { verdictOf, VERDICT_LEGEND, HIT_BAD, HIT_WARN, davisCategory,
   type Tone, failTone} from "../utils/verdict";
 import { errorsExplorerHref, servicesExplorerHref, viewVitalsHref, rowDrilldown, open,
   intentsAvailable, appEntityOf } from "../utils/links";
 import type { DeepLink } from "../utils/links";
-import { apdexOf, apdexBand, apdexTone, fmtApdex, APDEX_LABEL, APDEX_T_MS } from "../utils/apdex";
+import { apdexOf, apdexBand, apdexTone, fmtApdex, scoreExplain, scoreMix } from "../utils/apdex";
 import { useCardDetail, type DetailRow, type DetailMetric } from "../hooks/useCardDetail";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 
@@ -136,7 +136,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   /* RESOLVED FIRST, BECAUSE IT DECIDES THE MEASURE. The name is what lets
      the impact scan read the session store instead of the event store, so
      the card counts what its own button opens. */
-  const impacted = useImpacted(appId, data.tf, true, feName || undefined);
+  /* ONE PER-SESSION SCAN, NOT TWO. Inside the session store's lag (the
+     default hour) the impact had a per-session scan of user.events of its
+     own — the same window, the same sessions, the same counts the UX scan
+     (qUxByApp) already produces: 95 GB twice on a bank's estate, the two
+     competing for Grail. There the impact is read from the UX scan; past
+     the lag, the session store answers as before. */
+  const lag = withinSessionLag(data.tf);
+  const impactedScan = useImpacted(appId, data.tf, !lag, feName || undefined);
   /* THE METRIC STORE ANSWERS FIRST. Pre-aggregated counts for this frontend
      — errors, crashes, ANRs, requests, actions — in milliseconds and for no
      Grail bytes. They hold the card up while the event scans that decide
@@ -149,7 +156,27 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      whole window. Once the measurement is final, it is the measurement. */
   const early = <T,>(metric: T | null | undefined, measured: T): T =>
     data.partial && metric != null ? metric : measured;
+  /* The map's rows carry their own experience score now (qGeo) — no merge,
+     and no waiting on any other scan: the map is final when its scan is. */
   const geo = useGeo(data.tf, appId);
+  const ux = useUxOverview(data.tf, appId);
+  const uxSelf = ux?.get(appId);
+  /* WHO WAS HURT — sessions an error AFFECTED (utils/dql USER_HIT: an error
+     during the person's own action, or the app crashing/freezing), from the
+     one per-session scan. This alone judges: the verdict, error-free and the
+     lines the Intelligence facts quote. */
+  const harm: Impacted | null = uxSelf
+    ? { sessions: uxSelf.sessions, hit: uxSelf.hit,
+        realSessions: uxSelf.realSessions, hitReal: uxSelf.hitReal,
+        hitRobot: uxSelf.hitRobot, hitSynth: uxSelf.hitSynth,
+        partial: !!ux?.partial, base: "events" }
+    : null;
+  /* HOW MANY — the session headline keeps the store Users & Sessions lists
+     once the window is past its lag, so the card and its button agree. */
+  const impacted: Impacted | null = !lag ? impactedScan : harm;
+  /* a state's experience score comes with its row (qGeoRegions) */
+  const regionArm = (r: { sessions: number; hit: number; realSessions?: number; realHit?: number;
+    sat?: number; tol?: number; fru?: number }) => r;
   /* The geo drill: one country opened at a time, one scan leg per first
    * click, memoised for the window like everything else. */
   const [geoSel, setGeoSel] = useState<string | null>(null);
@@ -181,7 +208,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     + Math.max(0, (regions?.length ?? 0) - shownRegions.length);
   const cities = useCities(data.tf, regionSel ? appId : null, geoSel,
     regionSel ? regionSel.slice((geoSel ?? "").length + 1) : null);
-  const [geoDetail, setGeoDetail] = useState<Array<{ view: string; sessions: number; hit: number }> | null>(null);
+  type ScreenRows = Array<{ view: string; sessions: number; hit: number }> & { partial?: boolean };
+  const [geoDetail, setGeoDetail] = useState<ScreenRows | null>(null);
   const geoMemo = React.useRef(new Map<string, Array<{ view: string; sessions: number; hit: number }>>());
   useEffect(() => {
     if (!geoSel || !appId) { setGeoDetail(null); return; }
@@ -192,9 +220,16 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     let live = true;
     (async () => {
       try {
-        const rows = await Q.runDql<Record<string, unknown>>(Q.qGeoCountry(data.tf, appId, geoSel), 8);
-        const res = rows.map((r) => ({ view: String(r.view ?? "?"),
+        const shape = (rows: Record<string, unknown>[]): ScreenRows => rows.map((r) => ({
+          view: String(r.view ?? "?"),
           sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0 }));
+        /* previews paint, the final decides — see usePlaces for the why */
+        const rows = await Q.runDql<Record<string, unknown>>(
+          Q.qGeoCountry(data.tf, appId, geoSel), 8, undefined, (early) => {
+            if (!live || !early.length) return;
+            const pv = shape(early); pv.partial = true; setGeoDetail(pv);
+          });
+        const res = shape(rows);
         geoMemo.current.set(k, res);
         if (live) setGeoDetail(res);
       } catch { if (live) setGeoDetail([]); }
@@ -207,8 +242,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * so clicking an amber state showed a list in which that state's traffic
    * was a rounding error, and the click looked like it had found nothing.
    * One leg, asked only when a state is actually opened. */
-  const [regionDetail, setRegionDetail] = useState<
-    Array<{ view: string; sessions: number; hit: number }> | null>(null);
+  const [regionDetail, setRegionDetail] = useState<ScreenRows | null>(null);
   const regionMemo = React.useRef(new Map<string,
     Array<{ view: string; sessions: number; hit: number }>>());
   useEffect(() => {
@@ -221,10 +255,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     let live = true;
     (async () => {
       try {
-        const rows = await Q.runDql<Record<string, unknown>>(
-          Q.qGeoRegion(data.tf, appId, geoSel, uf), 8);
-        const res = rows.map((r) => ({ view: String(r.view ?? "?"),
+        const shape = (rows: Record<string, unknown>[]): ScreenRows => rows.map((r) => ({
+          view: String(r.view ?? "?"),
           sessions: Number(r.sessions) || 0, hit: Number(r.hit) || 0 }));
+        const rows = await Q.runDql<Record<string, unknown>>(
+          Q.qGeoRegion(data.tf, appId, geoSel, uf), 8, undefined, (early) => {
+            if (!live || !early.length) return;
+            const pv = shape(early); pv.partial = true; setRegionDetail(pv);
+          });
+        const res = shape(rows);
         regionMemo.current.set(k, res);
         if (live) setRegionDetail(res);
       } catch { if (live) setRegionDetail([]); }
@@ -442,7 +481,11 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     let live = true;
     (async () => {
       try {
-        const rows = await Q.runDql<Record<string, unknown>>(Q.qGeoWho(data.tf, appId, geoSel), 10000);
+        /* one deterministic sample of the application's sessions (sampleRate):
+           the country-vs-rest RATES are read off it, and both sides of the
+           comparison come from the same sample */
+        const rows = await Q.runDql<Record<string, unknown>>(Q.qGeoWho(data.tf, appId, geoSel,
+          Q.sampleRate(data.apps.find((a) => a.appId === appId)?.sessions ?? 0)), 10000);
         const DIMS = ["os", "browser", "isp", "devtype", "conn", "osv", "browserv"] as const;
         const LABEL: Record<string, string> = { os: "os", browser: "browser", isp: "isp",
           devtype: "device", conn: "connection", osv: "os version", browserv: "browser version" };
@@ -481,7 +524,6 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   }, [geoSel, appId, data.tf.from, data.tf.to]);
   const pulse = usePulse(appId, data.tf, feName || undefined);
   const fc = useAppForecast(appId, data.tf, feName || undefined);
-  const ux = useUxOverview(data.tf, appId);
   const scope = useAppScope(appId, data.apps.find((a) => a.appId === appId)?.entity);
   /* The page opens on sessions. Clicking a card opens that card's evidence
    * BELOW the grid — the chart and its breakdown — and clicking the open card
@@ -570,7 +612,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
        (checkout.playground-dev.internal.example.com is a wall in a
        160px column); the whole name rides the tooltip. */
     /* THE WHOLE HOST, ELLIPSISED BY CSS. It used to be cut to its first two
-       labels to fit the column, which turned internal.example.com into
+       labels to fit the column, which turned static.cdn.example-bank.com into
        "static.neth" — a hostname that does not exist, printed as if it did. A
        name cut by CSS at least shows that it was cut; a name cut by code
        looks complete. */
@@ -581,8 +623,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const isMobile = app.entity?.startsWith("MOBILE_APPLICATION-");
   const problems = data.problems.filter((p) =>
     (p.entityIds ?? []).includes(app.entity ?? ""));
-  const clean = impacted && impacted.sessions > 0
-    ? 1 - impacted.hit / impacted.sessions : null;
+  /* A PER-SESSION RATIO HAS NO HONEST PREVIEW. Grail's partial result of a
+     per-session count holds each session with only part of its events, so
+     "sessions that met an error" is not an incomplete figure but a LOW one —
+     measured on a bank's production application: previews of 40%, 32%, 63%,
+     78%, 56% before the final 81%. The verdict followed each of them, from
+     "not measured" through Warning to Critical, and the reader watched the
+     application change its diagnosis three times. So the ratio and the
+     verdict built on it wait for the final; counts may still preview. */
+  const impactFinal = !!harm && !harm.partial;
+  const clean = impactFinal && harm && harm.sessions > 0
+    ? 1 - harm.hit / harm.sessions : null;
   // Problems anywhere in this application's delivery scope count against it —
   // the same set the chain rolls up into its layer captions.
   const scopeProbs = data.problems.filter((pr) =>
@@ -609,12 +660,24 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     problems: problems.length + scopeProblems,
     anomalies,
     categories: [...problems, ...scopeProbs].map((p) => p.category),
-    sessions: impacted?.sessions, hit: impacted?.hit,
+    sessions: harm?.sessions, hit: harm?.hit,
     // the population that can actually be harmed decides the verdict
-    realSessions: impacted?.realSessions, realHit: impacted?.hitReal,
+    realSessions: harm?.realSessions, realHit: harm?.hitReal,
     forecastRising: !!fc && fc.slope > 0,
+    // response time against the errors that hurt — judged once it is final
+    score: uxSelf && !ux?.scorePartial ? apdexOf(uxSelf) : null,
   });
-  const tone: Tone = verdict.tone;
+  /* ONE VERDICT, ONCE. Until the impact scan's final and the chain's final
+     (Davis problems arrive with it) have both landed, the page says it is
+     measuring — in the header and in the hero, in neutral ink — instead of
+     printing a diagnosis it may have to take back. */
+  // the score judges too, so the verdict waits for its final as well
+  const verdictFinal = impactFinal && !data.partial && !!ux && !ux.scorePartial;
+  const shown = verdictFinal ? verdict : {
+    tone: "info" as Tone, label: "Measuring",
+    reason: "counting this window's sessions — the verdict appears once they are all in",
+    hitRate: null };
+  const tone: Tone = shown.tone;
   // Real people, the same population the estate table's headline counts — the
   // two lines quote the same estate and must not disagree about it.
   /* One row means the scan was scoped to this application, so there is no
@@ -649,8 +712,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     synth: Math.round(devOrigin.synth * scale),
   };
   const hits = {
-    real: impacted?.hitReal ?? 0, robot: impacted?.hitRobot ?? 0,
-    synth: impacted?.hitSynth ?? 0,
+    real: harm?.hitReal ?? 0, robot: harm?.hitRobot ?? 0,
+    synth: harm?.hitSynth ?? 0,
   };
   const springs = ([
     ["real", "Real users"], ["robot", "Robots"], ["synth", "Synthetic"],
@@ -677,6 +740,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
    * figure the page could NOT measure is named as unmeasured rather than
    * quietly omitted, which is how a model ends up inventing one. */
   const overviewFacts = () => {
+    const HIT_BAD_PCT = HIT_BAD * 100, HIT_WARN_PCT = HIT_WARN * 100;
     const pc = (r: number) => `${(r * 100).toFixed(r >= 0.1 ? 0 : 1)}%`;
     const apdex = uxRow ? apdexOf(uxRow) : null;
     const L: string[] = [
@@ -686,16 +750,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
          fact that decided it were right there and never made it into the
          facts, so the model was asked to judge a page whose judgement it
          could not see */
-      `Verdict: ${verdict.label} — ${verdict.reason}`,
+      verdictFinal ? `Verdict: ${verdict.label} — ${verdict.reason}`
+        : "Verdict: still measuring — the session scan has not finished; do not infer one",
       impacted
         ? `Sessions: ${fmtN(impacted.sessions)} started in this window as Users & Sessions lists them (${fmtN(impacted.realSessions)} from real people, the rest robots or synthetic)`
         : "Sessions: not measured in this window",
-      impacted && impacted.realSessions > 0
-        ? `Sessions that met an error: ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} real ones (${pc(impacted.hitReal / impacted.realSessions)})`
-        : "Sessions that met an error: not measurable — no real-user sessions on record",
+      harm && harm.realSessions > 0
+        ? `Sessions an error affected (an error during the person's own action, or the app crashing/freezing — background errors are not counted): ${fmtN(harm.hitReal)} of ${fmtN(harm.realSessions)} real ones (${pc(harm.hitReal / harm.realSessions)})`
+        : "Sessions an error affected: not measurable — no real-user sessions on record",
       apdex === null
-        ? "Apdex: not rated — no rated user actions in this window"
-        : `Apdex: ${fmtApdex(apdex)} (${apdexBand(apdex)}; T = ${APDEX_T_MS / 1000}s)`,
+        ? "Experience score: not rated — the platform rated no user action in this window"
+        : `Experience score: ${(scoreExplain({ ...uxRow!, crashes: uxRow!.scoreCrashes }) ?? "").replace(/\n+/g, " ")}`,
       `Errors recorded: ${fmtN(app.errors)}`
         + (uxRow
           ? ` — ${fmtN(uxRow.errorsThird)} raised by third parties (CSP, external requests, foreign scripts), ${fmtN(Math.max(0, uxRow.errors - uxRow.errorsThird))} by this application's own code; ${fmtN(uxRow.realErrors)} reached a real person`
@@ -725,23 +790,54 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           + (r.type ? ` · type ${r.type}` : ""));
       }
       L.push("");
-    } else {
+    } else if (detail !== "sessions") {
       L.push("Errors by name: not loaded — open the errors card on this page to list them, and the Error Inspector drill-down to open one.", "");
+    }
+    /* THE SCORE, SCREEN BY SCREEN, when the experience card is open — and
+       what each screen costs it. "Points lost" is plain arithmetic on the
+       platform's own ratings: how far the application's score would rise if
+       that screen's frustrated and tolerating actions had been satisfied,
+       everything else equal. It ranks the screens by what fixing them is
+       worth, which is the question a reader asks next. */
+    const rated = uxRow ? uxRow.satisfied + uxRow.tolerating + uxRow.frustrated : 0;
+    if (detail === "sessions" && detailRows && detailRows.length && rated > 0) {
+      L.push("The experience score by screen (the experience card is open; most used first):",
+        "  points lost = (frustrated + tolerating ÷ 2) ÷ the application's rated actions —",
+        "  how much the application's score would rise if that screen's actions had all been satisfied");
+      for (const r of detailRows.slice(0, 8)) {
+        const sat = r.sat ?? 0, tol = r.tol ?? 0, fru = r.fru ?? 0;
+        const n = sat + tol + fru;
+        const own = n ? (sat + tol / 2) / n : null;
+        const lost = (fru + tol / 2) / rated;
+        const ms = (v?: number) => (v ? `${Math.round(v / 1e6).toLocaleString("en-US")} ms` : "—");
+        L.push(`  ${r.name}: ${fmtN(r.vol)} actions, ${fmtN(n)} rated`
+          + (own === null ? " (none rated)"
+            : ` — its own score ${fmtApdex(own)} (${fmtN(sat)} satisfied, ${fmtN(tol)} tolerating, ${fmtN(fru)} frustrated)`
+              + `, points lost ${lost.toFixed(3)}`)
+          + ` · p50 ${ms(r.p50)}, p90 ${ms(r.p90)}`
+          + (r.errors ? ` · ${fmtN(r.errors)} errors recorded on it` : ""));
+      }
+      L.push("");
+    } else if (detail !== "errors") {
+      L.push("The experience score by screen: not loaded — open the User experience card on this page to list the screens and what each costs the score.", "");
     }
     if (geo && geo.length) {
       const tot = geo.reduce((a, g) => a + g.sessions, 0) || 1;
-      const base = geo.reduce((a, g) => a + g.hit, 0) / tot;
+      // the application's located rate, on the population places are judged on
+      const base = geo.reduce((a, g) => a + geoPop(g).h, 0)
+        / (geo.reduce((a, g) => a + geoPop(g).n, 0) || 1);
       /* THE RULE TRAVELS WITH THE FIGURES. A country in line at 85% beside
          states at 85% is only a contradiction to a reader who assumes the
          colour is the rate. It is not: it is deviation from this application.
          Spelled out here so the answer explains the rule the map applies —
          the rule in utils/geoVerdict — and not one it guessed. */
-      L.push(`How a place is judged on this page: every country, state and city is compared with THIS application's own error rate — ${pc(base)} of its located sessions met an error in this window — and with its own speed. Tolerating starts at 1.15× that rate or Apdex under 0.85; frustrated at 1.5× or Apdex under 0.50. The absolute rate is printed on every row but is NOT the colour: on an application whose normal is ${pc(base)}, a place at ${pc(base)} is "in line", however high that number is for users. The verdict needs substance — at least 30 sessions, 5 of them errored, a 2% rate — so a small place stays green for lack of evidence, not for health. States and cities have no Apdex at this depth, so only the deviation arm can colour them.`);
-      L.push("Where they connect from (sessions · share of the window · met an error · times the application's rate · verdict):");
+      L.push(`How a place is judged on this page: by the APPLICATION'S OWN RULE, worst of two — the share of the place's real-user sessions an error AFFECTED (an error during the person's own action, or — mobile only — the app crashing or freezing; background errors do not count), Critical at ${HIT_BAD_PCT}% or more, Warning at ${HIT_WARN_PCT}% or more; and the place's experience score (response time against those same errors), Critical under 0.70, Warning under 0.85, once 30 elements were rated. The place's rate against this application's (${pc(base)} of its located sessions were affected in this window — "0.59×" means better than usual) is printed, never coloured. A place with fewer than 10 sessions is too small to judge and stays green for lack of evidence, not for health.`);
+      L.push("Where they connect from (sessions · share of the window · affected by an error · times the application's rate · verdict):");
       for (const g of [...geo].sort((a, b) => b.sessions - a.sessions).slice(0, 8)) {
-        const rate = g.sessions > 0 ? g.hit / g.sessions : 0;
+        const pp = geoPop(g);
+        const rate = pp.n > 0 ? pp.h / pp.n : 0;
         L.push(`  ${geoName(g.country)} (${g.country}): ${fmtN(g.sessions)} sessions`
-          + ` (${((g.sessions / tot) * 100).toFixed(1)}%), ${pc(rate)} met an error`
+          + ` (${((g.sessions / tot) * 100).toFixed(1)}%), ${pc(rate)} affected by an error`
           + ` (${base > 0 ? (rate / base).toFixed(2) : "—"}×) — ${GEO_WORD[geoJudge(g, base)]}: ${geoBecause(g, base)}`);
       }
       if (geoSel) {
@@ -750,15 +846,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           L.push("  Its states, judged by the same rule (a session that moves between states is counted in each):");
           for (const r of [...regions].sort((a, b) => b.sessions - a.sessions).slice(0, 10)) {
             const rate = r.sessions > 0 ? r.hit / r.sessions : 0;
-            L.push(`    ${r.name}: ${fmtN(r.sessions)} sessions, ${pc(rate)} met an error`
-              + ` (${base > 0 ? (rate / base).toFixed(2) : "—"}×) — ${GEO_WORD[geoJudgeSub(r, base)]}`);
+            L.push(`    ${r.name}: ${fmtN(r.sessions)} sessions, ${pc(rate)} affected by an error`
+              + ` (${base > 0 ? (rate / base).toFixed(2) : "—"}×) — ${GEO_WORD[geoJudgeSub(regionArm(r), base)]}`);
           }
         }
         const rows = regionSel ? regionDetail : geoDetail;
         if (rows && rows.length) {
-          L.push(`  Top screens across ${regionSel ?? geoSel} (sessions · of which met an error):`);
+          L.push(`  Top screens across ${regionSel ?? geoSel} (sessions · of which an error affected):`);
           for (const d of rows.slice(0, 8)) {
-            L.push(`    ${d.view}: ${fmtN(d.sessions)} sessions, ${fmtN(d.hit)} met an error`
+            L.push(`    ${d.view}: ${fmtN(d.sessions)} sessions, ${fmtN(d.hit)} affected by an error`
               + (d.sessions > 0 ? ` (${pc(d.hit / d.sessions)})` : ""));
           }
           if (rows.some((d) => d.view === NO_SCREEN)) {
@@ -798,15 +894,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         <div className="tk-hd__t">
           <h2>{app.name}</h2>
           <span>{isMobile ? "Mobile application" : "Web application"} · {data.tf.label}
-            {" · "}<b style={{ color: TVAR[tone], fontWeight: 600 }}>
-              {verdict.label} — {verdict.reason}
+            {" · "}<b style={{ color: verdictFinal ? TVAR[tone] : "var(--ink-2)", fontWeight: 600 }}>
+              {shown.label} — {shown.reason}
               {/* A JUDGEMENT ON A PARTIAL FIGURE SAYS SO. The header already
                   reads "measuring…" while the impact scan is on a preview,
                   but the verdict is the loudest sentence on the page and it
                   was printing "Critical — 98% hit" off a partial scan with
                   nothing beside it. Data-integrity rule: the mark travels
                   with the number it qualifies. */}
-              {impacted?.partial ? <em className="dim"> · measuring</em> : null}</b></span>
+              </b></span>
         </div>
         <div className="tk-hd__a">
           {/* The errors this page counts, opened in the platform's own Error
@@ -878,10 +974,10 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         problemCats={[...new Set([...problems, ...scopeProbs]
           .map((pr) => davisCategory(pr.category)))]}
         requests={pulse?.requests ?? vitals?.requests ?? 0} reqFail={pulse?.reqFail ?? 0}
-        hitSessions={impacted?.hit ?? 0}
+        hitSessions={harm?.hit ?? 0}
         loadP50={app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? apdexOf(uxRow) : null}
-        apdexPartial={!!ux?.partial}
+        apdexPartial={!!ux?.scorePartial}
         /* AN EMPTY SCORE HAS TO SHOW ITS WORK.
            "—" is the right answer when nothing could be rated, and it is
            indistinguishable from a broken query unless the card says what it
@@ -901,20 +997,22 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           : uxRow && apdexOf(uxRow) === null
           ? (uxRow.realSessions === 0 && uxRow.sessions > 0
             ? "No people to rate: every session this window is robot or synthetic traffic, "
-              + "and Apdex scores real users only."
+              + "and the experience score counts real users only."
             : uxRow.actions === 0
               ? `No user actions recorded in this window — ${fmtN(uxRow.sessions)} sessions, `
-                + `and not one navigation or interaction among them. Apdex rates user actions, `
+                + `and not one navigation or interaction among them. The platform rates user actions, `
                 + `so there is nothing to score. This is a fact about the instrumentation, not `
                 + `about the speed: RUM is reporting requests and errors for this application `
                 + `and not what people do on the screen.`
               : `${fmtN(uxRow.actions)} user actions in this window and none of them rated. `
-                + `Apdex scores real users only, so actions belonging to robots or synthetic `
+                + `The experience score counts real users only, so actions belonging to robots or synthetic `
                 + `monitors are excluded — if that is all of them, the score has nothing left `
                 + `to measure.`)
           : undefined}
         apdexBands={uxRow ? { sat: uxRow.satisfied, tol: uxRow.tolerating,
-          fru: uxRow.frustrated, fruErr: uxRow.fruErr } : null}
+          fru: uxRow.frustrated, ratedActs: uxRow.ratedActs, errActions: uxRow.errActions,
+          crashes: uxRow.scoreCrashes } : null}
+        verdictLabel={shown.label} verdictReason={shown.reason}
         realErrors={uxRow ? uxRow.realErrors : null}
         errorsThird={uxRow?.errorsThird ?? 0}
         services={scopeCount} svcNames={svcNames} svcLinks={svcLinks} domNames={domNames}
@@ -959,8 +1057,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           scan leg (qGeo) feeds all of it. */}
       {geo && geo.length > 0 && (() => {
         const tot = geo.reduce((a, g) => a + g.sessions, 0) || 1;
-        const totHit = geo.reduce((a, g) => a + g.hit, 0);
-        const base = totHit / tot;
+        // the application's located rate, on the population places are judged on
+        const base = geo.reduce((a, g) => a + geoPop(g).h, 0)
+          / (geo.reduce((a, g) => a + geoPop(g).n, 0) || 1);
         const max = Math.max(...geo.map((g) => g.sessions), 1);
         const located = geo.filter((g) => CENTROID[g.country]);
         /* FRAME THE MAP ON THE PEOPLE, NOT ON THE PLACES.
@@ -1026,13 +1125,21 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
            initialViewState and nothing is projected against it. What the
            overlay projects against is geoView, which only ever holds a view
            the MAP reported. See the note at mapRef for why. */
-        const COL = geoCol();
+        /* NO VERDICT COLOUR ON A PREVIEW. The colour is a per-session share
+           judged on the application's lines, and a preview of a per-session
+           count is LOW (see impactFinal) — a country painted amber at 4 s
+           turned red at 8 s. Until the map's own scan is final, every mark
+           and row is drawn in neutral ink with its counts, and the header
+           says measuring; the verdict colours arrive once, together. */
+        const geoFinal = !geo.partial;
+        const COL = { ...geoCol(), wait: "rgba(160,164,176,0.55)" };
         /* dots and bars are MARKS, so they take the saturated half of the
            family — the text half resolves to #855400 in light, which is the
            olive that made the whole tile look yellow. */
         const TOK = { good: "var(--good-fill)", warn: "var(--warn-fill)",
-          bad: "var(--bad-fill)" } as const;
-        const WORD = GEO_WORD;
+          bad: "var(--bad-fill)", wait: "var(--ink-3)" } as const;
+        const shown = (g: GeoArm): GeoTone | "wait" => (geoFinal ? judge(g) : "wait");
+        const WORD = { ...GEO_WORD, wait: "measuring" } as const;
         const because = (g: GeoArm) => geoBecause(g, base);
         /* Country NAMES from the browser itself — no dataset needed, and it
          * speaks the reader's own language. City stays impossible honestly:
@@ -1060,7 +1167,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         const nameOf = geoName;
         const dot = (g: typeof located[number]) => ({
           latitude: CENTROID[g.country][0], longitude: CENTROID[g.country][1],
-          color: COL[judge(g)], country: nameOf(g.country),
+          color: COL[shown(g)], country: nameOf(g.country),
           sessions: g.sessions, hitByErrors: g.hit,
         });
         /* THE MAP DRILLS WITH THE SELECTION.
@@ -1081,7 +1188,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
             .filter((r) => REGION_CENTROID[r.id])
             .map((r) => ({
               latitude: REGION_CENTROID[r.id][0], longitude: REGION_CENTROID[r.id][1],
-              color: COL[geoJudgeSub(r, base)],
+              color: COL[geoJudgeSub(regionArm(r), base)],
               country: r.name, sessions: r.sessions, hitByErrors: r.hit,
             }));
           if (rs.length >= 2) return rs;
@@ -1237,14 +1344,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         && located.map((g) => {
                         const [la, lo] = CENTROID[g.country];
                         const sz = sizeOf(g);
-                        const tone = judge(g);
+                        const tone = shown(g);
                         return (
                           <button type="button" key={g.country}
                             className={`gpin gpin--${tone}${sz === 44 ? " gpin--busy" : ""}${geoSel === g.country ? " gpin--sel" : ""}`}
                             style={{ width: sz, height: sz,
                               left: `calc(50% + ${(mx(lo) - cx).toFixed(1)}px)`,
                               top: `calc(50% + ${(my(la) - cy).toFixed(1)}px)` }}
-                            title={`${nameOf(g.country)} — ${WORD[tone]} · ${fmtN(g.sessions)} sessions, ${fmtN(g.hit)} met an error · ${because(g)}${g.ttfbMs ? ` · ${fmtLat(g.ttfbMs)} to first byte (p75)` : ""}`}
+                            title={`${nameOf(g.country)} — ${WORD[tone]} · ${fmtN(g.sessions)} sessions · ${because(g)}${g.ttfbMs ? ` · ${fmtLat(g.ttfbMs)} to first byte (p75)` : ""}`}
                             onClick={() => {
                               const opening = geoSel !== g.country;
                               setGeoSel((c) => (c === g.country ? null : g.country));
@@ -1276,7 +1383,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         const c = REGION_CENTROID[r.id];
                         if (!c) return null;
                         const rate = r.hit / Math.max(r.sessions, 1);
-                        const t = geoJudgeSub(r, base);
+                        const t = geoJudgeSub(regionArm(r), base);
                         const sz = r.sessions >= 100 ? 20 : r.sessions >= 10 ? 15 : 11;
                         return (
                           <button type="button" key={r.id}
@@ -1354,17 +1461,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     the numbers just above the next one. */}
                 <div className="geo__r geo__hd" aria-hidden="true" style={{ order: -1 }}>
                   <i /><span>code</span><span>country</span><span />
-                  <span>sessions</span><span>met an error</span><span>ttfb p75</span>
+                  <span>sessions</span><span>affected</span><span>ttfb p75</span>
                 </div>
                 {shownGeo.map((g, gi) => {
                   const a = arms(g);
                   const { rate, lift } = a;
-                  const tone = judge(g);
-                  /* when SPEED alone set the tone, the cell must say so — a
-                   * red country with zero errors reading "clean" is the same
-                   * contradiction this tile just got cured of */
-                  const spdOnly = a.level > 0 && a.spd === a.level
-                    && a.abs < a.level && a.rel < a.level;
+                  const tone = shown(g);
+
                   return (
                     <button type="button"
                       className={`geo__r${geoSel === g.country ? " geo__r--on" : ""}`}
@@ -1375,7 +1478,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         if (opening) revealDrill();
                       }}
                       key={g.country}
-                      title={`${fmtN(g.sessions)} sessions from ${g.country} — ${fmtN(g.hit)} met an error (${(rate * 100).toFixed(1)}%, application average ${(base * 100).toFixed(1)}%) · ${WORD[tone]}: ${because(g)}`}>
+                      title={`${fmtN(g.sessions)} sessions from ${g.country} — ${(rate * 100).toFixed(1)}% affected by an error, application average ${(base * 100).toFixed(1)}% · ${WORD[tone]}: ${because(g)}`}>
                       <i className="geo__dot" style={{ background: TOK[tone] }} />
                       {/* THE ROW SAYS IT OPENS. Clicking a country has always
                           listed its states, and nothing on the row admitted
@@ -1395,16 +1498,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           background: `color-mix(in srgb, ${TOK[tone]} 55%, transparent)` }} />
                       </span>
                       <span className="num geo__n">{fmtN(g.sessions)}</span>
-                      {/* the multiplier only when deviation IS the finding —
-                          same substance gate as judge(): a red country at
-                          1.0× the app reads its own rate, and one errored
-                          session in hundreds never gets to claim "2.8×" */}
+                      {/* the rate is what the colour judged; the deviation
+                          rides beside it as a figure, with the same substance
+                          gate as before — one errored session in hundreds
+                          never gets to claim "2.8×" */}
                       <em className={`geo__h geo__h--${tone}`}>
-                        {spdOnly ? `Apdex ${a.apx!.toFixed(2)}`
-                          : g.hit === 0 ? "clean"
-                          : lift >= 1.15 && g.hit >= 5 && rate >= 0.02
-                            ? `${lift.toFixed(1)}× the app`
-                          : `${(rate * 100).toFixed(1)}% hit`}
+                        {g.hit === 0 ? "clean" : `${(rate * 100).toFixed(1)}% hit`}
+                        {g.hit >= 5 && rate >= 0.02 && base > 0 && Math.abs(lift - 1) >= 0.15
+                          ? <span className="geo__x"> · {lift.toFixed(2)}×</span> : null}
                       </em>
                       <em className={`geo__lat${latTone(g) ? ` geo__lat--${latTone(g)}` : ""}`}
                         title={g.ttfbMs ? `first byte p75 for ${nameOf(g.country)} — the network route's own cost; median country here: ${fmtLat(latBase)}` : "no timed views from here"}>
@@ -1428,7 +1529,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                   const under = shownGeo.findIndex((g) => g.country === geoSel) * 100
                     + 1 + ri;
                   const rate = r.hit / Math.max(r.sessions, 1);
-                  const t = geoJudgeSub(r, base);
+                  const t = geoJudgeSub(regionArm(r), base);
                   const c = REGION_CENTROID[r.id];
                   return (
                     <button type="button" key={r.id}
@@ -1487,7 +1588,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                 <div className="geo__drill-hd">
                   <b>{nameOf(geoSel)} · {geoSel}</b>
                   <span>{geoDetail === null ? "reading this country's sessions…"
-                    : `top screens · ${data.tf.label}`}</span>
+                    : `top screens · ${data.tf.label}${
+                      (regionSel ? regionDetail : geoDetail)?.partial ? " · measuring…" : ""}`}</span>
                   <button className="geo__drill-x" aria-label="Close"
                     onClick={() => setGeoSel(null)}><XmarkIcon /></button>
                 </div>
@@ -1515,7 +1617,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         states
                         <em>{regions.length === 0
                           ? `none of this country's ${fmtN(total)} sessions carry a state`
-                          : `${regions.length} recorded of ${fmtN(total)} sessions in the country`
+                          : (regions.partial ? "measuring… · " : "")
+                            + `${regions.length} recorded of ${fmtN(total)} sessions in the country`
                             + " — a session that moves between states is counted in each,"
                             + " so these do not add up"}</em>
                       </span>
@@ -1605,7 +1708,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       {/* the columns, named — same grid as the rows */}
                       <div className="geo__dr geo__dr--hd" aria-hidden="true">
                         <span>screen</span><span>share</span>
-                        <span>sessions</span><span>met an error</span>
+                        <span>sessions</span><span>affected</span>
                       </div>
                       {scoped.map((d) => {
                         const t = toneOf(d);
@@ -1617,7 +1720,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             onClick={() => setGeoViewSel((v) => (v === d.view ? null : d.view))}
                             title={noScreen
                               ? `${fmtN(d.hit)} ${geoSel} sessions met an error that belongs to no screen — app-level failures like ANR (the app frozen until the OS kills it). They count in the country's total, and a session opened from the list below may carry one of these instead of a screen's error.`
-                              : `${fmtN(d.sessions)} sessions from ${geoSel} on ${d.view}${d.hit ? ` — ${fmtN(d.hit)} met an error (${((d.hit / Math.max(d.sessions, 1)) * 100).toFixed(1)}% vs ${(cRate * 100).toFixed(1)}% for the country)` : ""}. Click to set this screen as the filter — the button below opens the sessions.`}>
+                              : `${fmtN(d.sessions)} sessions from ${geoSel} on ${d.view}${d.hit ? ` — ${fmtN(d.hit)} affected by an error (${((d.hit / Math.max(d.sessions, 1)) * 100).toFixed(1)}% vs ${(cRate * 100).toFixed(1)}% for the country)` : ""}. Click to set this screen as the filter — the button below opens the sessions.`}>
                             <span className="geo__dr-v">{d.view}</span>
                             <span className="geo__t"><i className="geo__b"
                               style={{ width: `${(d.sessions / dmax) * 100}%`,
@@ -1807,7 +1910,11 @@ interface CardProps {
    *  application on a live estate read as a rendering bug. */
   apdexNote?: string;
   /** The bands behind it — what the words under the score are built from. */
-  apdexBands: { sat: number; tol: number; fru: number; fruErr: number } | null;
+  apdexBands: { sat: number; tol: number; fru: number; ratedActs: number; errActions: number;
+    crashes: number } | null;
+  /** The application's ONE verdict (utils/verdict) — the same word and
+   *  reason the page header prints. The hero leads with it. */
+  verdictLabel: string; verdictReason: string;
   /** Errors that reached a real person, and the third-party share of all of
    *  them — null while the estate scan is still in flight. */
   realErrors: number | null;
@@ -2073,19 +2180,25 @@ function CleanCard(p: CardProps) {
   const reqRate = p.requests > 0 ? p.reqFail / p.requests : 0;
   // the shared rule (utils/verdict.failTone), not a second copy of it
   const reqTone: Tone = failTone(reqRate);
-  const apdexWords = (() => {
-    if (!p.apdexBands) return null;
-    const { sat, tol, fru, fruErr } = p.apdexBands;
-    const rated = sat + tol + fru;
-    if (!rated) return null;
-    const per = (v: number) => Math.round((v / rated) * 100);
-    const slow = per(fru - fruErr) + per(tol);
-    const err = per(fruErr);
-    const fine = Math.max(0, 100 - slow - err);
-    return `Of every 100 things users do here, about ${fine} feel fine`
-      + (slow > 0 ? ` · ${slow} drag${err > 0 ? "" : " — speed, not errors"}` : "")
-      + (err > 0 ? ` · ${err} ruined by errors` : "");
-  })();
+  /* THE SCORE SHOWS ITS ARITHMETIC. Asked twice in production how the
+     number is made, so the counts behind it travel with it: the hero's word
+     and the card's stat carry the formula with this window's own figures as
+     their tooltip, and the hero prints the three shares under the score. */
+  const counts = p.apdexBands
+    ? { satisfied: p.apdexBands.sat, tolerating: p.apdexBands.tol, frustrated: p.apdexBands.fru,
+        crashes: p.apdexBands.crashes, errActions: p.apdexBands.errActions }
+    : null;
+  const apdexWords = counts ? scoreExplain(counts) : null;
+  const apdexMix = counts ? scoreMix(counts) : null;
+  /* WHERE THE HURT IS. Read off the user actions themselves (error.count /
+     has_crash): the share that carried an error. On a fast application that
+     still hurts people this is small — the errors are outside the actions
+     (ANRs, background requests) — which is exactly why the speed score can
+     read high while one session in three meets an error. */
+  const errActs = p.apdexBands && p.apdexBands.ratedActs > 0
+    ? p.apdexBands.errActions / p.apdexBands.ratedActs : null;
+  const errActsLine = errActs === null ? null
+    : `${errActs > 0 && errActs < 0.01 ? "<1" : Math.round(errActs * 100)}% of rated actions carried an error and were rated frustrated`;
 
   return (
     <div className="tk-mgrid cc" role="region" aria-label={`${p.name} overview card`}
@@ -2109,14 +2222,20 @@ function CleanCard(p: CardProps) {
                 + `ago, which the session aggregator has not written yet, and `
                 + `ones with no navigation and no interaction at all, which it `
                 + `never writes.`} />
-            <Stat v={pct} l="error-free" tone={p.tone === "info" ? undefined : p.tone} />
+            {/* UNAFFECTED, not "error-free": the share of sessions no error
+                AFFECTED — none during the person's own actions, no crash or
+                freeze. Background errors are counted on the errors card. */}
+            <Stat v={pct} l="unaffected" tone={p.tone === "info" ? undefined : p.tone}
+              title={"Sessions no error affected: no error during the person's own actions, "
+                + "and no crash or freeze. Errors in the background — a request with no "
+                + "action around it, an analytics beacon — are counted on the errors card "
+                + "but do not hurt anyone, so they do not count here."} />
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
                 should have to say both out loud. */}
-            <Stat v={fmtApdex(p.apdex)} l={p.apdexPartial ? "apdex · measuring" : "apdex"}
+            <Stat v={fmtApdex(p.apdex)} l={p.apdexPartial ? "experience · measuring" : "experience"}
               tone={p.apdex === null ? undefined : apdexTone(p.apdex)}
-              title={p.apdex === null ? p.apdexNote
-                : `${apdexBand(p.apdex)} · ${APDEX_LABEL}`} />
+              title={p.apdex === null ? p.apdexNote : apdexWords ?? undefined} />
           </div>
           {/* THE OTHER BASE, ON THE SCREEN. A reader comparing this card with
               Users & Sessions found 427 here and 193 there, twice, and had to
@@ -2166,9 +2285,8 @@ function CleanCard(p: CardProps) {
             if (!conflicted) return null;
             return (
               <div className="tk-apdex">
-                fast, and still hurting people — errored views frustrate their own
-                actions (Dynatrace&apos;s rule); errors outside any rated action
-                still cost no time
+                fast, and still hurting people — most of the harm is outside the
+                rated actions (crashes, freezes); see unaffected
               </div>
             );
           })()}
@@ -2235,16 +2353,31 @@ function CleanCard(p: CardProps) {
           own wave on this ring. */}
       {/* the score in plain words, built from the same bands the number is, so
           the two can never disagree — it is the verdict word's tooltip now */}
-      <div className={`tk-core cc-core${p.apdex === null ? " cc-core--mute" : ""}`}
+      {/* THE HERO LEADS WITH THE VERDICT. It led with the experience score —
+          a SPEED measure — and on a bank's production application printed
+          EXCELLENT in green while the header beside it said Warning: one in
+          three real-user sessions hit by errors. Two answers to "how is this
+          application?" on one screen, and the louder one was the partial
+          one. The hero now carries the application's ONE verdict
+          (utils/verdict: errors, Davis problems and speed together), in its
+          colour and its breathing pace; the score keeps its place as the
+          caption, named for what it is. The ring's fill is still the score. */}
+      <div className={`tk-core cc-core${p.apdex === null && p.tone === "info" ? " cc-core--mute" : ""}`}
         ref={coreRef}
-        style={{ ["--t" as string]: p.apdex === null
-            ? "var(--border-2)" : FVAR[apdexTone(p.apdex)],
-          ["--breath" as string]: BREATH[apdexTone(p.apdex)] }}>
+        style={{ ["--t" as string]: FVAR[p.tone],
+          ["--breath" as string]: BREATH[p.tone] }}>
         <div className="cc-corewrap" ref={ringRef}>
-        <CoreRing host={ringRef} value={p.apdex} tone={apdexTone(p.apdex)}
-          errPerMin={Number(p.errorsPerMin)} errors={p.errors} />
+        {/* NOTHING MOVES BEFORE THE VERDICT. While the page measures, the ring
+            drew a red wave from the early error rate and a score that was not
+            in yet — an alarm before any finding. Neutral and still until the
+            verdict lands; then the ring speaks the verdict's tone. */}
+        <CoreRing host={ringRef}
+          value={p.verdictLabel === "Measuring" ? null : p.apdex}
+          tone={p.verdictLabel === "Measuring" ? "info" : p.tone}
+          errPerMin={p.verdictLabel === "Measuring" ? 0 : Number(p.errorsPerMin)}
+          errors={p.verdictLabel === "Measuring" ? 0 : p.errors} />
         <button className="tk-core__b" onClick={p.onOpen}
-          aria-label={`${p.name} — Apdex ${fmtApdex(p.apdex)}, open its delivery chain`}>
+          aria-label={`${p.name} — ${p.verdictLabel}: ${p.verdictReason}; experience score ${fmtApdex(p.apdex)}, open its delivery chain`}>
           <i className="tk-core__ic">{p.isMobile ? <MobileIcon /> : <DesktopIcon />}</i>
           {/* The WORD leads — "Good" reads instantly where 0.92 needs a
               scale; the number moves to the caption for whoever audits it. */}
@@ -2256,12 +2389,24 @@ function CleanCard(p: CardProps) {
               product speaks. It also carries the score in plain words as its
               tooltip, which used to be a line on the card repeating the
               number printed right above it. */}
+          {/* "Measuring" is not a judgement: neutral ink, not the primary hue */}
           <b className="num tk-core__pct tk-core__pct--word"
-            style={{ color: p.apdex === null ? undefined : TVAR[apdexTone(p.apdex)] }}
-            title={apdexWords ?? undefined}>
-            {p.apdex === null ? "…" : apdexBand(p.apdex)}</b>
-          <span className="tk-core__cap">
-            apdex{p.apdex === null ? "" : ` ${fmtApdex(p.apdex)}`}</span>
+            style={{ color: p.verdictLabel === "Measuring" ? "var(--ink-2)" : TVAR[p.tone] }}
+            title={p.verdictReason}>
+            {p.verdictLabel}</b>
+          <span className="tk-core__why">{p.verdictReason}</span>
+          {/* ONE LINE FOR THE SCORE. The card carried the score, its band, its
+              three shares, its rated count and the share of actions with an
+              error — five facts in three lines under the verdict, read as
+              clutter in production. The line keeps the number and what it
+              measures; everything else is its tooltip, with the arithmetic. */}
+          <span className="tk-core__cap"
+            title={[apdexWords, apdexMix, errActsLine && `${errActsLine} — read off each action's `
+              + "own error fields. Errors outside any action (background requests) do not "
+              + "enter the score; a crash or freeze counts against unaffected."]
+              .filter(Boolean).join("\n\n") || p.apdexNote || undefined}>
+            experience score {p.apdexPartial && p.apdex === null ? "…"
+              : p.apdex === null ? "—" : fmtApdex(p.apdex)}</span>
           {/* The score, translated: what happens in every 100 things users
               do — built from the same bands the number is, so the words and
               the figure cannot disagree. Slowness and errors are named
@@ -2397,7 +2542,8 @@ error series, read at the same width the window is drawn in.`}>
             every tab. One stamp is enough; two is clutter on a key line. */}
         <summary>what the motion and the colours mean</summary>
         <span>
-          every motion is a measurement · ring and breathing pace = apdex ·
+          every motion is a measurement · ring fill = experience score (speed) ·
+          hero colour and breathing pace = the application's verdict ·
           wave = error rate · icon knock = a failing signal on that box ·
           pulsing forecast = rising · bright bar = the interval still
           accruing · click a box for its breakdown
@@ -2821,7 +2967,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           : metric === "requests"
             ? "failures come from the error records: request events on a live estate "
               + "carry only 2xx, so counting 4xx off them would always read zero"
-            : `apdex bands at T = ${APDEX_T_MS / 1000}s · the bar is share of user actions`}
+            : `experience rated by the platform per action · the bar is share of user actions`}
       </div>
     </div>
   );

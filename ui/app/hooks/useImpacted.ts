@@ -27,6 +27,9 @@ export interface Impacted {
   ex?: { sid: string; start: string; inst?: string; errs: number };
   /** True while these came from a PREVIEW: real, measured, not yet whole. */
   partial?: boolean;
+  /** The experience score, when the caller has it final — carried here so a
+   *  builder that judges from impact judges with the score too. */
+  score?: number | null;
   /** Which store counted: "sessions" is what Users & Sessions lists;
    *  "events" is every session active in the window, which the list will
    *  not match. The card says which one it is showing. */

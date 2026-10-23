@@ -366,9 +366,9 @@ export function useChainData(
            full round trips where there had been one expensive one.
            Smartscape stays, because it is free and it names the picker. */
         discovery ? Promise.resolve([] as CallRow[])
-          : safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, 200, cut),
+          : safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, Q.TOPOLOGY_CAP, cut),
         discovery ? Promise.resolve([] as RuntimeRow[])
-          : safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
+          : safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, Q.TOPOLOGY_CAP, cut),
         discovery ? none
           : safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
         discovery ? Promise.resolve([] as ProblemRow[])
@@ -381,7 +381,7 @@ export function useChainData(
               Q.DAVIS_ROLLUP_CAP, cut),
         discovery ? none
           : safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf),
-              bag, 300, cut),
+              bag, Q.SIGNALS_CAP, cut),
       ]);
 
       // the first paint waits for these two only

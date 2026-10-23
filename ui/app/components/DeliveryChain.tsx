@@ -1,7 +1,7 @@
 // Delivery chain: 7 layers built from Smartscape and enriched with Davis
 // problems, custom alerts and extension events.
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { fmtK, fmtMs, fmtN, perfScore } from "../utils/dql";
+import { fmtK, fmtMs, fmtN, perfScore, withinSessionLag } from "../utils/dql";
 import { appHomeHref, intentsAvailable, investigationPaths, kindOf,
   KIND_LABEL as ENTITY_WORD, open,
   type Persona, type Route } from "../utils/links";
@@ -19,6 +19,8 @@ import { Intelligence } from "./Intelligence";
 import { CHAIN_STARTERS } from "../utils/starters";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
+import { useUxOverview } from "../hooks/useUxOverview";
+import { apdexOf } from "../utils/apdex";
 import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useDbEntity } from "../hooks/useDbEntity";
@@ -1119,6 +1121,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope, ahead: Forecas
       // the same people-first rule the landing page and the estate table use
       realSessions: impacted?.realSessions, realHit: impacted?.hitReal,
       forecastRising: !!ahead && ahead.slope > 0,
+      score: impacted?.score ?? null,
     });
     appElo.tone = appVd.tone;
     appElo.det.push(["Status",
@@ -1162,9 +1165,34 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // line hit the temporal dead zone at runtime, not at typecheck
   const ahead = useAppForecast(appId, data.tf,
     feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined);
-  const impacted = useImpacted(appId, data.tf, true,
+  /* Inside the session store's lag the impact would be ANOTHER per-session
+     scan of user.events — the same one useUxOverview below already makes
+     (memoised, shared with the Overview): 81 GB and 14 s twice on a bank's
+     estate. There the UX scan answers alone; past the lag, the session store
+     still gives the headline count Users & Sessions lists. */
+  const impacted = useImpacted(appId, data.tf, !withinSessionLag(data.tf),
     feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "")
       || undefined);
+  /* WHO WAS HURT, judged exactly as the Overview judges it: sessions an
+     error AFFECTED (utils/dql USER_HIT), from the same per-session scan —
+     memoised, so arriving from the Overview costs nothing. The session
+     headline and the origin scaling keep `impacted`. */
+  const uxMap = useUxOverview(data.tf, appId);
+  const harm = uxMap?.get(appId);
+  /* What the chain is built with: the session COUNT from `impacted` (the
+     store Users & Sessions lists), every HIT figure — and the real-user base
+     it is a share of — from the affected-sessions scan, so each ratio is
+     taken on one base and judged by one definition. */
+  const judged: Impacted | null = harm
+    ? { sessions: impacted?.sessions ?? harm.sessions, hit: harm.hit,
+        realSessions: harm.realSessions, hitReal: harm.hitReal,
+        hitRobot: harm.hitRobot, hitSynth: harm.hitSynth,
+        partial: !!uxMap?.partial || !!impacted?.partial || !!uxMap?.scorePartial,
+        base: impacted?.base ?? "events",
+        // the experience score judges the application here as on the Overview
+        score: !uxMap?.scorePartial ? apdexOf(harm) : null }
+    : null;
+
   // The provider behind the machines AND the serverless placements: a
   // lambda-backed service produces no HOST, and the Provider column born
   // only from hosts never existed for it — the chain ended at Run while the
@@ -1220,9 +1248,9 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         : undefined);
   const quiet = useQuietProbe(quietEntity, !data.loading && appSessions === 0);
   const built = useMemo(
-    () => buildTiers(data, appId, scope, ahead, impacted, cloud, stores, gen2, dbIds,
+    () => buildTiers(data, appId, scope, ahead, judged, cloud, stores, gen2, dbIds,
       quiet, promotedFp),
-    [data, appId, scope, ahead, impacted, cloud, stores, gen2, dbIds, promotedFp, quiet]);
+    [data, appId, scope, ahead, judged, cloud, stores, gen2, dbIds, promotedFp, quiet]);
   const tiers = built.layers;
   /* Density decides the SCALE, not just the height: a chain of one node per
    * layer drew the same 18–44px icons and 11px type as a nine-node estate,
@@ -1715,7 +1743,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   // same address shape, just named for what it is.
                   domain: selElo.domain ?? selElo.store,
                   domainHasSpans: !!selAddress && !!selDomainTraces?.has(selAddress),
-                  impacted: selShowsImpact && impacted && impacted.hit > 0 ? impacted : undefined,
+                  impacted: selShowsImpact && judged && judged.hit > 0 ? judged : undefined,
                   signals: nSigs,
                   forecastRising: fcRising,
                   assist,
@@ -1728,7 +1756,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selElo, selTier, appId, data, met, ahead, dbEntity, selAddress,
-      selDomainTraces, impacted, assist, apps, feNames, scope]);
+      selDomainTraces, judged, assist, apps, feNames, scope]);
 
 
   const bar = (items: Array<[string, number]>, tone: (k: string) => Tone) => {

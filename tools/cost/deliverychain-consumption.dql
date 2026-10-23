@@ -1,0 +1,119 @@
+// UX Delivery Chain (my.deliverychain.ux) — query consumption on THIS tenant.
+// Run in a Notebook on the tenant to measure. Each block is one query.
+// Window: the last 30 days covers every version deployed here; narrow `from:`
+// to a single day to see one validation session.
+//
+// BUE (BILLING_USAGE_EVENT) is what was billed. QEE (QUERY_EXECUTION_EVENT)
+// is per-query detail (text, bytes read, duration) — diagnostic, not billing.
+// Queries over RUM data bill as "Digital Experience Monitoring - Query"
+// (preview: no normalization weight, volume only); Davis problems/events as
+// "Events - Query".
+
+
+// ── 1. Is the app attributed? Sample before trusting the rest ─────────────
+fetch dt.system.events, from: -30d
+| filter event.kind == "BILLING_USAGE_EVENT"
+| filter client.application_context == "my.deliverychain.ux"
+| limit 3
+
+
+// ── 2. Billed so far, by query type ───────────────────────────────────────
+fetch dt.system.events, from: -30d
+| filter event.kind == "BILLING_USAGE_EVENT"
+| filter in(event.type,
+    "Digital Experience Monitoring - Query",
+    "Events - Query",
+    "Log Management & Analytics - Query",
+    "Traces - Query",
+    "Files - Query")
+| filter client.application_context == "my.deliverychain.ux"
+| dedup {event.id, event.type}
+| summarize billed_gib = sum(toDouble(billed_bytes) / 1073741824),
+    dql_statements = countDistinct(query_id),
+    first_seen = min(timestamp), last_seen = max(timestamp),
+    by: {event.type}
+| sort billed_gib desc
+
+
+// ── 3. Billed per day — shows each validation session and each version ────
+fetch dt.system.events, from: -30d
+| filter event.kind == "BILLING_USAGE_EVENT"
+| filter in(event.type,
+    "Digital Experience Monitoring - Query",
+    "Events - Query",
+    "Log Management & Analytics - Query",
+    "Traces - Query",
+    "Files - Query")
+| filter client.application_context == "my.deliverychain.ux"
+| dedup {event.id, event.type}
+| summarize billed_gib = sum(toDouble(billed_bytes) / 1073741824),
+    dql_statements = countDistinct(query_id),
+    by: {day = bin(timestamp, 24h)}
+| sort day asc
+
+
+// ── 4. Billed per user ────────────────────────────────────────────────────
+fetch dt.system.events, from: -30d
+| filter event.kind == "BILLING_USAGE_EVENT"
+| filter in(event.type,
+    "Digital Experience Monitoring - Query",
+    "Events - Query",
+    "Log Management & Analytics - Query",
+    "Traces - Query",
+    "Files - Query")
+| filter client.application_context == "my.deliverychain.ux"
+| dedup {event.id, event.type}
+| summarize billed_gib = sum(toDouble(billed_bytes) / 1073741824),
+    dql_statements = countDistinct(query_id),
+    by: {user.email}
+| sort billed_gib desc
+
+
+// ── 5. Which queries cost the most (QEE — diagnostic) ─────────────────────
+// One QEE row per bucket a statement touched: count statements with
+// countDistinct(query_id), never count().
+fetch dt.system.events, from: -30d
+| filter event.kind == "QUERY_EXECUTION_EVENT"
+| filter client.application_context == "my.deliverychain.ux"
+| fieldsAdd head = substring(query_string, from: 0, to: 160)
+| summarize scanned_gib = sum(toDouble(scanned_bytes)) / 1073741824,
+    dql_statements = countDistinct(query_id),
+    avg_duration_s = avg(toDouble(execution_duration_ms)) / 1000,
+    by: {head}
+| sort scanned_gib desc
+| limit 25
+
+
+// ── 6. Read vs billed — the gap is zero-rated usage, not an error ─────────
+fetch dt.system.events, from: -30d
+| filter (event.kind == "QUERY_EXECUTION_EVENT")
+    or (event.kind == "BILLING_USAGE_EVENT" and in(event.type,
+      "Digital Experience Monitoring - Query", "Events - Query",
+      "Log Management & Analytics - Query", "Traces - Query", "Files - Query"))
+| filter client.application_context == "my.deliverychain.ux"
+| summarize scanned_gib = sum(if(event.kind == "QUERY_EXECUTION_EVENT",
+      toDouble(scanned_bytes), else: 0.0)) / 1073741824,
+    billed_gib = sum(if(event.kind == "BILLING_USAGE_EVENT",
+      toDouble(billed_bytes), else: 0.0)) / 1073741824
+
+
+// ── 7. THE ONE THAT ANSWERS: read vs billed, matched by query_id ──────────
+// Measured on a customer production tenant (2026-10-23): QEE carries client.application_context
+// = my.deliverychain.ux, but no BUE did — blocks 2-4 return nothing there.
+// This joins each of the app's statements to whatever BUE billed it, so
+// billing under a null or different context is still found.
+fetch dt.system.events, from: -2d
+| filter event.kind == "QUERY_EXECUTION_EVENT"
+| filter client.application_context == "my.deliverychain.ux"
+| summarize scanned = sum(toDouble(scanned_bytes)), by: {query_id}
+| join [
+    fetch dt.system.events, from: -2d
+    | filter event.kind == "BILLING_USAGE_EVENT" and contains(event.type, "Query")
+    | dedup {event.id, event.type}
+    | summarize billed = sum(toDouble(billed_bytes)), types = collectDistinct(event.type), by: {query_id}
+  ], on: {query_id}, kind: leftOuter, fields: {billed, types}
+| summarize statements = count(),
+    statements_billed = countIf(isNotNull(billed)),
+    scanned_gib = sum(scanned) / 1073741824,
+    billed_gib = sum(coalesce(billed, 0.0)) / 1073741824,
+    billed_types = collectDistinct(types)

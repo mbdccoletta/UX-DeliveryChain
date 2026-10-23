@@ -6,6 +6,9 @@ import { qGeo, runDql, type Timeframe } from "../utils/dql";
 
 export interface GeoRow {
   country: string; sessions: number; hit: number; ttfbMs: number;
+  /** Sessions of real people (no robots, no synthetic monitors) and how many
+   *  of them met an error — the population the verdict is judged on. */
+  realSessions?: number; realHit?: number;
   /** Duration-only Apdex bands over user actions (T = 3s) — the slowness
    *  side of frustration; the error side is counted by `hit`. */
   sat: number; tol: number; fru: number;
@@ -22,6 +25,8 @@ const shape = (rows: Record<string, unknown>[]): GeoRows => rows.map((r) => ({
   country: String(r.country ?? "?"),
   sessions: Number(r.sessions) || 0,
   hit: Number(r.hitSessions) || 0,
+  realSessions: Number(r.realSessions) || 0,
+  realHit: Number(r.realHit) || 0,
   ttfbMs: Number(r.ttfbMs) || 0,
   sat: Number(r.sat) || 0,
   tol: Number(r.tol) || 0,

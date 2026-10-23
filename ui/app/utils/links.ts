@@ -509,7 +509,7 @@ export const viewVitalsHref = (
  * THE TRACES EXPLORER, FILTERED — read off its own address bar, not deduced.
  *
  *   /ui/apps/dynatrace.distributedtracing/explorer
- *     ?filter=server.address = internal.example.com
+ *     ?filter=server.address = intranet.example-bank.test
  *             endpoint.name = "POST /\*.jsf"
  *     &tf=now-2h;now&v=requests
  *
