@@ -164,7 +164,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   /* The name Users & Sessions filters by. Its Frontends facet keys on
    * frontend.name, which differs from the inventory name — the same lookup
    * the Overview uses, so the two pages hand off to the identical filter. */
-  const feNames = useFrontendNames();
+  const feNames = useFrontendNames(data.tf.minutes);
   const boardApp = data.apps.find((a) => a.appId === scopeApp);
   const feName = (boardApp && feNames?.get(boardApp.entity ?? "")) || "";
   /** A hand-off to Users & Sessions, narrowed to one kind of session. */
@@ -571,6 +571,12 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       rows, whereBetween, total, worst, worstLost, where, top };
   }, [data.sequences, scopeApp, completeness.deepest]);
 
+  /* While the figures are a preview, every card says so — the mark travels
+     with the number it qualifies, the same way it does on the Overview and
+     the Delivery Chain. */
+  const measuringMark = kpis?.partial
+    ? <em className="dim" title="Preview figures — real, measured, still firming up as Grail finishes. The final replaces them."> · measuring</em>
+    : null;
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
     if (!kpis) return <div className="bc__hero bc__hero--load" />;
     const isBrand = front === "brand";
@@ -579,7 +585,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
      * where pricing a keyword guess was not. */
     if (isBrand && noPeople) return (
       <div className="bc__hero" style={{ ["--ht" as string]: "var(--ink-2)" }}>
-        <span className="bc__hero-l">customers at risk</span>
+        <span className="bc__hero-l">customers at risk{measuringMark}</span>
         <b className="bc__hero-v num" title={NO_PEOPLE}>•••</b>
         <span className="bc__hero-s">{NO_PEOPLE}</span>
       </div>
@@ -807,7 +813,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       // could not be measured, and "0.0% of the customer base" under "•••"
       // is the fabrication this branch exists to prevent
       <div className="bc__stat" title={unmeasured}>
-        <span className="bc__stat-l">{label}</span>
+        <span className="bc__stat-l">{label}{measuringMark}</span>
         <div className="bc__stat-row"><b className="bc__stat-v num">•••</b></div>
         <div className="bc__stat-ft">
           <span className="bc__stat-prev" title={unmeasured}>not measurable</span>
@@ -829,7 +835,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           onKeyDown: (e: React.KeyboardEvent) => {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dest.run(); }
           } } : {})}>
-        <span className="bc__stat-l">{label}</span>
+        <span className="bc__stat-l">{label}{measuringMark}</span>
         <div className="bc__stat-row">
           <b className="bc__stat-v num">{fmt(cv)}</b>
           {!liveOnly && (

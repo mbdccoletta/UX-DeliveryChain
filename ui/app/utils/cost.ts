@@ -26,7 +26,7 @@ let truncated = 0;
 /** Every query of this window, in order: what it read and whether it finished.
  *  The header draws one bar per entry, which is the readout AND the evidence —
  *  a truncated query is a red bar you can point at. */
-let trace: Array<{ bytes: number; cut: boolean }> = [];
+let trace: Array<{ bytes: number; cut: boolean; label: string }> = [];
 /** Queries in flight right now, so the readout can show it is still working. */
 let inFlight = 0;
 let windowKey = "";
@@ -37,14 +37,14 @@ const emit = () => subs.forEach((f) => f());
 export function noteScanStart(): void { inFlight += 1; emit(); }
 
 /** Every completed query reports what Grail actually read for it. */
-export function noteScan(bytes: number, wasTruncated = false): void {
+export function noteScan(bytes: number, wasTruncated = false, label = "query"): void {
   queries += 1;
   inFlight = Math.max(0, inFlight - 1);
   if (wasTruncated) truncated += 1;
   const b = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
   scanned += b;
   // the readout holds the last 48 — enough to show the shape of a page load
-  trace.push({ bytes: b, cut: wasTruncated });
+  trace.push({ bytes: b, cut: wasTruncated, label });
   if (trace.length > 48) trace = trace.slice(-48);
   emit();
 }
@@ -54,9 +54,26 @@ export const isScanLimit = (message?: string | null) =>
   /scanLimitGBytes|gigabytes of data were scanned/i.test(message ?? "");
 
 /** A new window is a new bill: the counter belongs to the timeframe on screen. */
+/* THE PAGE'S CLOCK. "A última resposta não pode ser maior que 10 segundos"
+   is a bound on the PAGE, not on each query — a query that starts six
+   seconds in does not get its own fresh ten. The epoch is the moment the
+   window on screen changed, which is also when the bill restarts; the
+   runner reads the remaining budget from here. Queries issued after the
+   budget has elapsed are user actions (a drill opened a minute later) and
+   keep their own per-query bound instead — see pageBudgetMs. */
+export const PAGE_BUDGET_MS = 10000;
+let windowStartedAt = Date.now();
+/** Milliseconds of the page budget still left, or null once the first-load
+ *  budget has fully elapsed (later queries are interactions, not the load). */
+export function pageBudgetMs(): number | null {
+  const left = PAGE_BUDGET_MS - (Date.now() - windowStartedAt);
+  return left > 0 ? left : null;
+}
+
 export function resetScan(key: string): void {
   if (key === windowKey) return;
   windowKey = key;
+  windowStartedAt = Date.now();
   scanned = 0;
   queries = 0;
   truncated = 0;
@@ -65,6 +82,31 @@ export function resetScan(key: string): void {
 }
 
 export const scanTotals = () => ({ bytes: scanned, queries, truncated, trace, inFlight });
+
+/**
+ * WHERE THE MONEY WENT, not just how much.
+ *
+ * A single total says the page is expensive and nothing about what to do. The
+ * bill is the sum of a handful of scans with very different shapes — a
+ * per-session summarize over the whole estate costs orders more than the same
+ * projection scoped to one application — so the readout groups by what each
+ * query READ. Grouped, the ranking is the work list: whatever sits on top is
+ * the next thing worth scoping.
+ *
+ * Nothing extra is executed for this. Grail reports scannedBytes with every
+ * result; this is the number it already sent, kept instead of discarded.
+ */
+export const scanByLabel = () => {
+  const by = new Map<string, { bytes: number; n: number; cut: number }>();
+  for (const t of trace) {
+    const cur = by.get(t.label) ?? { bytes: 0, n: 0, cut: 0 };
+    cur.bytes += t.bytes; cur.n += 1; if (t.cut) cur.cut += 1;
+    by.set(t.label, cur);
+  }
+  return [...by.entries()]
+    .map(([label, v]) => ({ label, ...v }))
+    .sort((a, b) => b.bytes - a.bytes);
+};
 
 /** Has any query on this screen come back from a PARTIAL scan?
  *
