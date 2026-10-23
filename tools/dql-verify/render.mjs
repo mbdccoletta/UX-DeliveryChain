@@ -15,6 +15,8 @@ const SAMPLES = {
   qAppTraceIds: [app],
   qFrontendNames: [60],
   qMetricForecastExpr: ["errors", "Sample frontend", "now()-2h", "now()-3m", "2m"],
+  qMetricErrorRateExpr: ["Sample frontend", "now()-2h", "now()-3m", "2m"],
+  qEventErrorRateExpr: ["0123456789abcdef", "now()-2h", "now()-3m", "2m"],
   qAppServices: [["4bf92f3577b34da6a3ce929d0e0e4736"]],
   qCloudPlacement: [["HOST-0123456789ABCDEF"]],
   qCohortPivot: [tf, app, ["s1", "s2"], "os.name"],
@@ -34,7 +36,15 @@ const SAMPLES = {
   qServiceDataStores: [svc],
   qServiceRuntime: [svc],
   qServicesGen2Calls: [svc],
+  qShadowSessionsEvents: [{ from: "2026-10-23T04:08:00.000Z", to: "2026-10-23T05:08:00.000Z" }, app],
+  qShadowErrorMetrics: [tf, "Sample frontend"],
+  qShadowTtfbEvents: [{ from: "2026-10-23T04:08:00.000Z", to: "2026-10-23T05:08:00.000Z" }, app],
+  qShadowTtfbMetric: [{ from: "2026-10-23T04:08:00.000Z", to: "2026-10-23T05:08:00.000Z" }, "Sample frontend"],
 };
+// the metric candidate has four shapes; render each one
+const W = { from: "2026-10-23T04:08:00.000Z", to: "2026-10-23T05:08:00.000Z" };
+const EXTRA = Object.fromEntries(["total", "user type", "country", "bin"].map((b) =>
+  [`qShadowSessionsMetric_${b.replace(" ", "_")}`, () => m.qShadowSessionsMetric(W, "Sample frontend", b)]));
 const GENERIC = [[tf, app], [tf, null, app], [tf], [], [app, tf], [tf, app, {}], [tf, {}, app], [60], [tf, [app]]];
 // a query may open with comment lines before its first command
 const looksDql = (s) => typeof s === "string"
@@ -43,10 +53,11 @@ const looksDql = (s) => typeof s === "string"
 let n = 0;
 const missed = [];
 for (const [name, fn] of Object.entries(m)) {
-  if (!/^q[A-Z]/.test(name) || typeof fn !== "function") continue;
+  if (!/^q[A-Z]/.test(name) || typeof fn !== "function" || name === "qShadowSessionsMetric") continue;
   const tries = SAMPLES[name] ? [SAMPLES[name]] : GENERIC;
   const q = tries.map((a) => { try { return fn(...a); } catch { return null; } }).find(looksDql);
   if (q) { writeFileSync(`${dir}/${name}.dql`, q); n++; } else missed.push(name);
 }
+for (const [k, f] of Object.entries(EXTRA)) { writeFileSync(`${dir}/${k}.dql`, f()); n++; }
 console.log(`rendered ${n}`);
 if (missed.length) { console.log(`NOT RENDERED (add a sample): ${missed.join(", ")}`); process.exitCode = 1; }

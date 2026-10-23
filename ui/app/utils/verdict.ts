@@ -58,12 +58,20 @@ export interface VerdictInput {
    */
   realSessions?: number | null;
   realHit?: number | null;
-  /** The analyzer projects errors rising over the horizon. */
+  /** The error RATE (errors per user action) is projected to rise with
+   *  certainty: the forecast's lower bound ends above the measured level.
+   *  See riseIsReal in utils/forecast. */
   forecastRising?: boolean;
   /** The experience score — response time against the errors that hurt
    *  (see utils/apdex) — or null/absent when nothing was rated. */
   score?: number | null;
 }
+
+/** Which rule decided — so a screen can say whether the verdict has a
+ *  PLACE (errors, score: the map can show where) or not (problems, anomalies,
+ *  forecast: a trend or a component, not a location). */
+export type VerdictCause = "machines" | "problems" | "hit" | "score" | "anomalies"
+  | "forecast" | "none" | "healthy";
 
 export interface Verdict {
   tone: Tone;
@@ -73,7 +81,12 @@ export interface Verdict {
   reason: string;
   /** hit / sessions, or null when the impact was not measured. */
   hitRate: number | null;
+  /** The rule that decided. */
+  cause?: VerdictCause;
 }
+
+/** The forecast's reason, worded once. */
+export const FORECAST_REASON = "error rate forecast to rise";
 
 const pct = (r: number) => `${r >= 0.995 ? 100 : Math.floor(r * 100)}%`;
 
@@ -109,8 +122,8 @@ export function verdictOf(v: VerdictInput): Verdict {
   const hitRate = humansMeasured ? realHit / realSessions
     : sessions > 0 ? hit / sessions : null;
   const of = humansMeasured ? "of real-user sessions" : "of sessions";
-  const say = (tone: Tone, reason: string, label?: string): Verdict =>
-    ({ tone, label: label ?? STATUS_LABEL[tone], reason, hitRate });
+  const say = (tone: Tone, reason: string, label?: string, cause?: VerdictCause): Verdict =>
+    ({ tone, label: label ?? STATUS_LABEL[tone], reason, hitRate, cause });
 
   // No people in this window at all: the errors are real but nobody met them.
   // Worth saying out loud, never worth outranking an application that is
@@ -126,7 +139,7 @@ export function verdictOf(v: VerdictInput): Verdict {
     const machineRate = hit / sessions;
     return say("info", machineRate > 0
       ? `no real users here · ${pct(machineRate)} of test traffic hit`
-      : "no real users in this window", "No users");
+      : "no real users in this window", "No users", "machines");
   }
 
   if (problems > 0) {
@@ -135,35 +148,35 @@ export function verdictOf(v: VerdictInput): Verdict {
     const cats = [...new Set((v.categories ?? []).filter(Boolean)
       .map((c) => davisCategory(c)))].slice(0, 2);
     return say("bad", `${problems} active problem${problems > 1 ? "s" : ""}`
-      + (cats.length ? ` · ${cats.join(", ")}` : ""));
+      + (cats.length ? ` · ${cats.join(", ")}` : ""), undefined, "problems");
   }
 
   if (hitRate !== null && hitRate >= HIT_BAD)
-    return say("bad", `${pct(hitRate)} ${of} affected by errors`);
+    return say("bad", `${pct(hitRate)} ${of} affected by errors`, undefined, "hit");
 
   if (score !== null && score < SCORE_BAD)
-    return say("bad", scoreTxt);
+    return say("bad", scoreTxt, undefined, "score");
 
   if (anomalies > 0)
-    return say("warn", `${anomalies} anomal${anomalies > 1 ? "ies" : "y"} detected`);
+    return say("warn", `${anomalies} anomal${anomalies > 1 ? "ies" : "y"} detected`, undefined, "anomalies");
 
   if (hitRate !== null && hitRate >= HIT_WARN)
-    return say("warn", `${pct(hitRate)} ${of} affected by errors`);
+    return say("warn", `${pct(hitRate)} ${of} affected by errors`, undefined, "hit");
 
   if (score !== null && score < SCORE_WARN)
-    return say("warn", scoreTxt);
+    return say("warn", scoreTxt, undefined, "score");
 
   if (forecastRising)
-    return say("warn", "errors forecast to rise");
+    return say("warn", FORECAST_REASON, undefined, "forecast");
 
   if (hitRate === null && score === null)
-    return say("info", "no impact measured in this window");
+    return say("info", "no impact measured in this window", undefined, "none");
 
   /* Healthy says BOTH halves: who was unaffected, and how the actions went */
   const unaffected = hitRate === null ? ""
     : hitRate > 0 ? `${pct(1 - hitRate)} ${of} unaffected`
     : humansMeasured ? "no real user affected by an error" : "no session affected by an error";
-  return say("good", [unaffected, scoreTxt].filter(Boolean).join(" · "));
+  return say("good", [unaffected, scoreTxt].filter(Boolean).join(" · "), undefined, "healthy");
 }
 
 /** The failure-rate cell in any table, judged by the same two thresholds. */
@@ -178,7 +191,7 @@ export const worseOf = (a: Tone, b: Tone): Tone => (WORST[b] > WORST[a] ? b : a)
 export const VERDICT_LEGEND =
   `Critical = an active Davis problem, ≥${HIT_BAD * 100}% of sessions affected by errors, `
   + `or an experience score under ${SCORE_BAD.toFixed(2)} · `
-  + `Warning = an anomaly, a rising forecast, ≥${HIT_WARN * 100}% of sessions affected, `
+  + `Warning = an anomaly, an error rate forecast to rise beyond its uncertainty, ≥${HIT_WARN * 100}% of sessions affected, `
   + `or an experience score under ${SCORE_WARN.toFixed(2)} · `
   + `Healthy = neither · affected = an error during the person's own action, `
   + `or the app crashing or freezing; background errors are counted, never judged`;
@@ -225,3 +238,12 @@ export const FAIL_LEGEND =
  * the board and FLOW_MIN in the journeys page, which is how that drift starts.
  */
 export const SAMPLE_MIN = 30;
+
+/**
+ * Is this application MOBILE? The platform's own word first — Smartscape's
+ * frontend.type ("web" | "mobile") — and the classic entity prefix only when
+ * the platform gave no type. Crashes, ANRs and every "lost to a crash" figure
+ * are mobile facts and are shown only where this is true (Marcelo, 2026-10-23).
+ */
+export const isMobileApp = (a?: { kind?: string; entity?: string } | null): boolean =>
+  a?.kind ? a.kind === "mobile" : !!a?.entity?.startsWith("MOBILE_APPLICATION-");

@@ -13,6 +13,16 @@ import { Boundary } from "./app/components/Boundary";
  * to be set BEFORE AppRoot renders, because the theme is resolved once. */
 globalThis.dtVisualRefreshEnabled = true;
 
+/* THE MAP'S GEOMETRY STARTS DOWNLOADING WITH THE APP, not with the map.
+   Strato's MapView fetches the world's country shapes from the CDN only when
+   it mounts — measured on staging at t+6.4 s, 14 MB uncompressed, 7.6 s to
+   arrive — so the map could not paint before t+14 s. The same request,
+   issued here, is served to MapView from the browser cache (the file is
+   cached for a year) or joins the download already under way. Failure is
+   harmless: MapView simply asks again. */
+void fetch("https://dt-cdn.net/scripts/data/worldmap/maps/v006/WORLD-COUNTRIES.json")
+  .then((r) => r.arrayBuffer()).catch(() => undefined);
+
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 root.render(
   // A render error above the per-view boundaries would otherwise blank the

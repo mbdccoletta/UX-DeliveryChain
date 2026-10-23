@@ -80,6 +80,8 @@ const EMPTY: AppScope = { services: new Set(), traces: new Map(), names: new Map
   runtime: new Set(), placements: [], resolved: false, loading: false,
   tracesSeen: 0, measured: false, measuring: false, measure: () => {} };
 const memo = new Map<string, AppScope>();
+/** The trace-context probe's answers — see idsIn. */
+const traceIdsMemo = new Map<string, Promise<string[]>>();
 
 export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
   const [scope, setScope] = useState<AppScope>(
@@ -146,10 +148,23 @@ export function useAppScope(rumAppId?: string, appEntity?: string): AppScope {
         /* Does this application propagate trace context? Cheap, and worth
          * knowing even when topology already answered: an empty backend has two
          * causes and they call for opposite actions. */
-        const idsIn = async (since: string) =>
-          (await runDql<Record<string, unknown>>(qAppTraceIds(rumAppId, since), 300))
-            .map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
-            .filter(Boolean);
+        /* ONE PROBE PER APPLICATION AND WINDOW. The scope is rebuilt under
+           different keys (with and without an entity, with and without spans)
+           and every rebuild re-ran this probe — four times in two seconds on
+           a capture. The answer only depends on the application and the
+           window, so that is what it is remembered by. */
+        const idsIn = (since: string) => {
+          const k = `${rumAppId}|${since}|${gen}`;
+          let p = traceIdsMemo.get(k);
+          if (!p) {
+            p = runDql<Record<string, unknown>>(qAppTraceIds(rumAppId, since), 300)
+              .then((rs) => rs.map((r) => String((r as { "trace.id"?: unknown })["trace.id"] ?? ""))
+                .filter(Boolean))
+              .catch((e) => { traceIdsMemo.delete(k); throw e; });
+            traceIdsMemo.set(k, p);
+          }
+          return p;
+        };
         let since = "now()-10m";
         /* THE PROBE FAILS ALONE. This shared the outer try with the whole
            scope construction, so a RUM permission or query failure threw

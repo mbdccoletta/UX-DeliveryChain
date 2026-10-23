@@ -9,7 +9,7 @@
 // should not scan twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qExperience, qUxByApp, runDql, type Timeframe } from "../utils/dql";
+import { qExperience, qUxByApp, qUxLean, runDql, type Timeframe } from "../utils/dql";
 
 export interface UxRow {
   sessions: number;
@@ -83,11 +83,20 @@ export function useUxOverview(
    *  read of the window's RUM, and App mounted it on every page for the one
    *  tab (Journeys) that draws it. */
   active = true,
+  /** THE LEAN PASS (0.16.0). One scan of the two event kinds that can hurt
+   *  a person — errors and user actions — answers the verdict's numerator
+   *  and the experience score together. Validated field by field beside the
+   *  per-session scan and the score query on staging, exact to the unit on a
+   *  settled window. It carries NO session totals: the caller takes those
+   *  from the scoped census (exact), which the page already reads. The
+   *  fields only the Journeys tab needs (engaged, abandoned, fragments) are
+   *  not in it, so that caller keeps the per-session scan. */
+  lean = false,
 ): UxMap | null {
   const gen = useMemoGen();
   // the scope is part of the key: a payload that lacked this application
   // must not answer for the request that went and fetched it
-  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${wide ? "w" : "s"}|${gen}`;
+  const key = `${tf.from}|${tf.to}|${appId ?? ""}|${wide ? "w" : "s"}|${lean ? "lean" : "full"}|${gen}`;
   const [map, setMap] = useState<UxMap | null>(memo.get(key) ?? null);
 
   useEffect(() => {
@@ -115,6 +124,22 @@ export function useUxOverview(
            line is the only thing that needs the whole estate, so it is the
            only thing that pays for it — and when it cannot be drawn, it says
            so rather than comparing an application with itself. */
+        if (lean && appId && !wide) {
+          let final = false;
+          const paint = (rows: Record<string, unknown>[]) => {
+            if (!live) return;
+            const m = fold(rows.map((r) => ({ ...r, appId })));
+            m.partial = !final; m.scorePartial = !final;
+            setMap(m);
+          };
+          const rows = await runDql<Record<string, unknown>>(qUxLean(tf, appId), 1, undefined,
+            (early) => { if (early.length && !final) paint(early); });
+          final = true;
+          const out = fold(rows.map((r) => ({ ...r, appId })));
+          memo.set(key, out);
+          if (live) setMap(out);
+          return;
+        }
         const rows = wide
           ? await runDql<Record<string, unknown>>(qUxByApp(tf), 100)
           : [] as Record<string, unknown>[];
@@ -172,4 +197,26 @@ export function useUxOverview(
   }, [key, tf]);
 
   return map;
+}
+
+
+/** THE LEAN PASS'S DENOMINATOR. Fills one application's session totals from
+ *  the scoped census (exact, countDistinctExact) and keeps the row a preview
+ *  until that census is final — a ratio over a preview denominator is the
+ *  very thing the verdict refuses to print. */
+export function withCensus(
+  map: UxMap | null, appId: string,
+  census: { sessions: number; realSessions?: number } | undefined,
+  censusFinal: boolean,
+): UxMap | null {
+  if (!map) return null;
+  const row = map.get(appId);
+  const out: UxMap = new Map(map);
+  out.partial = !!map.partial || !censusFinal || !census;
+  out.scorePartial = map.scorePartial;
+  if (row && census) {
+    out.set(appId, { ...row, sessions: census.sessions,
+      realSessions: census.realSessions ?? 0 });
+  }
+  return out;
 }

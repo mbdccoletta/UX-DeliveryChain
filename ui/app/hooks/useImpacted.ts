@@ -58,7 +58,12 @@ export function useImpacted(
      so the scan ran once with the name empty and once again when it landed:
      the one duplicate left in a production load, and a full per-session
      scan paid twice for the same answer. */
-  const fe = frontendName && !withinSessionLag(tf!) ? frontendName : "";
+  /* THE HEADLINE IS WHAT THE PLATFORM LISTS — at every window length
+     (Marcelo, twice). Inside the store's lag that is the sessions already
+     written, a smaller number than the ones active; the card says how many
+     are still running beside it, rather than swapping the headline to a base
+     the sessions button cannot open. */
+  const fe = frontendName || "";
   const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${fe}|${gen}` : "";
   const [imp, setImp] = useState<Impacted | null>(key ? memo.get(key) ?? null : null);
 
@@ -112,7 +117,7 @@ export function useImpacted(
            which the guard below would catch, but a small true number that
            would read as the application's traffic. The event scan is the
            base there, and the card is told which base it got. */
-        if (fe && !withinSessionLag(tf!)) {
+        if (fe) {
           out = await ask(qImpactedSessions(tf!, fe));
           if (out) out.base = "sessions";
           /* NOTHING SERIALIZED IS NOT NOTHING HAPPENED. The session store
@@ -123,7 +128,10 @@ export function useImpacted(
              share over an application that is plainly busy, so the event
              scan answers instead — fewer promises about the hand-off, but a
              page that still describes what is happening. */
-          if (!out || out.sessions === 0) {
+          /* inside the lag an empty store is the true answer for the list
+             (the caller shows the running sessions next to it); past the lag
+             an empty store means nothing was written, and the events answer */
+          if ((!out || out.sessions === 0) && !withinSessionLag(tf!)) {
             out = await ask(qImpacted(tf!, rumAppId!));
             if (out) out.base = "events";
           }

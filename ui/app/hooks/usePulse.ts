@@ -108,7 +108,12 @@ export function usePulse(
                 : Number(r.sessions) || 0,
               errors: mm ? mm.errors : Number(r.errors) || 0,
               actions: mm ? mm.actions : Number(r.actions) || 0,
-              requests: mm ? mm.requests : Number(r.requests) || 0,
+              /* REQUESTS STAY ON EVENTS. Measured bin by bin on a production
+                 capture, dt.frontend.request.count runs 22% above the request
+                 events in every interval — a different population, not a lag.
+                 The card's total is counted from events; its bars must be the
+                 same population ("what does not match is not substituted"). */
+              requests: Number(r.requests) || 0,
             };
           }),
           requests: Number(tuples[0]?.requests) || 0,

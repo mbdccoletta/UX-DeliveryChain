@@ -10,6 +10,7 @@ import { AppHeader, HelpMenu, PageLayout, TitleBar } from "@dynatrace/strato-com
 import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
+import { useOrigins } from "./hooks/useOrigins";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
 import { hasTruncation, subscribeScan, scanTotals, scanByLabel,
@@ -212,6 +213,9 @@ export function App() {
      it — and the banner's advice, "pick a single application", now actually
      changes what is scanned. */
   const d = useChainData(tf, state.session, state.app);
+  /* the origin split is the Delivery Chain's alone, fetched when it opens */
+  const origins = useOrigins(tf, state.session, state.app, tab === "chain");
+  const chainData = React.useMemo(() => (origins ? { ...d, origins } : d), [d, origins]);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   /* NOBODY PAYS FOR THE ESTATE SCAN BY DEFAULT.
      The first cut had the Overview pay for it, which defeats the point: the
@@ -634,7 +638,7 @@ export function App() {
 
           {tab === "chain" && current && (
             <Boundary label="Delivery chain">
-              <DeliveryChain data={d} appId={current}
+              <DeliveryChain data={chainData} appId={current}
                 sel={state.sel} onSel={(v) => set({ sel: v })}
                 highlight={state.hl === "anomalies" ? "anomalies" : null}
                 onHighlightClear={() => set({ hl: null }, false)} />

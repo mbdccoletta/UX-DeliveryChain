@@ -11,7 +11,7 @@
 // of the traffic, the reader states the monitored share and every VOLUME is
 // extrapolated to the whole (marked with an approx sign and a bar notice);
 // RATES are untouched — a representative sample carries them as they are.
-import { SAMPLE_MIN } from "../utils/verdict";
+import { isMobileApp, SAMPLE_MIN } from "../utils/verdict";
 import { Button } from "@dynatrace/strato-components/buttons";
 import React from "react";
 import type { ChainData, SeqRow } from "../hooks/useChainData";
@@ -161,6 +161,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   onGo?: (tab: "chain" | "flow" | "home", appId?: string, hl?: string) => void;
 }) {
   const kpis = useBizKpis(data.tf, outcomeDefs, scopeApp || null);
+  /* crashes are a mobile fact (isMobileApp: the platform's frontend.type) */
+  const scopeMobile = isMobileApp(data.apps.find((a) => a.appId === scopeApp));
   /* The name Users & Sessions filters by. Its Frontends facet keys on
    * frontend.name, which differs from the inventory name — the same lookup
    * the Overview uses, so the two pages hand off to the identical filter. */
@@ -449,7 +451,10 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       ["customers", curP.realSessions, prevP.realSessions, true],
       ["customers at risk", curP.hitReal, prevP.hitReal, false],
       ["customers made to wait", curP.waitedReal, prevP.waitedReal, false],
-      ["sessions lost to a crash", curP.fatalSessions, prevP.fatalSessions, false],
+      // a crash is a mobile fact — no such line for a web application
+      ...(scopeMobile
+        ? [["sessions lost to a crash", curP.fatalSessions, prevP.fatalSessions, false] as
+          [string, number, number, boolean]] : []),
       ["customers who bounced",
         Math.max(0, curP.realSessions - curP.realEngaged),
         Math.max(0, prevP.realSessions - prevP.realEngaged), false],
@@ -967,7 +972,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   + `  Customers made to wait (an action over 3s): ${fmtCount(c.waited)}`
                   + ` (was ${fmtCount(p.waited)})\n`
                   + `  Customers who bounced: ${fmtCount(Math.max(0, c.customers - c.realEngaged))}`,
-              `  Sessions lost to a crash or freeze: ${fmtCount(c.crashed)}`,
+              scopeMobile ? `  Sessions lost to a crash or freeze: ${fmtCount(c.crashed)}` : "",
               `  Open incidents on this application's chain: ${
                 chainProblems === null ? "still resolving" : fmtN(chainProblems)}`,
               "",
@@ -1173,12 +1178,16 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               go={toSessions(SESSION_CHIP.withErrors(), "these sessions",
                 "Open exactly these sessions in Users & Sessions — real users, this window, "
                 + "filtered to the ones that met an error", c.customersAtRisk)} />
+            {/* crashes and ANRs exist only on mobile — a web board does not
+                carry a permanent zero for a failure its platform cannot have */}
+            {scopeMobile && (
             <Stat label="sessions lost to a crash or freeze" cur={c.crashed} prev={p.crashed}
               fmt={fmtCount} riseIsGood={false} tab="home"
               caption="crashes and ANRs — ended with no way back"
               go={toSessions(chips(SESSION_CHIP.withErrors(), SESSION_CHIP.errorType("Crash")),
                 "the crashed sessions",
                 "Open the sessions that ended in a crash, in Users & Sessions", c.crashed)} />
+            )}
             {/* This slot held "brand health (0–100)": the share of customers
                 untouched by a failure, printed as an integer. Measured on
                 easytravel it read 100 against a previous 100 — and so would
