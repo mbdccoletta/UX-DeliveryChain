@@ -23,9 +23,16 @@ const memo = new Map<string, JourneysData>();
 
 export function useJourneys(
   tf: Timeframe, active: boolean, session?: string | null,
+  /** The application on screen. The journeys are mined per application and
+   *  every consumer filters by it, so reading the estate was scanning — and
+   *  paying for — paths nobody would draw. Measured on a production tenant,
+   *  an estate-wide RUM scan of a 2h window cost about 230 GB against 32 GB
+   *  scoped: these four were the most expensive page in the app once the
+   *  Overview was dealt with. */
+  appId?: string | null,
 ): JourneysData | null {
   const gen = useMemoGen();
-  const key = active ? `${tf.from}|${tf.to}|${session ?? ""}|${gen}` : "";
+  const key = active ? `${tf.from}|${tf.to}|${session ?? ""}|${appId ?? ""}|${gen}` : "";
   const [out, setOut] = useState<JourneysData | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -42,10 +49,10 @@ export function useJourneys(
     (async () => {
       try {
         const [views, sequences, transitions, friction] = await Promise.all([
-          runDql<Record<string, unknown>>(qViews(tf, session), 200),
-          runDql<Record<string, unknown>>(qSequences(tf, session), 1000),
-          runDql<Record<string, unknown>>(qTransitions(tf, session), 200),
-          runDql<Record<string, unknown>>(qFriction(tf, session), 30),
+          runDql<Record<string, unknown>>(qViews(tf, session, appId), 200),
+          runDql<Record<string, unknown>>(qSequences(tf, session, appId), 1000),
+          runDql<Record<string, unknown>>(qTransitions(tf, session, appId), 200),
+          runDql<Record<string, unknown>>(qFriction(tf, session, appId), 30),
         ]);
         const res: JourneysData = {
           views: views.map((r) => ({

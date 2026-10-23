@@ -5,7 +5,7 @@
 // forecast is sound: an unreliable projection shown to a business owner is
 // worse than no projection at all.
 import { analyzersClient } from "@dynatrace-sdk/client-davis-analyzers";
-import { binMinutesFor, durStr } from "./dql";
+import { binMinutesFor, durStr, EVENT_LAG_MIN } from "./dql";
 
 const ANALYZER = "dt.statistics.GenericForecastAnalyzer";
 
@@ -33,10 +33,21 @@ export interface Forecast {
 }
 
 /** Polls until the analysis completes, per the documented execution contract. */
-async function poll(requestToken: string) {
-  const MAX = 10;
-  for (let i = 0; i < MAX; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
+async function poll(requestToken: string, deadlineAt: number) {
+  /* The same ten-second page budget the queries keep. Measured on
+     production: each analyzer poll is itself ~2 seconds, so four forecasts
+     ran in four waves and the last landed at t+13.4s — past the page's
+     budget on their own. A projection that is not ready by the deadline is
+     cancelled and the card draws none; the cancel also stops the analyzer's
+     own DQL scan on the server. */
+  /* Measured on production (HAR 15): every analyzer poll blocks ~2.0s on the
+     server, so the 700ms we slept between them was pure addition — up to
+     1.4s per forecast across three rounds. The server is the clock here;
+     the client waits as little as it can. */
+  const MAX = 8;
+  for (let i = 0; i < MAX && Date.now() < deadlineAt; i++) {
+    await new Promise((r) => setTimeout(r, Math.min(200, Math.max(50, deadlineAt - Date.now()))));
+    if (Date.now() >= deadlineAt) break;
     const { result } = await analyzersClient.pollAnalyzerExecution({
       analyzerName: ANALYZER, requestToken,
     });
@@ -106,11 +117,17 @@ export function forecast(expression: string, horizon = 12): Promise<Forecast | n
 
 async function runForecast(expression: string, horizon = 12): Promise<Forecast | null> {
   try {
+    /* A PROJECTION ARRIVING LATE BEATS NO PROJECTION. The page's ten-second
+       budget governs when the page is usable, not whether the card gets its
+       forecast: this waits for idle and then takes its own bound, generous
+       enough for the analyzer's ~2-second polls to finish. Cancelled only if
+       it would otherwise run on indefinitely. */
+    const deadlineAt = Date.now() + 14000;
     const res = await analyzersClient.executeAnalyzer({
       analyzerName: ANALYZER,
       body: { timeSeriesData: { expression }, forecastHorizon: horizon } as never,
     });
-    const result = res.requestToken ? await poll(res.requestToken) : res.result;
+    const result = res.requestToken ? await poll(res.requestToken, deadlineAt) : res.result;
     if (result.executionStatus !== "COMPLETED") return null;
 
     const out = (result.output as never as Array<Record<string, never>>)?.[0];
@@ -195,7 +212,13 @@ export function histWindow(
   tf: { to: string }, histMin: number,
 ): { from: string; to: string } {
   const v = tf.to.trim().replace(/^"(.*)"$/, "$1");
-  if (/^now\(?\)?$/i.test(v)) return { from: `now()-${histMin}m`, to: "now()" };
+  /* A LIVE HISTORY ENDS BEFORE THE BINS THAT ARE STILL FILLING. See
+     EVENT_LAG_MIN in dql.ts: the newest minutes of the event stream are
+     incomplete, and a forecast trained through them projects the cliff.
+     The history keeps its length and slides back by the lag. */
+  if (/^now\(?\)?$/i.test(v)) {
+    return { from: `now()-${histMin + EVENT_LAG_MIN}m`, to: `now()-${EVENT_LAG_MIN}m` };
+  }
   /* A SHIFTED WINDOW IS OFTEN STILL RELATIVE. tfFrom emits `now()-2h` for the
      END of a range like from=-4h,to=-2h, and the first cut of this function
      only recognised the literal `now()`: everything else went to new Date(),

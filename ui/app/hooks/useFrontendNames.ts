@@ -16,9 +16,9 @@ import { qFrontendNames, runDql } from "../utils/dql";
 let memo: Map<string, string> | null = null;
 let inflight: Promise<Map<string, string>> | null = null;
 
-function load(): Promise<Map<string, string>> {
+function load(minutes: number): Promise<Map<string, string>> {
   if (!inflight) {
-    inflight = runDql<{ ent: string; fe: string; n: string }>(qFrontendNames(), 1000)
+    inflight = runDql<{ ent: string; fe: string; n: string }>(qFrontendNames(minutes), 1000)
       .then((rows) => {
         const m = new Map<string, string>();
         for (const r of rows) {
@@ -39,13 +39,13 @@ function load(): Promise<Map<string, string>> {
 }
 
 /** entity id → frontend.name, or null while it loads. */
-export function useFrontendNames(): Map<string, string> | null {
+export function useFrontendNames(minutes = 180): Map<string, string> | null {
   const [map, setMap] = useState<Map<string, string> | null>(memo);
   useEffect(() => {
     if (memo) return;
     let live = true;
-    load().then((m) => { if (live) setMap(m); });
+    load(minutes).then((m) => { if (live) setMap(m); });
     return () => { live = false; };
-  }, []);
+  }, [minutes]);
   return map;
 }
