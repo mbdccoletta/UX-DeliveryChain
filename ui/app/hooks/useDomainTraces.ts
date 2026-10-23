@@ -20,6 +20,11 @@ import { runDql, type Timeframe } from "../utils/dql";
 const memo = new Map<string, Set<string>>();
 
 /** The subset of `domains` that has spans, or null while loading. */
+/** The start of the presence probe: the window's last 15 minutes when the
+ *  window ends now and is longer than that; the whole window otherwise. */
+const probeFrom = (tf: Timeframe) =>
+  /^now\(?\)?$/i.test(tf.to.trim()) && tf.minutes > 15 ? "now()-15m" : tf.from;
+
 export function useDomainTraces(
   domains: string[], tf: Timeframe, active = true,
 ): Set<string> | null {
@@ -41,7 +46,12 @@ export function useDomainTraces(
         const where = list.slice(0, 12)
           .map((d) => `server.address == "${d.replace(/["\\]/g, "")}"`).join(" or ");
         const rows = await runDql<{ addr?: string }>(
-          `fetch spans, from: ${tf.from}, to: ${tf.to}
+          /* PRESENCE, NOT VOLUME. The question is only "does any span serve
+             this host"; the whole window answered it at 65 GB for zero rows on
+             a bank's estate (external hosts — a fraud SDK, googleapis — never
+             have spans). The last 15 minutes of the window answer it the same
+             for any host the application is actively calling. */
+          `fetch spans, from: ${probeFrom(tf)}, to: ${tf.to}
            | filter ${where}
            | summarize n = count(), by: { addr = server.address }
            | filter n > 0 | limit 12`, 12);

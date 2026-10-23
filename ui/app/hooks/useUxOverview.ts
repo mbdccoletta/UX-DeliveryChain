@@ -9,7 +9,7 @@
 // should not scan twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qUxByApp, runDql, type Timeframe } from "../utils/dql";
+import { qExperience, qUxByApp, runDql, type Timeframe } from "../utils/dql";
 
 export interface UxRow {
   sessions: number;
@@ -29,13 +29,17 @@ export interface UxRow {
   /** User actions in the window, and how many were abandoned mid-flight. */
   actions: number;
   abandoned: number;
-  /** Apdex bands over user actions — see utils/apdex.ts for T and the formula. */
+  /** Experience weights over user actions — the platform's own rating, see utils/apdex.ts. */
   satisfied: number;
   tolerating: number;
   frustrated: number;
-  /** Of the frustrated: actions an ERRORED VIEW reassigned there (Dynatrace's
-   *  error rule at view grain) rather than slowness. Feeds the explainer. */
-  fruErr: number;
+  /** Rated user actions, counted (not weighted), and how many of them
+   *  carried an error of their own (error.count / has_crash on the action). */
+  ratedActs: number;
+  errActions: number;
+  /** Crashes and freezes of real people's sessions — each is one frustrated
+   *  element in the experience score (see qExperience). */
+  scoreCrashes: number;
   /** Sessions whose only in-window content is stray metadata — their real
    *  activity happened outside the window. Not journeys; excluded from
    *  funnels, reported as a transparency line. */
@@ -45,13 +49,15 @@ export interface UxRow {
 const memo = new Map<string, UxMap>();
 
 /** Impact per application id, or null while loading / when the query failed. */
-/** A Map of UxRow per app id, plus whether it is still a PREVIEW. */
-export type UxMap = Map<string, UxRow> & { partial?: boolean };
+/** A Map of UxRow per app id, plus whether each of its two scans is still a
+ *  PREVIEW: `partial` for the per-session impact (the verdict waits on it),
+ *  `scorePartial` for the experience score (only the score's caption does). */
+export type UxMap = Map<string, UxRow> & { partial?: boolean; scorePartial?: boolean };
 
 const ZERO: UxRow = { sessions: 0, hit: 0, realSessions: 0, errors: 0,
   errorsThird: 0, realErrors: 0, hitReal: 0, hitRobot: 0, hitSynth: 0,
   engaged: 0, actions: 0, abandoned: 0, satisfied: 0, tolerating: 0,
-  frustrated: 0, fruErr: 0, fragments: 0 };
+  frustrated: 0, ratedActs: 0, errActions: 0, scoreCrashes: 0, fragments: 0 };
 
 /* TWO row kinds share an appId — the main row and the Apdex leg's row — and
    they are MERGED field by field, never overwritten (see the note that used
@@ -73,6 +79,10 @@ export function useUxOverview(
   tf: Timeframe, appId?: string | null,
   /** True when the caller draws the estate comparison and must pay for it. */
   wide = false,
+  /** False while nothing on screen reads the answer — the scan is a full
+   *  read of the window's RUM, and App mounted it on every page for the one
+   *  tab (Journeys) that draws it. */
+  active = true,
 ): UxMap | null {
   const gen = useMemoGen();
   // the scope is part of the key: a payload that lacked this application
@@ -83,6 +93,7 @@ export function useUxOverview(
   useEffect(() => {
     const hit = memo.get(key);
     if (hit) { setMap(hit); return; }
+    if (!active) { setMap(null); return; }
 
     let live = true;
     setMap(null);
@@ -121,28 +132,34 @@ export function useUxOverview(
            cheap query of the two — and it is the shape the estate scan should
            eventually take for everything except the comparison line. */
         if (appId) {  // eslint-disable-line no-constant-condition
-          try {
-            /* THE SLOWEST FINAL ON THE PAGE, AND IT HAD NO PREVIEW. Measured
-               on production: this per-session scan is the last to land
-               (25.6s on 30m; still polling when two captures ended). Until
-               it did, the Apdex read "—" with "no rated user actions" under
-               it — a fact asserted before the data existed, identical on
-               screen to an application that truly has none. The preview
-               paints, marked; the final decides; only the final is memoised. */
-            rows.push(...await runDql<Record<string, unknown>>(
-              qUxByApp(tf, appId), 8, undefined, (early) => {
-                if (!live || !early.length) return;
-                const prev = fold(early); prev.partial = true;
-                setMap(prev);
-              }));
-          } catch { /* the estate's answer still stands on its own */ }
+          /* TWO SCANS, SIDE BY SIDE, EACH WITH ITS OWN "MEASURING". The
+             per-session scan decides the verdict; the lean score scan
+             (qExperience) decides the score. Neither waits for the other —
+             the score's sums once rode inside the per-session scan and held
+             the verdict back by 13 s. Previews paint, marked; finals decide;
+             only the pair of finals is memoised. */
+          let main: Record<string, unknown>[] = [], score: Record<string, unknown>[] = [];
+          let mainFinal = false, scoreFinal = false;
+          const paint = () => {
+            if (!live) return;
+            const m = fold([...rows, ...main, ...score.map((r) => ({ ...r, appId }))]);
+            m.partial = !mainFinal; m.scorePartial = !scoreFinal;
+            setMap(m);
+          };
+          const mainP = runDql<Record<string, unknown>>(qUxByApp(tf, appId), 8, undefined,
+            (early) => { if (early.length && !mainFinal) { main = early; paint(); } })
+            .then((r) => { main = r; }).catch(() => { main = []; })
+            .finally(() => { mainFinal = true; paint(); });
+          const scoreP = runDql<Record<string, unknown>>(qExperience(tf, appId), 1, undefined,
+            (early) => { if (early.length && !scoreFinal) { score = early; paint(); } })
+            .then((r) => { score = r; }).catch(() => { score = []; })
+            .finally(() => { scoreFinal = true; paint(); });
+          await Promise.all([mainP, scoreP]);
+          const out = fold([...rows, ...main, ...score.map((r) => ({ ...r, appId }))]);
+          memo.set(key, out);
+          if (live) setMap(out);
+          return;
         }
-        // TWO row kinds share an appId: the main per-app row, and the Apdex
-        // leg's row carrying only satisfied/tolerating/frustrated (the bands
-        // live in their own subquery so Dynatrace's error rule can rate at
-        // view-instance grain). MERGE them — a plain Map(rows.map(...)) let
-        // the later row overwrite the earlier one, which zeroed every main
-        // field and put "0 reached a user" beside "86% of sessions hit".
         const out = fold(rows);
         memo.set(key, out);
         if (live) setMap(out);

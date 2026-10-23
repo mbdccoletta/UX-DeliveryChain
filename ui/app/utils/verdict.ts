@@ -14,11 +14,17 @@
 //
 // Thresholds are named constants, stated once, so no screen can drift.
 
+import { apdexBand, fmtApdex } from "./apdex";
+
 export type Tone = "good" | "warn" | "bad" | "info";
 
 /** Sessions hit by an error, as a share of sessions in the window. */
 export const HIT_BAD = 0.5;
 export const HIT_WARN = 0.1;
+/** The experience score's own bands — Fair starts under 0.85, Poor under 0.70
+ *  (utils/apdex apdexBand / apdexTone): the verdict reads the same lines. */
+export const SCORE_WARN = 0.85;
+export const SCORE_BAD = 0.7;
 
 /**
  * The platform's status words. Every Gen3 app labels state with these, so this
@@ -54,6 +60,9 @@ export interface VerdictInput {
   realHit?: number | null;
   /** The analyzer projects errors rising over the horizon. */
   forecastRising?: boolean;
+  /** The experience score — response time against the errors that hurt
+   *  (see utils/apdex) — or null/absent when nothing was rated. */
+  score?: number | null;
 }
 
 export interface Verdict {
@@ -74,6 +83,15 @@ const pct = (r: number) => `${r >= 0.995 ? 100 : Math.floor(r * 100)}%`;
  */
 export function verdictOf(v: VerdictInput): Verdict {
   const { problems = 0, anomalies = 0, forecastRising = false } = v;
+  /* NOT ONLY ERROR-FREE (Marcelo, 2026-10-23). The share of sessions an
+     error affected says who was hurt; the experience score says how the
+     actions went — response time against the errors that hurt. Both judge,
+     in the score's own bands: under 0.85 is Fair or worse (Warning), under
+     0.70 Poor or worse (Critical). Before, the score was kept out of the
+     verdict on purpose, and an application whose actions were all frustrated
+     could read Healthy because few sessions had errors. */
+  const score = v.score ?? null;
+  const scoreTxt = score === null ? "" : `experience score ${fmtApdex(score)} (${apdexBand(score).toLowerCase()})`;
   const sessions = v.sessions ?? 0;
   const hit = v.hit ?? 0;
   /* ── who actually felt it ──
@@ -121,23 +139,31 @@ export function verdictOf(v: VerdictInput): Verdict {
   }
 
   if (hitRate !== null && hitRate >= HIT_BAD)
-    return say("bad", `${pct(hitRate)} ${of} hit by errors`);
+    return say("bad", `${pct(hitRate)} ${of} affected by errors`);
+
+  if (score !== null && score < SCORE_BAD)
+    return say("bad", scoreTxt);
 
   if (anomalies > 0)
     return say("warn", `${anomalies} anomal${anomalies > 1 ? "ies" : "y"} detected`);
 
   if (hitRate !== null && hitRate >= HIT_WARN)
-    return say("warn", `${pct(hitRate)} ${of} hit by errors`);
+    return say("warn", `${pct(hitRate)} ${of} affected by errors`);
+
+  if (score !== null && score < SCORE_WARN)
+    return say("warn", scoreTxt);
 
   if (forecastRising)
     return say("warn", "errors forecast to rise");
 
-  if (hitRate === null)
+  if (hitRate === null && score === null)
     return say("info", "no impact measured in this window");
 
-  return say("good", hitRate > 0
-    ? `${pct(1 - hitRate)} ${of} error-free`
-    : humansMeasured ? "no real user hit by an error" : "no session hit by an error");
+  /* Healthy says BOTH halves: who was unaffected, and how the actions went */
+  const unaffected = hitRate === null ? ""
+    : hitRate > 0 ? `${pct(1 - hitRate)} ${of} unaffected`
+    : humansMeasured ? "no real user affected by an error" : "no session affected by an error";
+  return say("good", [unaffected, scoreTxt].filter(Boolean).join(" · "));
 }
 
 /** The failure-rate cell in any table, judged by the same two thresholds. */
@@ -150,9 +176,12 @@ export const worseOf = (a: Tone, b: Tone): Tone => (WORST[b] > WORST[a] ? b : a)
 
 /** The legend every screen prints, so the thresholds are never hidden. */
 export const VERDICT_LEGEND =
-  `Critical = an active Davis problem, or ≥${HIT_BAD * 100}% of sessions hit by errors · `
-  + `Warning = an anomaly, a rising forecast, or ≥${HIT_WARN * 100}% of sessions hit · `
-  + `Healthy = neither`;
+  `Critical = an active Davis problem, ≥${HIT_BAD * 100}% of sessions affected by errors, `
+  + `or an experience score under ${SCORE_BAD.toFixed(2)} · `
+  + `Warning = an anomaly, a rising forecast, ≥${HIT_WARN * 100}% of sessions affected, `
+  + `or an experience score under ${SCORE_WARN.toFixed(2)} · `
+  + `Healthy = neither · affected = an error during the person's own action, `
+  + `or the app crashing or freezing; background errors are counted, never judged`;
 
 /**
  * How a FAILURE RATE on requests is judged — one rule, one home.

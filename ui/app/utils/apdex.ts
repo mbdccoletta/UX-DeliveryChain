@@ -1,50 +1,37 @@
-// Apdex, computed here because Gen3 does not ship it.
+// The user-experience score — GEN3 ONLY, the platform's own rating.
 //
-// Checked before writing any of this: `apdex` is not a field on user.events
-// (none of its 80 fields carries it), there is no Grail metric for it, and the
-// classic metrics API answers 403 to this app's token. The settings API — where
-// a live estate's own thresholds live — answers 403 too (`settings:objects:read`
-// is not in the app's scopes). So the number cannot be read; it has to be
-// computed, and the threshold it was computed with has to be stated on screen
-// next to it. An Apdex whose T is invisible is a number nobody can check.
+// Every user action in user.events carries `experience.level` (satisfied ·
+// tolerating · frustrated), set by an OpenPipeline processor from the
+// action's duration against the environment's thresholds, and
+// `experience.weight` (default 1). The session's `experience.score` is
+// documented (semantic dictionary, user sessions) as
 //
-// THE DEFINITION (Apdex Alliance, the one Dynatrace implements):
+//     score = sum(level × weight) / sum(weight)
+//     satisfied = 1 · tolerating = 0.5 · frustrated = 0
 //
-//     Apdex = (satisfied + tolerating / 2) / rated
+// banded excellent ≥ 0.94 · good ≥ 0.85 · fair ≥ 0.70 · poor ≥ 0.50 ·
+// unacceptable below (experience.score.band). This module applies that one
+// formula to the weight sums the queries return, at whatever grain they are
+// summed — a view, a state, a country, the application. One rule is added on
+// top, Marcelo's of 2026-10-23 and Dynatrace's own for actions with reported
+// errors: an action that carried an error of its own (error.count /
+// has_crash on the action event) counts as frustrated whatever its speed.
+// Errors outside any action never enter the score (utils/dql USER_HIT).
 //
-//   satisfied   duration ≤ T
-//   tolerating  T < duration ≤ 4T
-//   frustrated  duration > 4T
-//
-// measured over USER ACTIONS, which is the unit Dynatrace rates — not views and
-// not sessions. T is Dynatrace's own default for user actions, 3 s, so this
-// app's number matches what the platform would report for a live estate that never
-// changed the setting. Where a live estate HAS changed it, ours will differ, which
-// is exactly why the label says which T produced it.
-//
-// DYNATRACE'S ERROR RULE — "user actions with reported errors are rated as
-// Frustrated" (docs, verified 2026-08) — IS implemented, at the closest grain
-// a live estate's data links. The docs' mechanism is server-side; in Grail the
-// error events carry no user_action.id (checked: none of the populated
-// fields), so per-action attribution is impossible. What both sides DO share
-// is view.instance_id (measured: 1,224 view instances in a 2h window hold
-// both errors and actions, covering 1,738 of 63,901 actions), so the rule
-// fires at view grain: an errored view instance frustrates its own actions,
-// whatever their speed. An error with no view instance frustrates nothing —
-// the rule only acts where the data actually links. Implemented in qUxByApp
-// and qDetailExperience; an earlier note here cited `user_action.error_count`
-// (always zero on a live estate) — that field was never Dynatrace's mechanism.
+// It replaced a hand-computed Apdex (RUM Classic: T = 3 s, 4T, an error
+// rule), kept out on purpose: a score the reader cannot reconcile with the
+// platform's own screens is a number nobody can check. The function names
+// below kept their historical `apdex` prefix so call sites did not churn;
+// the concept they implement is the experience score.
 
-/** Dynatrace's default tolerated threshold for user actions. */
+/** Kept for the one caller that still names a duration; no query uses it. */
 export const APDEX_T_MS = 3_000;
-/** The Apdex spec's frustration boundary: four times T. */
 export const APDEX_4T_MS = APDEX_T_MS * 4;
-/** Durations arrive in nanoseconds. */
 export const APDEX_T_NS = APDEX_T_MS * 1e6;
 export const APDEX_4T_NS = APDEX_4T_MS * 1e6;
 
-/** How the threshold reads on screen, wherever the score is shown. */
-export const APDEX_LABEL = `T = ${APDEX_T_MS / 1000}s · frustrated over ${APDEX_4T_MS / 1000}s`;
+/** How the score reads on screen, wherever it is shown. */
+export const APDEX_LABEL = "rated by the platform · experience.level";
 
 export interface ApdexCounts {
   satisfied: number;
@@ -52,7 +39,7 @@ export interface ApdexCounts {
   frustrated: number;
 }
 
-/** The rated population: actions that carried a duration, nothing else. */
+/** The rated population: the weight the platform rated, nothing else. */
 export const apdexRated = (c: ApdexCounts) =>
   c.satisfied + c.tolerating + c.frustrated;
 
@@ -62,7 +49,46 @@ export function apdexOf(c: ApdexCounts): number | null {
   return rated > 0 ? (c.satisfied + c.tolerating / 2) / rated : null;
 }
 
-/** The standard rating bands — the same five Dynatrace labels its score with. */
+/** The score's arithmetic with this window's own counts, so anyone can redo
+ *  it by hand: what was rated, by whom, and how the number falls out. Every
+ *  screen that prints the score uses THIS sentence — the hero's word, the
+ *  card's stat, the Intelligence facts — so the explanation cannot drift
+ *  from the figure. */
+export function scoreExplain(c: ApdexCounts & { crashes?: number; errActions?: number }): string | null {
+  const rated = apdexRated(c);
+  if (!rated) return null;
+  const v = apdexOf(c) as number;
+  const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
+  const pc = (n: number) => `${Math.round((n / rated) * 100)}%`;
+  const crashes = c.crashes ?? 0, errActs = c.errActions ?? 0;
+  const actions = rated - crashes;
+  return `Experience score ${fmtApdex(v)} (${apdexBand(v)})\n`
+    + `= (satisfied + tolerating ÷ 2) ÷ (rated actions + crashes)\n`
+    + `= (${fmt(c.satisfied)} + ${fmt(c.tolerating)} ÷ 2) ÷ ${fmt(rated)}\n\n`
+    + `RESPONSE TIME AGAINST THE ERRORS THAT HURT. ${fmt(actions)} user actions by `
+    + `real people were rated for speed by the platform (experience.level, from the `
+    + `action's duration against this environment's thresholds). Counted frustrated `
+    + `whatever their speed: ${fmt(errActs)} action${errActs === 1 ? "" : "s"} that `
+    + `carried an error of ${errActs === 1 ? "its" : "their"} own, and ${fmt(crashes)} `
+    + `crash${crashes === 1 ? "" : "es"} or freeze${crashes === 1 ? "" : "s"} of the app, `
+    + `one frustrated element each. In all: ${pc(c.satisfied)} satisfied, `
+    + `${pc(c.tolerating)} tolerating, ${pc(c.frustrated)} frustrated. Errors in the `
+    + `background, outside any action, do not enter. Robots and synthetic monitors `
+    + `are left out.\n\n`
+    + `Bands: excellent ≥ 0.94 · good ≥ 0.85 · fair ≥ 0.70 · poor ≥ 0.50 · `
+    + `unacceptable below.`;
+}
+
+/** The three shares in one line, for the card: what the score is made of. */
+export function scoreMix(c: ApdexCounts): string | null {
+  const rated = apdexRated(c);
+  if (!rated) return null;
+  const pc = (n: number) => `${Math.round((n / rated) * 100)}%`;
+  const k = rated >= 1e6 ? `${(rated / 1e6).toFixed(1)}M` : rated >= 1e3 ? `${(rated / 1e3).toFixed(1)}K` : `${rated}`;
+  return `${pc(c.satisfied)} satisfied · ${pc(c.tolerating)} tolerating · ${pc(c.frustrated)} frustrated · ${k} rated`;
+}
+
+/** The platform's bands (experience.score.band), with its own labels. */
 export type ApdexBand = "Excellent" | "Good" | "Fair" | "Poor" | "Unacceptable";
 export const apdexBand = (v: number): ApdexBand =>
   v >= 0.94 ? "Excellent" : v >= 0.85 ? "Good" : v >= 0.7 ? "Fair"
@@ -85,4 +111,8 @@ export const apdexTone = (v: number | null): "good" | "warn" | "bad" | "info" =>
  * held at 0.99.
  */
 export const fmtApdex = (v: number | null) =>
-  (v === null ? "—" : v < 1 ? Math.min(v, 0.99).toFixed(2) : "1.00");
+  /* TRUNCATED, never rounded — the figure must sit in the band its word
+     names. Rounded, 0.9399 printed "0.94" beside "Good" while 0.94 is where
+     Excellent starts: the number and the word disagreed on one screen. The
+     same rule already held at the top (0.998 is never "1.00"). */
+  (v === null ? "—" : v < 1 ? (Math.floor(Math.min(v, 0.99) * 100) / 100).toFixed(2) : "1.00");

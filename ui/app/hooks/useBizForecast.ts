@@ -8,7 +8,7 @@
 // figures. Memoised per (window, scope).
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qBizSeries, type OutcomeDefs, type Timeframe } from "../utils/dql";
+import { bizSeriesShape, qBizSeries, type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 export interface Projection { point: number; lower: number; upper: number; quality: string }
 export interface BizForecast { sessions: Projection | null; conversions: Projection | null }
@@ -26,7 +26,10 @@ async function forecastOne(
   defs?: OutcomeDefs,
 ): Promise<Projection | null> {
   try {
-    const horizon = 8; // one window ahead: the series bins the window into 8
+    /* one window ahead, in the bins qBizSeries actually uses — one shape,
+       shared, see bizSeriesShape */
+    const { horizon, ok } = bizSeriesShape(tf);
+    if (!ok) return null;
     const base = `/platform/davis/analyzers/v1/analyzers/${ANALYZER}`;
     let res = await (await fetch(`${base}:execute`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -67,7 +70,12 @@ async function forecastOne(
 }
 
 export function useBizForecast(tf: Timeframe, appId: string | null,
-  defs?: OutcomeDefs): BizForecast | null {
+  defs?: OutcomeDefs,
+  /** AFTER THE BOARD, NEVER BESIDE IT. The analyzer's scan is a full read of
+   *  two windows of RUM; fired with the cube it competed for the same hour
+   *  and the cards waited on it. The caller passes true once the board's own
+   *  figures have landed — the projection is the last thing drawn. */
+  ready = true): BizForecast | null {
   const gen = useMemoGen();
   const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs?.[appId ?? ""] ?? null)}|${gen}`;
   const [out, setOut] = useState<BizForecast | null>(memo.get(key) ?? null);
@@ -76,6 +84,7 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
     const hit = memo.get(key);
     if (hit) { setOut(hit); return; }
     setOut(null);
+    if (!ready) return;
     let live = true;
     (async () => {
       /* ONE analyzer run, not two. The conversion leg projected a predicate
@@ -89,7 +98,7 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, ready]);
 
   return out;
 }

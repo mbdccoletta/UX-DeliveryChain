@@ -24,7 +24,7 @@ import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
 import { deepestOf, routeCtxOf } from "./FlowSankey";
 import { fmtMs, fmtN, fmtPct, type OutcomeDefs } from "../utils/dql";
 import { useGeo } from "../hooks/useGeo";
-import { GEO_WORD, geoBecause, geoJudge, geoName } from "../utils/geoVerdict";
+import { GEO_WORD, geoBecause, geoJudge, geoName, geoPop } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
 import { useFrontendNames } from "../hooks/useFrontendNames";
 import { SESSION_CHIP, chips, intentsAvailable, open as openIntent,
@@ -179,13 +179,14 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
    * verdict the Overview map speaks (utils/geoVerdict), memoised per app and
    * window, so opening the board after the map costs no second scan. */
   const geoRows = useGeo(data.tf, scopeApp || null);
-  const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs);
+  const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs,
+    !!kpis && !kpis.partial);
   const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
   /* the segment ranking read a capped number of session rows: past the cap it
      is built from a subset, and a subset that looks like a total is the one
      thing this board must not show */
   const breakdownPartial = breakdown?.partial === true;
-  const difficulty = useDifficulty(data.tf, scopeApp || null);
+  const difficulty = useDifficulty(data.tf, scopeApp || null, outcomeDefs);
   // the SAME closure the delivery chain resolves — so "incidents in your
   // systems" counts exactly what a click on the button will show lit
   const chainScope = useAppScope(scopeApp || undefined,
@@ -210,7 +211,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   const routeCtx = React.useMemo(
     () => (routePicks?.length && scopeApp ? routeCtxOf(data.sequences, scopeApp) : null),
     [data.sequences, scopeApp, routePicks]);
-  const cohort = useRouteCohort(data.tf, scopeApp, routePicks ?? null, routeCtx, outcomeDefs);
+  const cohort = useRouteCohort(data.tf, scopeApp, routePicks ?? null, routeCtx, outcomeDefs,
+    data.apps.find((a) => a.appId === scopeApp)?.sessions ?? 0);
   /* NOTHING PICKED — OR NOTHING FOUND — IS THE WHOLE APPLICATION.
    *
    * A board narrowed to journeys nobody walked in this window printed zero
@@ -576,7 +578,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
      the Delivery Chain. */
   const measuringMark = kpis?.partial
     ? <em className="dim" title="Preview figures — real, measured, still firming up as Grail finishes. The final replaces them."> · measuring</em>
-    : null;
+    : kpis?.cachedAt
+      ? <em className="dim" title="These figures were measured earlier in this session and kept for a window-sized while, like the chain's. Refresh goes back to Grail."> · cached {Math.max(1, Math.round((Date.now() - kpis.cachedAt) / 60000))}m ago</em>
+      : null;
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
     if (!kpis) return <div className="bc__hero bc__hero--load" />;
     const isBrand = front === "brand";
@@ -1000,8 +1004,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               "",
               geoRows && geoRows.length ? "WHERE THE CUSTOMERS ARE" : "",
               ...(geoRows ?? []).slice(0, 6).map((g) => {
-                const tot = (geoRows ?? []).reduce((a, x) => a + x.sessions, 0) || 1;
-                const base = (geoRows ?? []).reduce((a, x) => a + x.hit, 0) / tot;
+                const tot = (geoRows ?? []).reduce((a, x) => a + geoPop(x).n, 0) || 1;
+                const base = (geoRows ?? []).reduce((a, x) => a + geoPop(x).h, 0) / tot;
                 return `  ${geoName(g.country)}: ${fmtN(g.sessions)} sessions,`
                   + ` ${GEO_WORD[geoJudge(g, base)]} — ${geoBecause(g, base)}`;
               }),
@@ -1017,11 +1021,10 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           stated as such, so nothing fills a gap with a plausible number. */}
       {breakdownPartial && (
         <div className="banner">
-          <b>Segments are partial:</b> this application sent more sessions in this window than
-          the breakdown reads ({fmtN(BREAKDOWN_CAP)}), so the figures below the funnel are
-          built from the first {fmtN(BREAKDOWN_CAP)} and are floors, not totals. The funnel
-          and the conversion above are unaffected — they are counted server-side. Narrow the
-          window to make the segments whole.
+          <b>Segments are partial:</b> this application has more distinct segments
+          (country × OS × browser × device × user type) in this window than the board reads
+          ({fmtN(BREAKDOWN_CAP)} groups), so the smallest ones are missing and the figures
+          below the funnel are floors, not totals. Narrow the window to make them whole.
         </div>
       )}
 
@@ -1555,8 +1558,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           headline is the worst location or the negative finding, because "no
           region stands out" is also an answer the owner needs stated. */}
       {geoRows && geoRows.length > 0 && (() => {
-        const tot = geoRows.reduce((a, g) => a + g.sessions, 0) || 1;
-        const base = geoRows.reduce((a, g) => a + g.hit, 0) / tot;
+        const tot = geoRows.reduce((a, g) => a + geoPop(g).n, 0) || 1;
+        const base = geoRows.reduce((a, g) => a + geoPop(g).h, 0) / tot;
         const judged = geoRows.map((g) => ({ g, tone: geoJudge(g, base) }));
         const hurt = judged.filter((x) => x.tone !== "good")
           .sort((a, b) => (a.tone === b.tone ? b.g.sessions - a.g.sessions

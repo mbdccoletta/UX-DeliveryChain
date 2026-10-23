@@ -3,7 +3,7 @@
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
 import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
-  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql,
+  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql, sampleRate,
   type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 /** The poster's scans, shared and remembered: keyed by the query text itself
@@ -1311,11 +1311,24 @@ export function FlowSankey({
        * "drawing the route's portrait…". Parallel now, and memoised per
        * window+app: the first open costs the slower scan alone, reopening
        * costs nothing. */
+      /* ONE SAMPLE FOR BOTH SCANS — see sampleRate in utils/dql. On a large
+       * application both scans keep the same deterministic share of sessions,
+       * so the join below is exact inside the sample and every count is the
+       * sample's scaled by 1/rate. On a small one the rate is 1: everything. */
+      const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
+      const rate = sampleRate(appSessions);
+      /* "NO NAVIGATION" IS A COHORT TOO. Its sessions have no mined path by
+       * definition, so matching them through the path scan found nobody and
+       * the poster said "0 of 197,171" for the biggest band on the diagram.
+       * They are the sessions with no named screen, which the facts scan
+       * counts directly — the same test the mining applies. */
+      const noNav = mode !== "unconverted"
+        && picks.some((id) => id === "j-none" || id === "st-none");
       const [rows, pr] = await Promise.all([
-        memoDql(qCohortSessions(tf, appId, outcomeDefs), 10000),
-        mode === "unconverted"
+        memoDql(qCohortSessions(tf, appId, outcomeDefs, rate), 10000),
+        mode === "unconverted" || noNav
           ? Promise.resolve(null)
-          : memoDql(qPathSessions(tf, appId), 10000),
+          : memoDql(qPathSessions(tf, appId, rate), 10000),
       ]);
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
@@ -1340,6 +1353,7 @@ export function FlowSankey({
       })();
       const inCohortOf = (r: Record<string, unknown>) =>
         mode === "unconverted" ? Number(r.reached) === 0
+        : noNav ? Number(r.views) === 0
         : pickIds ? pickIds.has(String(r.sid)) : true;
       /* HONEST SAMPLING. Both scans are capped (10k sessions, 2k paths);
        * printing a sample's absolute count against the band's full total once
@@ -1350,17 +1364,21 @@ export function FlowSankey({
         .reduce((a, q) => a + q.sessions, 0);
       const appTotal = apps.find((a) => a.appId === appId)?.sessions ?? rows.length;
       let cohortN: number;
-      let sampled: boolean;
-      if (mode === "unconverted") {
-        sampled = rows.length >= 10000;
+      /* sampled when the rate cut the sessions, or when even the sample hit
+         the row cap (then the scale is approximate twice over, and says so) */
+      const sampled = rate < 1 || rows.length >= 10000 || prTotal >= 10000;
+      if (mode === "unconverted" || noNav) {
         const matched = rows.filter(inCohortOf).length;
-        cohortN = sampled && rows.length > 0
-          ? Math.round((matched / rows.length) * appTotal) : matched;
+        cohortN = rate < 1 ? Math.round(matched / rate)
+          : rows.length >= 10000 && rows.length > 0
+            ? Math.round((matched / rows.length) * appTotal) : matched;
+      } else if (rate < 1) {
+        // the same sessions in both scans: the matched paths, scaled
+        cohortN = Math.round(prMatched / rate);
       } else {
-        sampled = prTotal >= 10000 || rows.length >= 10000;
         // the match RATE comes from the path sample itself — the one place
         // that knows which journeys satisfy the picks — scaled to the full
-        // mined volume the band displays
+        // mined volume the band displays when a cap was hit
         cohortN = sampled && prTotal > 0
           ? Math.round((prMatched / prTotal) * (journeyedTotal || prTotal))
           : rows.filter(inCohortOf).length;

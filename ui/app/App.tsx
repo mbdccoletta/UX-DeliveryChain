@@ -219,7 +219,11 @@ export function App() {
      truncated it — and it bought one comparison sentence. The sentence is
      gone; every number on the card is still measured, and the card no longer
      claims a comparison it did not pay for. */
-  const uxMap = useUxOverview(tf, state.app, false);
+  const [warmJourneys, setWarmJourneys] = useState(false);
+  /* and only while Journeys is the page — the one consumer of this map
+     (FlowSankey); every other page was paying a full scan for a prop it
+     never received. Warmed with the journeys, on the tab's hover. */
+  const uxMap = useUxOverview(tf, state.app, false, tab === "flow");
   /* Users & Sessions filters by frontend.name, not the inventory name —
    * see useFrontendNames for the measured mismatch. */
   const feNames = useFrontendNames(tf.minutes);
@@ -227,7 +231,6 @@ export function App() {
    * Control) — four user.events scans Overview and the chain stopped paying */
   /* warmed the moment the pointer TOUCHES the Journeys/Business Control
    * tab — by the click, the four scans are usually already in flight */
-  const [warmJourneys, setWarmJourneys] = useState(false);
   const jd = useJourneys(tf,
     warmJourneys || tab === "flow" || tab === "report", state.session, state.app);
   // the customer's own conversion definitions — taught on Journeys, read by

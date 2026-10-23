@@ -10,41 +10,32 @@
 // Phrased as a reader speaks: short on the chip, precise in the question.
 import type { Starter } from "../components/Intelligence";
 
-/** Overview — one application's health, as its users met it. */
+/** Overview — one application's health, as its users met it. Action first:
+ *  the three that end in a ranked list of things to do lead the row. "What
+ *  would move the needle" was retired — the two ranking questions answer it
+ *  with the points and the people behind each action. */
 export const OVERVIEW_STARTERS: Starter[] = [
-  { label: "What is hurting users most",
-    ask: "Across everything measured on this page, what is costing users the "
-      + "most right now — and how do you know it is that rather than something "
-      + "else on screen?" },
-  { label: "Is this app healthy",
-    ask: "Judge this application's health for the people using it. Say which "
-      + "single number you are leaning on, what it means in plain terms, and "
-      + "whether anything on this page contradicts that verdict." },
-  { label: "Where are the worst users",
-    ask: "Which country, device or connection is having the worst experience "
-      + "here, how much worse is it than the rest, and is the gap big enough "
-      + "to act on or small enough to be noise?" },
-  { label: "What would move the needle",
-    ask: "If I could fix one thing on this application this week, what does "
-      + "this page say it should be, and roughly how many sessions would it "
-      + "touch?" },
-  /* THE TWO QUESTIONS A BRAND OWNER ACTUALLY ASKED, on a bank's production
-   * application: "why is the country green and every state red?" and "what
-   * exactly do we do to protect the brand?". Both are answerable only from
-   * what this page measures — the judging rule and the application's own
-   * rate travel with the facts, the errors by name travel when the card is
-   * open — and both demand exactness: a named error, a named screen, a
-   * count, an owner, a way to verify. */
-  { label: "Why is this place that colour",
-    ask: "Explain the map's verdict for the selected country and its states, "
-      + "using the judging rule and the figures supplied. For the country and "
-      + "for each state listed: its error rate, how many times this "
-      + "application's own rate that is, and which arm fired — deviation, "
-      + "speed, or neither. If the country reads as in line while its states "
-      + "do not, or the reverse, say precisely what in the rule or the figures "
-      + "produces that and whether it is a finding or an artefact. Finish with "
-      + "what the absolute rate means for the people using the application, "
-      + "independent of the colour, and which single row to open first." },
+  { label: "What protects users first",
+    ask: "Build a prioritised action list to protect the people using this "
+      + "application, from the figures supplied and nothing else. Rank by "
+      + "real people affected: sessions that met an error, sessions lost to a "
+      + "crash or freeze, actions rated frustrated. For each action give: the "
+      + "rank, what to do, where (named screen, error, country or state), how "
+      + "many real people it protects, who owns it, how quickly it can be done "
+      + "(today / this sprint / structural), and the exact number on this page "
+      + "that should move when it is done — so it can be checked on the next "
+      + "window. Put first whatever protects the most people soonest. Name "
+      + "anything that looks alarming but should NOT be escalated (robot "
+      + "traffic, third-party noise, a small place) and why." },
+  { label: "Raise the experience score",
+    ask: "Using only the figures supplied, rank the screens that pull this "
+      + "application's experience score down, by the points each one costs "
+      + "(the facts give the arithmetic). For the top three: the screen, its "
+      + "own score and p90, how many points fixing it would return, and what "
+      + "to look at first — the slow requests behind it, its errors, or its "
+      + "rendering. Then say what score the application would reach if those "
+      + "three were fixed, with the sum shown. If the per-screen figures are "
+      + "not loaded, say so and tell me which card to open; do not estimate." },
   { label: "How do I protect the brand",
     ask: "Errors are reaching this application's users. Give an exact, "
       + "prioritised plan to protect the brand, from the figures supplied and "
@@ -58,6 +49,28 @@ export const OVERVIEW_STARTERS: Starter[] = [
       + "wait, say what the business should tell customers and when; if not, "
       + "say so plainly. Where an action needs a figure this page did not "
       + "measure, name what to open to get it instead of estimating." },
+  { label: "What is hurting users most",
+    ask: "Across everything measured on this page, what is costing users the "
+      + "most right now — and how do you know it is that rather than something "
+      + "else on screen?" },
+  { label: "Why is this place that colour",
+    ask: "Explain the map's verdict for the selected country and its states, "
+      + "using the judging rule and the figures supplied. For the country and "
+      + "for each state listed: its error rate, how many times this "
+      + "application's own rate that is, and which arm fired — deviation, "
+      + "speed, or neither. If the country reads as in line while its states "
+      + "do not, or the reverse, say precisely what in the rule or the figures "
+      + "produces that and whether it is a finding or an artefact. Finish with "
+      + "what the absolute rate means for the people using the application, "
+      + "independent of the colour, and which single row to open first." },
+  { label: "Is this app healthy",
+    ask: "Judge this application's health for the people using it. Say which "
+      + "single number you are leaning on, what it means in plain terms, and "
+      + "whether anything on this page contradicts that verdict." },
+  { label: "Where are the worst users",
+    ask: "Which country, device or connection is having the worst experience "
+      + "here, how much worse is it than the rest, and is the gap big enough "
+      + "to act on or small enough to be noise?" },
 ];
 
 /** Journeys — where people go, and where they stop going. */
@@ -95,6 +108,14 @@ export const BOARD_STARTERS: Starter[] = [
   { label: "What should I tell my exec",
     ask: "Write the three sentences I would say to an executive about this "
       + "board: what is happening, what it costs, and what I am asking for." },
+  { label: "Where to act first",
+    ask: "From this board's figures only, rank the three actions that would "
+      + "protect the most customers this week. For each: the segment or step "
+      + "it targets (named), how many real customers it touches, whether they "
+      + "were hit by a failure, made to wait or lost to a crash, who owns it, "
+      + "and which number on this board must move on the next window to prove "
+      + "it worked. Say which change in the comparison with the previous "
+      + "window is real and which is within noise before ranking on it." },
   { label: "How do I protect the brand",
     ask: "From this board's figures only, give the exact actions that protect "
       + "the brand this week: who is affected and how many; which failure to "

@@ -1,6 +1,6 @@
 // Business Control, scoped to the routes a reader picked on Journeys.
 //
-// The board's own scan (qBizKpis) is per application: it cannot know about a
+// The board's own scan (qBizCube) is per application: it cannot know about a
 // route, because a route is a mined sequence, not a field. So a route-scoped
 // board is computed the way the poster computes its cohort — per-session facts
 // joined to per-session journeys, in the browser — and it is run TWICE, this
@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import {
-  normalizeView, qCohortSessions, qPathSessions, runDql,
+  normalizeView, qCohortSessions, qPathSessions, runDql, sampleRate,
   type OutcomeDefs, type Timeframe,
 } from "../utils/dql";
 import { matchesRoutes, type RouteCtx } from "../components/FlowSankey";
@@ -38,11 +38,14 @@ const memo = new Map<string, RouteCohort>();
 /** One window's facts for the sessions whose journey matches the picks. */
 async function windowFacts(
   tf: Timeframe, appId: string, picks: string[], ctx: RouteCtx | null,
-  defs?: OutcomeDefs,
+  defs?: OutcomeDefs, rate = 1,
 ): Promise<{ facts: CohortFacts; sampled: boolean }> {
+  /* ONE SAMPLE FOR BOTH SCANS (sampleRate, utils/dql): the same sessions in
+     the facts and the paths, so the join is exact inside the sample; every
+     count below is scaled by 1/rate before it reaches the board. */
   const [rows, paths] = await Promise.all([
-    runDql<Record<string, unknown>>(qCohortSessions(tf, appId, defs), 10000),
-    runDql<Record<string, unknown>>(qPathSessions(tf, appId), 10000),
+    runDql<Record<string, unknown>>(qCohortSessions(tf, appId, defs, rate), 10000),
+    runDql<Record<string, unknown>>(qPathSessions(tf, appId, rate), 10000),
   ]);
   const inCohort = new Set<string>();
   for (const r of paths) {
@@ -56,26 +59,29 @@ async function windowFacts(
   const hurt = real.filter((r) => Number(r.errs) > 0);
   const conv = (rs: Array<Record<string, unknown>>) =>
     rs.filter((r) => Number(r.reached) === 1).length;
+  const k = (n: number) => (rate < 1 ? Math.round(n / rate) : n);
   return {
     facts: {
-      sessions: mine.length,
-      customers: real.length,
-      converted: conv(real),
-      hit: hurt.length,
-      crashed: mine.filter((r) => Number(r.crash) > 0).length,
+      sessions: k(mine.length),
+      customers: k(real.length),
+      converted: k(conv(real)),
+      hit: k(hurt.length),
+      crashed: k(mine.filter((r) => Number(r.crash) > 0).length),
       // the same per-session facts the board's own figures rest on, so a
       // narrowed board keeps every line it had: engagement and failure cost
-      engaged: real.filter((r) => Number(r.views) > 1).length,
-      waited: real.filter((r) => Number(r.waited) > 0).length,
-      cleanN: clean.length, cleanConv: conv(clean), hitConv: conv(hurt),
+      engaged: k(real.filter((r) => Number(r.views) > 1).length),
+      waited: k(real.filter((r) => Number(r.waited) > 0).length),
+      cleanN: k(clean.length), cleanConv: k(conv(clean)), hitConv: k(conv(hurt)),
     },
-    sampled: paths.length >= 10000 || rows.length >= 10000,
+    sampled: rate < 1 || paths.length >= 10000 || rows.length >= 10000,
   };
 }
 
 export function useRouteCohort(
   tf: Timeframe, appId: string, picks: string[] | null, ctx: RouteCtx | null,
   defs?: OutcomeDefs,
+  /** The application's sessions in the window — sizes the shared sample. */
+  appSessions = 0,
 ): RouteCohort | null {
   /* THE CONTEXT IS PART OF THE QUESTION. The cohort is resolved AGAINST ctx
      — the mined routes and their depth — and ctx was in neither the cache key
@@ -106,9 +112,10 @@ export function useRouteCohort(
       try {
         const span = `${Math.max(1, Math.round(tf.minutes))}m`;
         const prevTf: Timeframe = { ...tf, from: `${tf.from}-${span}`, to: tf.from };
+        const rate = sampleRate(appSessions);
         const [a, b] = await Promise.all([
-          windowFacts(tf, appId, picks, ctx, defs),
-          windowFacts(prevTf, appId, picks, ctx, defs),
+          windowFacts(tf, appId, picks, ctx, defs, rate),
+          windowFacts(prevTf, appId, picks, ctx, defs, rate),
         ]);
         const res: RouteCohort = { cur: a.facts, prev: b.facts, sampled: a.sampled || b.sampled };
         memo.set(key, res);

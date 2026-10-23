@@ -1931,6 +1931,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   text-shadow: 0 0 16px color-mix(in srgb, var(--ink-hi) 35%, transparent); }
 .tk-core__cap { font: 700 9px var(--mono); color: color-mix(in srgb, var(--ink-hi) 70%, transparent);
   text-transform: uppercase; letter-spacing: 0.12em; }
+/* The verdict's reason, under the verdict word — the same sentence the page
+   header prints, so the two can be read as one. */
+/* the deviation beside a place's rate — a figure, not a second verdict */
+.geo__x { color: var(--ink-3); font-weight: 500; }
+.tk-core__why { font: 500 11px var(--mono); color: var(--ink-2); text-align: center;
+  max-width: 300px; line-height: 1.4; margin-top: 2px; }
+/* What the score is made of — three shares and the rated count, under the
+   score it explains. Quiet ink: it is arithmetic, not a second verdict. */
+.tk-core__mix { font: 500 10px var(--mono); color: var(--ink-3);
+  font-variant-numeric: tabular-nums; text-align: center; margin-top: 1px; }
 .tk-core__words { display: block; font: 400 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 75%, transparent);
   max-width: 320px; margin: 6px auto 0; line-height: 1.5; }
 .tk-core__nm { font: 700 15px var(--sans); color: var(--ink-hi); margin-top: 6px;
@@ -3225,6 +3235,11 @@ div:has(> header):has(main) > div {
 .gpin--bad { background: color-mix(in srgb, var(--bad-fill) 62%, transparent);
   border-color: var(--bad-fill);
   box-shadow: 0 0 0 1.5px var(--bg), 0 0 16px color-mix(in srgb, var(--bad-fill) 65%, transparent); }
+/* measuring: the place is there and sized by its sessions, but unjudged */
+.gpin--wait { background: color-mix(in srgb, var(--ink-3) 30%, transparent);
+  border-color: color-mix(in srgb, var(--ink-3) 70%, transparent);
+  box-shadow: 0 0 0 1.5px var(--bg); }
+.geo__h--wait { color: var(--ink-3); }
 .gpin--bad::before, .gpin--bad::after { content: ""; position: absolute; inset: 0;
   border-radius: 50%; border:2px solid var(--bad-fill); animation: gsonar 2.2s ease-out infinite; }
 .gpin--bad::after { animation-delay: 1.1s; }

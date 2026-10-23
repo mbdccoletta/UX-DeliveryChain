@@ -1,41 +1,43 @@
 // The ONE rule for judging a location — the map, the board and the poster
 // must speak the same verdict or the product argues with itself.
 //
-// Two arms colour a location, worst wins — deviation OR slowness. A third is
-// computed and PRINTED but does not colour:
+// A PLACE IS JUDGED BY THE APPLICATION'S OWN RULE (utils/verdict): the share
+// of its sessions that met an error, ≥ HIT_BAD Critical, ≥ HIT_WARN Warning.
+// The same two lines the page header and the hero use — so a country cannot
+// read Healthy beside an application that reads Critical for the very same
+// reason, which is what the relative rule did on a bank's production
+// application (every country "in line" with an 84% base, the map all green
+// under a hero saying Critical). Chosen by Marcelo, 2026-10-23, over a
+// relative map with neutral greys.
 //
-//   ABSOLUTE errors   ≥25% / ≥10% of the location's sessions met an error.
-//                     This WAS a colouring arm, added because the relative
-//                     arm alone painted 31% hit green on an app that ran at
-//                     30% overall. It was demoted on a bank's production
-//                     application whose own baseline is 52%: every country
-//                     cleared 25%, every pin was red, and the map said the
-//                     same thing about everywhere — nothing. The rate is
-//                     still stated on every row; it is no longer the colour.
-//                     The trade-off is real and stated: a place that is
-//                     absolutely bad but no worse than its application reads
-//                     as "in line" here, and as bad on the application card.
-//   RELATIVE errors   ≥1.5× / ≥1.15× the application's own rate — who
-//                     deviates. Substance-gated: ≥30 sessions, ≥5 errored,
-//                     ≥2% rate, because one errored session in 696 was 2.4×
-//                     a microscopic base and got a country called frustrated.
-//   SPEED             duration-only Apdex over the location's user actions
-//                     (T = 3s, apdex.ts): <0.85 warn, <0.50 bad, ≥30 rated
-//                     actions. Apdex's error rule is deliberately NOT applied
-//                     — errors already have their arms.
+// And by the application's experience score lines (under 0.85 Warning,
+// under 0.70 Critical, ≥30 rated elements) — "not only error-free", the
+// same two halves utils/verdict judges the application on.
+// The DEVIATION — the place's rate against the application's, "0.59×" — is
+// computed and printed, never coloured.
+// Substance gate: below GEO_MIN_SESSIONS a rate is an anecdote; the place
+// stays uncoloured-green and its sentence says it was too small to judge.
+import { fmtApdex } from "./apdex";
+import { HIT_BAD, HIT_WARN } from "./verdict";
+
 export type GeoTone = "good" | "warn" | "bad";
 
 export interface GeoArm {
   sessions: number;
   /** Sessions that met at least one error. */
   hit: number;
+  /** Real people only — when present (and non-zero) the verdict is judged on
+   *  these, exactly as the application's verdict is (utils/verdict). */
+  realSessions?: number; realHit?: number;
   /** Duration-only Apdex bands over user actions (T = 3s). */
   sat: number; tol: number; fru: number;
 }
 
-/** The reader's own semantics: satisfied green, tolerating yellow,
- *  frustrated red — everywhere a location is judged. */
-export const GEO_WORD = { bad: "frustrated", warn: "tolerating", good: "satisfied" } as const;
+/** The words the page header uses for the same verdict — a place judged by
+ *  the application's rule is named with the application's words. They were
+ *  satisfied / tolerating / frustrated, the vocabulary of a speed score,
+ *  which is not what colours a place any more. */
+export const GEO_WORD = { bad: "Critical", warn: "Warning", good: "Healthy" } as const;
 
 /* THE MAP WAS THE ONE PLACE STILL PAINTING ITS OWN STATUS COLOURS.
  * Everything else in this app reads --good / --warn / --bad, which bind to
@@ -86,34 +88,35 @@ export interface GeoArms {
 /** The absolute-arm floors, exported so every screen that judges a
  *  location's error share (map, drill rows, board) imports THESE numbers
  *  instead of retyping them. */
-export const GEO_ABS_BAD = 0.25;
-export const GEO_ABS_WARN = 0.10;
+export const GEO_ABS_BAD = HIT_BAD;
+export const GEO_ABS_WARN = HIT_WARN;
 /** Substance gate for the absolute arm — below this many sessions a rate
  *  is an anecdote, not a verdict. */
 export const GEO_MIN_SESSIONS = 10;
 
+/** The population a place is judged on: its real people when it has any,
+ *  every session otherwise — the application's verdict makes the same call. */
+export const geoPop = (g: GeoArm) => (g.realSessions && g.realSessions > 0
+  ? { n: g.realSessions, h: g.realHit ?? 0, real: true }
+  : { n: g.sessions, h: g.hit, real: false });
+
 export const geoArms = (g: GeoArm, base: number): GeoArms => {
-  const rate = g.sessions ? g.hit / g.sessions : 0;
+  const pop = geoPop(g);
+  const rate = pop.n ? pop.h / pop.n : 0;
   const lift = base > 0 ? rate / base : 0;
   const rated = g.sat + g.tol + g.fru;
   const apx = rated > 0 ? (g.sat + g.tol / 2) / rated : null;
-  const rel = g.sessions >= 30 && g.hit >= 5 && rate >= 0.02
+  const rel = pop.n >= 30 && pop.h >= 5 && rate >= 0.02
     ? (lift >= 1.5 ? 2 : lift >= 1.15 ? 1 : 0) : 0;
-  const abs = g.sessions >= GEO_MIN_SESSIONS && rate >= GEO_ABS_BAD ? 2
-    : g.sessions >= GEO_MIN_SESSIONS && rate >= GEO_ABS_WARN ? 1 : 0;
+  const abs = pop.n >= GEO_MIN_SESSIONS && rate >= GEO_ABS_BAD ? 2
+    : pop.n >= GEO_MIN_SESSIONS && rate >= GEO_ABS_WARN ? 1 : 0;
   const spd = rated >= 30 && apx !== null
-    ? (apx < 0.5 ? 2 : apx < 0.85 ? 1 : 0) : 0;
-  /* THE ABSOLUTE ERROR LINE NO LONGER COLOURS THE MAP.
-   *
-   * On an application whose own baseline is 52% of sessions meeting an
-   * error, every country clears a 25% line and every pin is red — the map
-   * says nothing, because it says the same thing about everywhere. "Senão
-   * fica tudo vermelho." A pin answers WHERE the worst users are, and
-   * "worse than this application usually is" (the deviation arm) and
-   * "slow" (the Apdex arm) are the two things that vary by place. The
-   * absolute rate is still printed on every row; it just stopped being the
-   * colour. One rule, shared by the pins and the rows. */
-  return { rate, lift, apx, rel, abs, spd, level: Math.max(rel, spd) };
+    ? (apx < 0.7 ? 2 : apx < 0.85 ? 1 : 0) : 0;
+  /* THE APPLICATION'S RULE COLOURS THE PLACE (see the header): the share of
+   * its people an error affected, and its experience score, each on the
+   * application's own lines — worst wins, exactly as utils/verdict decides.
+   * The deviation (rel) is still returned for the sentence, never the colour. */
+  return { rate, lift, apx, rel, abs, spd, level: Math.max(abs, spd) };
 };
 
 export const geoJudge = (g: GeoArm, base: number): GeoTone =>
@@ -129,44 +132,41 @@ export const geoJudge = (g: GeoArm, base: number): GeoTone =>
  *  sub-national rows carry sessions and hits but no Apdex bands, so only
  *  the deviation arm can fire here; the speed arm simply has nothing to
  *  rate, which is the truth, not a different threshold. */
-export const geoJudgeSub = (r: { sessions: number; hit: number }, base: number): GeoTone =>
-  geoJudge({ sessions: r.sessions, hit: r.hit, sat: 0, tol: 0, fru: 0 }, base);
-export const geoBecauseSub = (r: { sessions: number; hit: number }, base: number): string =>
-  geoBecause({ sessions: r.sessions, hit: r.hit, sat: 0, tol: 0, fru: 0 }, base);
+type SubArm = { sessions: number; hit: number; sat?: number; tol?: number; fru?: number;
+  realSessions?: number; realHit?: number };
+export const geoJudgeSub = (r: SubArm, base: number): GeoTone =>
+  geoJudge({ ...r, sat: r.sat ?? 0, tol: r.tol ?? 0, fru: r.fru ?? 0 }, base);
+export const geoBecauseSub = (r: SubArm, base: number): string =>
+  geoBecause({ ...r, sat: r.sat ?? 0, tol: r.tol ?? 0, fru: r.fru ?? 0 }, base);
 
-/** The threshold that fired, spelled out — a verdict never asks to be taken
- *  on faith. Deviation from the application's own rate first, slowness
- *  second; the absolute rate is stated but is not a threshold here. */
+/** The line that fired, spelled out — a verdict never asks to be taken on
+ *  faith — followed by the two figures that are printed but do not colour. */
 /** "1 session" / "4 sessions" — the gate's own count, in words that agree. */
 const fmtCount = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
 
 export const geoBecause = (g: GeoArm, base: number): string => {
   const a = geoArms(g, base);
   const pct = `${(a.rate * 100).toFixed(a.rate >= 0.1 ? 0 : 1)}%`;
-  if (a.level === 0) {
-    if (g.hit === 0) {
-      return a.apx !== null && a.apx < 1
-        ? `no errors · Apdex ${a.apx.toFixed(2)}` : "no session met an error";
-    }
-    /* A GATE IS NOT A THRESHOLD. Level 0 has two very different causes: the
-       rate really is below the line, or there were too few sessions to judge
-       it at all. Saying "under the 10% tolerating line" for the second was
-       a false claim about a measurement — one errored session out of four
-       reads 25%, and the sentence insisted that was under ten. Now the gate
-       says it is a gate. */
-    if (g.sessions < GEO_MIN_SESSIONS && a.rate >= GEO_ABS_WARN) {
-      return `${pct} of its sessions met an error, but ${fmtCount(g.sessions)}`
-        + ` is too few to judge — a verdict needs ${GEO_MIN_SESSIONS}`;
-    }
-    return `${pct} of its sessions met an error — in line with this application`
-      + (a.apx !== null ? ` · Apdex ${a.apx.toFixed(2)}` : "");
+  /* the deviation and the speed, printed after the verdict's own reason */
+  const tail = (base > 0 && geoPop(g).h > 0 ? ` · ${a.lift.toFixed(2)}× the application's rate` : "")
+    + (a.apx !== null ? ` · experience score ${fmtApdex(a.apx)}` : "");
+  const pop = geoPop(g);
+  const whose = pop.real ? "real-user sessions" : "sessions";
+  if (pop.h === 0) return `no ${whose.replace(/s$/, "")} was affected by an error` + tail;
+  /* A GATE IS NOT A THRESHOLD: too few sessions to judge is said as such. */
+  if (pop.n < GEO_MIN_SESSIONS) {
+    return `${pct} of its ${whose} were affected by an error, but ${fmtCount(pop.n)}`
+      + ` is too few to judge — a verdict needs ${GEO_MIN_SESSIONS}` + tail;
   }
-  if (a.rel === a.level) return a.level === 2
-    ? `${a.lift.toFixed(1)}× the app's error rate — frustrated starts at 1.5×`
-    : `${a.lift.toFixed(1)}× the app's error rate — tolerating starts at 1.15×`;
-  return a.level === 2
-    ? `Apdex ${a.apx!.toFixed(2)} — too slow: frustrated starts under 0.50 (T = 3s)`
-    : `Apdex ${a.apx!.toFixed(2)} — slow: tolerating starts under 0.85 (T = 3s)`;
+  /* when the experience score set the colour, the sentence says so first */
+  if (a.spd === a.level && a.abs < a.level && a.apx !== null) {
+    return `experience score ${fmtApdex(a.apx)} — ${a.level === 2 ? "Critical under 0.70" : "Warning under 0.85"}, `
+      + `the application's own line · ${pct} of its ${whose} were affected by an error`
+      + (base > 0 && pop.h > 0 ? ` · ${a.lift.toFixed(2)}× the application's rate` : "");
+  }
+  if (a.level === 2) return `${pct} of its ${whose} were affected by an error — Critical starts at ${HIT_BAD * 100}%, the application's own line` + tail;
+  if (a.level === 1) return `${pct} of its ${whose} were affected by an error — Warning starts at ${HIT_WARN * 100}%, the application's own line` + tail;
+  return `${pct} of its ${whose} were affected by an error — under the ${HIT_WARN * 100}% warning line` + tail;
 };
 
 /** Country name in the reader's language (display) — falls back to the code. */
