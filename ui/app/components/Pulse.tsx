@@ -49,7 +49,9 @@ import { useServiceVitals, type ServiceVitals } from "../hooks/useServiceVitals"
 import { aheadOf, riseIsReal, type Forecast } from "../utils/forecast";
 import { useUxOverview, withCensus, type UxMap } from "../hooks/useUxOverview";
 import { useFrontendMetrics } from "../hooks/useFrontendMetrics";
+import { scanRatio } from "../utils/cost";
 import { useClassicApdex, useClassicGeo } from "../hooks/useClassicApdex";
+import { useRegionApdex } from "../hooks/useRegionApdex";
 import { mergePlaces, type ClassicPlace } from "../utils/classicApdex";
 import { originOf } from "./DeliveryChain";
 import { XmarkIcon,
@@ -303,6 +305,31 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      own per-state scan. */
   const eventRegions = useRegions(data.tf, geoSel && !geoMetric ? appId : null, geoSel);
   const storePlaces = impactedScan?.base === "sessions" ? impactedScan.places : undefined;
+  /* NO NAME ON A NAME OR A MARK — MEASURED, NOT ESTIMATED (0.17.14). The
+     placer below estimates each label's box from its text, and on a zoomed
+     country the estimate let "São Paulo" run into "Rio de Janeiro" and a
+     state's dot sit on its neighbour's name. After every paint the real
+     boxes are read, biggest place first, and a label that touches a kept
+     label or any other mark is hidden — it comes back on hover. */
+  const geoOvRef = useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const root = geoOvRef.current;
+    if (!root) return;
+    const pins = [...root.querySelectorAll<HTMLElement>(".gpin")];
+    const kept: DOMRect[] = [];
+    const lbls = [...root.querySelectorAll<HTMLElement>(".gpin__lbl")]
+      .filter((l) => !l.classList.contains("gpin__lbl--off"))
+      .sort((a, b) => Number(b.dataset.w) - Number(a.dataset.w));
+    for (const l of lbls) {
+      l.classList.remove("gpin__lbl--clash");
+      const r = l.getBoundingClientRect();
+      const hit = (o: DOMRect) => !(r.right < o.left || r.left > o.right
+        || r.bottom < o.top || r.top > o.bottom);
+      const onMark = pins.some((p) => p !== l.parentElement && hit(p.getBoundingClientRect()));
+      if (kept.some(hit) || onMark) l.classList.add("gpin__lbl--clash");
+      else kept.push(r);
+    }
+  });
   /* THE CLASSIC RATING PER PLACE, while the application itself is rated by it
      (utils/classicApdex classicGeoApdex): a country from its own row and its
      states' rows, a state from its own row. */
@@ -332,6 +359,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     return Object.assign(rows, { partial: !!impactedScan?.partial });
   }, [geoMetric, geoSel, storePlaces, impactedScan?.partial]);
   const regions = geoMetric ? storeRegions : eventRegions;
+  /* THE STATES' APDEX (0.17.13). The metric store rates countries, not
+     states; the states' rating is read from the same user actions the
+     metric is extracted from, once a country is opened, inside the click
+     budget (hooks/useRegionApdex). */
+  const regionApdex = useRegionApdex(data.tf, appId, geoMetric ? geoSel : null,
+    scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0), fmRated);
+  const regionScore = (r: { id?: string; name?: string }): number | null => {
+    if (!regionApdex) return null;
+    const code = r.id?.split("-").slice(1).join("-");
+    const b = (code ? regionApdex.get(code) : undefined) ?? (r.name ? regionApdex.get(r.name.toLowerCase()) : undefined);
+    return b ? apdexOf({ satisfied: b.sat, tolerating: b.tol, frustrated: b.fru }) : null;
+  };
   /** The selected country's own share of closed real-user sessions with
    *  errors — the base its states are read against (session store). */
   const storeBase = (() => {
@@ -361,14 +400,24 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   // a state carries no experience score: measured, printed, not rated (0.17.2)
   const rShown = (r: AnyRegion, base: number): GeoTone | "wait" => {
     if (r.source === "store") {
+      const own = regionScore(r as { id?: string; name?: string });
+      if (own !== null) return scoreTone(own) ?? "wait";
       const c = classicRegion((r as { name?: string }).name);
       return c ? scoreTone(c.apdex) ?? "wait" : "wait";
     }
     return !((r.sat ?? 0) + (r.tol ?? 0) + (r.fru ?? 0) > 0) ? "wait" : rTone(r, base);
   };
-  const rWord = (t: GeoTone | "wait") => (t === "wait" ? "not rated" : GEO_WORD[t]);
+  const rWord = (t: GeoTone | "wait") => (t !== "wait" ? GEO_WORD[t]
+    // the states' Apdex is still being read: not yet, rather than not rated
+    : fmRated && geoSel && regionApdex === null ? "measuring" : "not rated");
   const rBecause = (r: AnyRegion, base: number) => {
     if (r.source !== "store") return geoBecauseSub(regionArm(r), base);
+    const own = regionScore(r as { id?: string; name?: string });
+    if (own !== null) {
+      return `Apdex ${fmtApdex(own)} — Dynatrace's rating of real people's user actions here`
+        + (regionApdex?.ratio ? `, from a 1-in-${regionApdex.ratio} sample` : "")
+        + ` · ${geoTagStore(r)}`;
+    }
     const c = classicRegion((r as { name?: string }).name);
     return c ? `${classicWhy(c)} · ${geoTagStore(r)}` : geoBecauseStore(r, storeBase);
   };
@@ -797,8 +846,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
     ? METRIC_LABEL[detail as Metric] : "errors";
 
   const svcSeries = useServiceSeries([...scope.services], data.tf);
+  /* THE CLICK'S BUDGET (utils/cost OPTIONAL_SCAN_BUDGET_GIB). A breakdown
+     reads raw events; measured on production, ≈25 KB per session of the
+     window (140 GiB for the views of a ~6M-session hour). The smallest Grail
+     sampling ratio that keeps the read inside the budget is used; a small
+     application stays exact (1). */
+  const detailRatio = scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0);
   const detailRows = useCardDetail(appId, data.tf,
-    picked && detail && detail !== "services" ? detail : null);
+    picked && detail && detail !== "services" ? detail : null, detailRatio);
   // which of the listed domains are served by instrumented code — one scan,
   // only while the requests panel is open
   /* THE PROBE ASKS ABOUT HOSTS. Its query matches a span's server address, so
@@ -844,7 +899,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   // otherwise one domain contacted from two origins would appear twice and
   // rank below a quieter one.
   /* fetched when the requests card opens (useDomains), not on every load */
-  const domRows = useDomains(data.tf, appId, detail === "requests");
+  const domRows = useDomains(data.tf, appId, detail === "requests", detailRatio);
   const domNames = Object.entries(
     (domRows ?? []).filter((r) => r.appId === appId)
       .reduce<Record<string, number>>((acc, r) => {
@@ -1726,7 +1781,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       });
                   }
                   return (
-                    <div className="geo__ov geo__ov--on" aria-hidden="true">
+                    <div className="geo__ov geo__ov--on" aria-hidden="true" ref={geoOvRef}>
                       {/* ONE LEVEL AT A TIME. With a country open, its own
                           bubble sat on top of the states it had just opened —
                           two readings of the same ground, the bigger one
@@ -1752,7 +1807,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                               if (opening) revealDrill();
                             }}>
                             {(sz >= 26 || tone !== "good") && (
-                              <span className={`gpin__lbl${
+                              <span data-w={g.sessions} className={`gpin__lbl${
                                 labelled.has(g.country) ? "" : " gpin__lbl--off"}`}>
                                 {sz === 44 ? nameOf(g.country) : g.country}
                                 <em>{fmtK(g.sessions)}</em>
@@ -1816,7 +1871,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 stays with the big marks only; sixteen numbers
                                 over one country is a wall, and the list is
                                 right there holding all of them. */}
-                            <span className={`gpin__lbl${
+                            <span data-w={r.sessions} className={`gpin__lbl${
                               rLabelled.has(r.id) ? "" : " gpin__lbl--off"}`}>
                               <b>{sz >= 20 ? r.name : uf(r.id)}</b>
                               {sz >= 20 && <em>{fmtK(r.sessions)}</em>}
@@ -3132,6 +3187,12 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
         <span className="mch__fc">
           {rows === null ? "measuring…" : `${rows.length} shown`}
         </span>
+        {rows && (rows as { ratio?: number }).ratio ? (
+          <span className="mch__fc" title={`Read from a 1-in-${(rows as { ratio?: number }).ratio} sample `
+            + "of the window's events, so this breakdown stays within the app's scan budget; counts are "
+            + "the sample scaled back up, shares and response times are the sample's."}>
+            {`sample 1:${(rows as { ratio?: number }).ratio}`}
+          </span>) : null}
         <button className="svcf__wide" onClick={() => setWide((w) => !w)}
           aria-pressed={wide}
           title={wide ? "Trim the names back to one line"

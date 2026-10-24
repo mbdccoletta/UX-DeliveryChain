@@ -53,21 +53,28 @@ export interface DetailRow {
   fru?: number;
 }
 
-const QUERY: Record<DetailMetric, (tf: Timeframe, app: string) => string> = {
+const QUERY: Record<DetailMetric, (tf: Timeframe, app: string, ratio?: number) => string> = {
   sessions: qDetailExperience,
   errors: qDetailErrors,
   requests: qDetailRequests,
 };
 
-const memo = new Map<string, DetailRow[]>();
+const memo = new Map<string, DetailRow[] & { ratio?: number }>();
 
 /** Rows for one card, or null while they are being fetched. */
 export function useCardDetail(
   appId: string, tf: Timeframe, metric: DetailMetric | null,
-): DetailRow[] | null {
+  /** THE GUARDRAIL ON A CLICK (0.17.10). A breakdown has no metric
+   *  equivalent — views, endpoints and error names live only on the events —
+   *  and on a production estate one click read 118–140 GiB. The caller
+   *  sizes a Grail sampling ratio (1, 10, 100…) so the read stays inside
+   *  OPTIONAL_SCAN_BUDGET_GIB; counts are scaled back by it, shares and
+   *  percentiles hold, and the rows carry the ratio so the panel says so. */
+  ratio = 1,
+): (DetailRow[] & { ratio?: number }) | null {
   const gen = useMemoGen();
-  const key = metric ? `${appId}|${tf.from}|${tf.to}|${metric}|${gen}` : "";
-  const [rows, setRows] = useState<DetailRow[] | null>(
+  const key = metric ? `${appId}|${tf.from}|${tf.to}|${metric}|${ratio}|${gen}` : "";
+  const [rows, setRows] = useState<(DetailRow[] & { ratio?: number }) | null>(
     key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -82,28 +89,31 @@ export function useCardDetail(
     let live = true;
     (async () => {
       try {
-        const raw = await runDql<Record<string, unknown>>(QUERY[metric](tf, appId), 20);
-        const out: DetailRow[] = raw.map((r) => ({
+        const raw = await runDql<Record<string, unknown>>(QUERY[metric](tf, appId, ratio), 20);
+        // a sampled count is the sample times the ratio — an estimate, marked
+        const x = (v: unknown) => (v == null ? undefined : Number(v) * ratio);
+        const out: DetailRow[] & { ratio?: number } = raw.map((r) => ({
           name: String(r.name ?? "—"),
           domain: r.domain == null ? undefined : String(r.domain),
-          vol: Number(r.vol) || 0,
+          vol: (Number(r.vol) || 0) * ratio,
           sessions: Number(r.sessions) || 0,
           p50: r.p50 == null ? undefined : Number(r.p50),
           p90: r.p90 == null ? undefined : Number(r.p90),
           p95: r.p95 == null ? undefined : Number(r.p95),
-          failures: r.failures == null ? undefined : Number(r.failures),
-          errors: r.errors == null ? undefined : Number(r.errors),
-          real: r.real == null ? undefined : Number(r.real),
-          third: r.third == null ? undefined : Number(r.third),
+          failures: x(r.failures),
+          errors: x(r.errors),
+          real: x(r.real),
+          third: x(r.third),
           type: r.type == null ? undefined : String(r.type),
-          named: r.named == null ? undefined : Number(r.named),
+          named: x(r.named),
           raw: r.raw == null ? undefined : String(r.raw),
           rawNames: r.rawNames == null ? undefined : Number(r.rawNames),
           src: r.src == null ? undefined : String(r.src),
-          sat: r.sat == null ? undefined : Number(r.sat),
-          tol: r.tol == null ? undefined : Number(r.tol),
-          fru: r.fru == null ? undefined : Number(r.fru),
+          sat: x(r.sat),
+          tol: x(r.tol),
+          fru: x(r.fru),
         }));
+        if (ratio > 1) out.ratio = ratio;
         memo.set(key, out);
         if (live) setRows(out);
       } catch {

@@ -15,9 +15,12 @@ const memo = new Map<string, DomainRow[]>();
 const num = (v: unknown) => Number(v) || 0;
 
 export function useDomains(tf: Timeframe, appId: string | null | undefined,
-  active: boolean): DomainRow[] | null {
+  active: boolean,
+  /** Grail sampling ratio sized by the caller (utils/cost scanRatio): counts
+   *  come back scaled by it, durations are the sample's. 1 = exact. */
+  ratio = 1): DomainRow[] | null {
   const gen = useMemoGen();
-  const key = appId ? `${tf.from}|${tf.to}|${appId}|${gen}` : "";
+  const key = appId ? `${tf.from}|${tf.to}|${appId}|${ratio}|${gen}` : "";
   const [out, setOut] = useState<DomainRow[] | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -29,15 +32,15 @@ export function useDomains(tf: Timeframe, appId: string | null | undefined,
     let live = true;
     (async () => {
       try {
-        const rows = await runDql<Record<string, unknown>>(qDomains(tf, appId), 200);
+        const rows = await runDql<Record<string, unknown>>(qDomains(tf, appId, ratio), 200);
         const res: DomainRow[] = rows.map((r) => ({
           appId: String(r.appId ?? ""),
           utype: (r.utype as string | null) ?? null,
           agent: (r.agent as string | null) ?? null,
           domain: String(r.domain ?? ""), provider: r.provider as string | null,
-          reqs: num(r.reqs), p50: num(r.p50), p90: num(r.p90), err: num(r.err),
-          bytes: num(r.bytes),
-          late: r.late == null ? null : num(r.late),
+          reqs: num(r.reqs) * ratio, p50: num(r.p50), p90: num(r.p90), err: num(r.err) * ratio,
+          bytes: num(r.bytes) * ratio,
+          late: r.late == null ? null : num(r.late) * ratio,
         }));
         memo.set(key, res);
         if (live) setOut(res);

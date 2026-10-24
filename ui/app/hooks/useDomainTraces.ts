@@ -51,7 +51,11 @@ export function useDomainTraces(
              a bank's estate (external hosts — a fraud SDK, googleapis — never
              have spans). The last 15 minutes of the window answer it the same
              for any host the application is actively calling. */
-          `fetch spans, from: ${probeFrom(tf)}, to: ${tf.to}
+          /* …and a 1-in-100 sample of them (0.17.12): measured 38 GiB on
+             production for a yes/no per host. A host the application is
+             actively calling still shows up; one too quiet to be sampled
+             falls back to the query hand-off, which is the safe side. */
+          `fetch spans, from: ${probeFrom(tf)}, to: ${tf.to}, samplingRatio: 100
            | filter ${where}
            | summarize n = count(), by: { addr = server.address }
            | filter n > 0 | limit 12`, 12);

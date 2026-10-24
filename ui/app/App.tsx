@@ -12,6 +12,7 @@ import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useOrigins } from "./hooks/useOrigins";
 import { useDomains } from "./hooks/useDomains";
+import { scanRatio } from "./utils/cost";
 import { rememberApp } from "./utils/prefs";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
@@ -222,7 +223,12 @@ export function App() {
   const origins = useOrigins(tf, state.session, state.app, tab === "chain");
   /* the contacted domains too: read by the chain's edge layer, fetched when
      it opens (the Overview's requests card asks for them itself) */
-  const domains = useDomains(tf, state.app, tab === "chain");
+  // the chain's domains, inside the click budget like the Overview's (utils/cost)
+  /* …and only once the census has landed: started before it, the ratio was
+     sized on zero sessions, so the read ran unsampled (76 GiB, 13.9 s on
+     production) and then ran again, sampled, when the count arrived. */
+  const domains = useDomains(tf, state.app, tab === "chain" && !d.loading,
+    scanRatio(d.apps.find((a) => a.appId === state.app)?.sessions ?? 0));
   const chainData = React.useMemo(() => ({ ...d,
     ...(origins ? { origins } : {}), ...(domains ? { domains } : {}),
     originsLoading: tab === "chain" && !!state.app && origins === null }),
@@ -234,7 +240,7 @@ export function App() {
      truncated it — and it bought one comparison sentence. The sentence is
      gone; every number on the card is still measured, and the card no longer
      claims a comparison it did not pay for. */
-  const [warmJourneys, setWarmJourneys] = useState(false);
+  const warmJourneys = false;
   /* and only while Journeys is the page — the one consumer of this map
      (FlowSankey); every other page was paying a full scan for a prop it
      never received. Warmed with the journeys, on the tab's hover. */
@@ -247,7 +253,8 @@ export function App() {
   /* warmed the moment the pointer TOUCHES the Journeys/Business Control
    * tab — by the click, the four scans are usually already in flight */
   const jd = useJourneys(tf,
-    warmJourneys || tab === "flow" || tab === "report", state.session, state.app);
+    (warmJourneys || tab === "flow" || tab === "report") && !d.loading, state.session, state.app,
+    d.apps.find((a) => a.appId === state.app)?.sessions ?? 0);
   // the customer's own conversion definitions — taught on Journeys, read by
   // every screen that speaks of conversion
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
@@ -367,9 +374,10 @@ export function App() {
             appIcon="/platform/app-engine/registry/v1/app-icons/my.deliverychain.ux"
             onClick={() => setTab("home")} />
           {TABS.map(([id, label]) => (
-            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}
-              onMouseEnter={(id === "flow" || id === "report")
-                ? () => setWarmJourneys(true) : undefined}>
+            /* NO WARM-UP ON HOVER (0.17.11). Passing the pointer over the
+               Journeys tab started its event scans — measured on production,
+               ≈80 GiB for a tab nobody opened. They start on the click. */
+            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}>
               {label}
             </AppHeader.NavigationItem>
           ))}
@@ -638,6 +646,12 @@ export function App() {
           )}
           {tab === "flow" && jd && (
             <div className="stack">
+              {jd.sliceMin ? (
+                <div className="j-slice" title={`To stay inside the app's scan budget, the journeys were mined from `
+                  + `the last ${jd.sliceMin} settled minutes of the window; counts are scaled to the whole window, `
+                  + `paths, rankings and shares are those minutes'.`}>
+                  {`sample · last ${jd.sliceMin} min`}
+                </div>) : null}
               {/* friction/onOpen retired with the audit: the prop was never
                   read and the hand-off callback had no consumer */}
               <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={jd.sequences} appId={current || null}

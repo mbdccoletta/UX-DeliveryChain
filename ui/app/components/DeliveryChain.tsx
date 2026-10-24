@@ -7,6 +7,7 @@ import { appHomeHref, intentsAvailable, investigationPaths, kindOf,
   type Persona, type Route } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
 import { useFrontendMetrics } from "../hooks/useFrontendMetrics";
+import { scanRatio } from "../utils/cost";
 import { useClassicApdex } from "../hooks/useClassicApdex";
 import { useDbEntities } from "../hooks/useDbEntities";
 import { useLayerStats } from "../hooks/useLayerStats";
@@ -1684,7 +1685,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     if (selElo.domain) return { kind: "domain", appId, domain: selElo.domain };
     return null;
   }, [selElo, selTier, appId]);
-  const met = useNodeMetrics(metTarget, data.tf);
+  const met = useNodeMetrics(metTarget, data.tf,
+    scanRatio(fm?.sessions ?? data.apps.find((a) => a.appId === appId)?.sessions ?? 0));
   /* The Databases app's entity behind the selected store, resolved only
    * while its drawer is open. The namespace rides along because the measured
    * exact match was on it (TradeManagement), not on the address. */

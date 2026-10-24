@@ -3,7 +3,7 @@
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
 import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
-  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql, sampleRate,
+  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql, cohortPlan,
   type OutcomeDefs, type Timeframe } from "../utils/dql";
 
 /** The poster's scans, shared and remembered: keyed by the query text itself
@@ -1316,7 +1316,10 @@ export function FlowSankey({
        * so the join below is exact inside the sample and every count is the
        * sample's scaled by 1/rate. On a small one the rate is 1: everything. */
       const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
-      const rate = sampleRate(appSessions);
+      /* read inside the budget: a settled slice of the window, then the hash
+         (cohortPlan, utils/dql) — `rate` is the fraction the counts stand for */
+      const plan = cohortPlan(tf, appSessions);
+      const rate = plan.rate;
       /* "NO NAVIGATION" IS A COHORT TOO. Its sessions have no mined path by
        * definition, so matching them through the path scan found nobody and
        * the poster said "0 of 197,171" for the biggest band on the diagram.
@@ -1325,10 +1328,10 @@ export function FlowSankey({
       const noNav = mode !== "unconverted"
         && picks.some((id) => id === "j-none" || id === "st-none");
       const [rows, pr] = await Promise.all([
-        memoDql(qCohortSessions(tf, appId, outcomeDefs, rate), 10000),
+        memoDql(qCohortSessions(plan.tf, appId, outcomeDefs, plan.hash), 10000),
         mode === "unconverted" || noNav
           ? Promise.resolve(null)
-          : memoDql(qPathSessions(tf, appId, rate), 10000),
+          : memoDql(qPathSessions(plan.tf, appId, plan.hash), 10000),
       ]);
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
