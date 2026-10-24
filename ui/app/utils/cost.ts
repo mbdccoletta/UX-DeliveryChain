@@ -62,6 +62,17 @@ export const isScanLimit = (message?: string | null) =>
    budget has elapsed are user actions (a drill opened a minute later) and
    keep their own per-query bound instead — see pageBudgetMs. */
 export const PAGE_BUDGET_MS = 10000;
+
+/* THE GUARDRAIL ON WHAT IS OPTIONAL (0.16.27). The cards' projections
+   (sessions, errors, requests — useMetricForecast) are drawn beside the
+   facts; the verdict reads none of them (its own forecast is the error rate,
+   on the metric store) — so they are never allowed to cost like facts on a
+   customer's estate. Measured on production,
+   the event-history fallback of one forecast read 466 GiB. An optional read
+   that would scan more than this is not run; the page shows no projection
+   instead. The estimate is measured, not guessed: the window's own event
+   scan (the pulse) times the history's length over the window's. */
+export const OPTIONAL_SCAN_BUDGET_GIB = 25;
 let windowStartedAt = Date.now();
 /** Milliseconds of the page budget still left, or null once the first-load
  *  budget has fully elapsed (later queries are interactions, not the load). */

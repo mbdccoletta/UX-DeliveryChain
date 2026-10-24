@@ -12,6 +12,7 @@ import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useOrigins } from "./hooks/useOrigins";
 import { useDomains } from "./hooks/useDomains";
+import { rememberApp } from "./utils/prefs";
 import { useChainData } from "./hooks/useChainData";
 import { tfFrom } from "./utils/dql";
 import { hasTruncation, subscribeScan, scanTotals, scanByLabel,
@@ -157,29 +158,32 @@ export function App() {
   // Flow (whose step mode now takes custom paths) is the Journeys page.
   // Any window the platform selector can express — presets and custom ranges
   // alike — travels in the URL as the two expressions the queries will use.
-  /* THE 24-HOUR CEILING. Scan cost is linear in the window (measured:
-   * ~16.9 GB for 2h of this estate — a 30-day pick would be ~6 TB), so the
-   * window's LENGTH is capped at 24h: the END the reader chose is kept and
-   * the start is pulled up to 24h before it. Recency is not constrained —
-   * yesterday's 2h window is as valid as today's. The label says when the
-   * cap acted, because a silently different window is the lie this app
-   * refuses to tell. */
+  /* THE 2-HOUR CEILING (Marcelo, 2026-10-23: "utilizar janela de 1 hora e
+   * limitar o máximo para 2 horas"). Scan cost is linear in the window, and
+   * measured on a production application a full scan reads ~265 GB per hour —
+   * at the old 24-hour ceiling one Overview open read ~23 TB. The window's
+   * LENGTH is capped at 2 h: the END the reader chose is kept and the start
+   * is pulled up to 2 h before it. Recency is not constrained — yesterday's
+   * hour is as valid as this one. The label says when the cap acted, because
+   * a silently different window is the lie this app refuses to tell. */
+  const MAX_WINDOW_MIN = 120;
   const tf = React.useMemo(() => {
     const raw = tfFrom(state.from || TF0.from, state.to || TF0.to);
-    if (raw.minutes <= 1440) return raw;
+    if (raw.minutes <= MAX_WINDOW_MIN) return raw;
+    const capNote = "capped at 2h";
     if (/^now\(\)$/i.test(raw.to.trim())) {
-      const capped = tfFrom("-24h", "now");
-      return { ...capped, label: `${capped.label} — capped at 24h` };
+      const capped = tfFrom("-2h", "now");
+      return { ...capped, label: `${capped.label} — ${capNote}` };
     }
     const endIso = raw.to.replace(/"/g, "");
     const end = new Date(endIso);
     if (!Number.isFinite(end.getTime())) {
-      const capped = tfFrom("-24h", "now");
-      return { ...capped, label: `${capped.label} — capped at 24h` };
+      const capped = tfFrom("-2h", "now");
+      return { ...capped, label: `${capped.label} — ${capNote}` };
     }
-    const start = new Date(end.getTime() - 24 * 3600e3);
+    const start = new Date(end.getTime() - MAX_WINDOW_MIN * 60e3);
     const capped = tfFrom(start.toISOString(), end.toISOString());
-    return { ...capped, label: `${capped.label} — capped at 24h` };
+    return { ...capped, label: `${capped.label} — ${capNote}` };
   }, [state.from, state.to]);
   const appId = state.app;
 
@@ -220,7 +224,9 @@ export function App() {
      it opens (the Overview's requests card asks for them itself) */
   const domains = useDomains(tf, state.app, tab === "chain");
   const chainData = React.useMemo(() => ({ ...d,
-    ...(origins ? { origins } : {}), ...(domains ? { domains } : {}) }), [d, origins, domains]);
+    ...(origins ? { origins } : {}), ...(domains ? { domains } : {}),
+    originsLoading: tab === "chain" && !!state.app && origins === null }),
+  [d, origins, domains, tab, state.app]);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   /* NOBODY PAYS FOR THE ESTATE SCAN BY DEFAULT.
      The first cut had the Overview pay for it, which defeats the point: the
@@ -286,7 +292,7 @@ export function App() {
      census actually named, never a url's guess */
   useEffect(() => {
     if (!current || !d.apps.some((a) => a.appId === current)) return;
-    try { window.localStorage.setItem("deliverychain:lastApp", current); } catch { /* blocked */ }
+    rememberApp(current);
   }, [current, d.apps]);
   // the engineer's reading of the same anatomy Business Control speaks in
   // business words — shown on the two technical pages, one scan shared
@@ -501,16 +507,13 @@ export function App() {
               <TimeframeSelector
                 value={{ from: state.from || TF0.from, to: state.to || TF0.to }}
                 onChange={(v) => setTf(v?.from.value ?? TF0.from, v?.to.value ?? TF0.to)}>
-                {/* only windows the 24h ceiling allows — the platform's
-                    default list offers 7/30/90 days, which the cap above
-                    would silently shrink; better not to offer them */}
+                {/* only windows the 2h ceiling allows — longer presets would
+                    be silently shrunk by the cap above, so they are not
+                    offered; 1 hour stays the default (TF0) */}
                 <TimeframeSelector.Presets>
                   <TimeframeSelector.PresetItem value={{ from: "-30m", to: "now" }}>Last 30 minutes</TimeframeSelector.PresetItem>
                   <TimeframeSelector.PresetItem value={{ from: "-1h", to: "now" }}>Last 1 hour</TimeframeSelector.PresetItem>
                   <TimeframeSelector.PresetItem value={{ from: "-2h", to: "now" }}>Last 2 hours</TimeframeSelector.PresetItem>
-                  <TimeframeSelector.PresetItem value={{ from: "-6h", to: "now" }}>Last 6 hours</TimeframeSelector.PresetItem>
-                  <TimeframeSelector.PresetItem value={{ from: "-12h", to: "now" }}>Last 12 hours</TimeframeSelector.PresetItem>
-                  <TimeframeSelector.PresetItem value={{ from: "-24h", to: "now" }}>Last 24 hours</TimeframeSelector.PresetItem>
                 </TimeframeSelector.Presets>
               </TimeframeSelector>
             </div>

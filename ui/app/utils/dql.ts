@@ -415,23 +415,6 @@ export const scopeApp = (rumAppId?: string | null) =>
  *  screen says the total is estimated. */
 export const distinctFn = (exact: boolean) => (x: string) =>
   exact ? `countDistinctExact(${x})` : `countDistinct(${x}, precision: 16)`;
-/** Applications known to exceed the exact-count limit. Asking exact first
- *  costs them a whole failed scan (~265 GB and ~11 s on a production
- *  application) before the estimate runs, so once one has hit the limit it is
- *  remembered per browser and asked for the estimate directly. */
-const OVER_KEY = "deliverychain:overExact";
-export const overExactLimit = (appId?: string | null): boolean => {
-  if (!appId) return false;
-  try { return (JSON.parse(window.localStorage.getItem(OVER_KEY) ?? "[]") as string[]).includes(appId); }
-  catch { return false; }
-};
-export const markOverExactLimit = (appId?: string | null): void => {
-  if (!appId) return;
-  try {
-    const xs = JSON.parse(window.localStorage.getItem(OVER_KEY) ?? "[]") as string[];
-    if (!xs.includes(appId)) window.localStorage.setItem(OVER_KEY, JSON.stringify([...xs, appId].slice(-50)));
-  } catch { /* blocked storage: the next open simply asks exact again */ }
-};
 /** True when a query failed on the exact-count element limit. */
 export const isExactLimit = (e: unknown) =>
   /UDF_ELEMENT_LIMIT/i.test(e instanceof Error ? e.message : String(e));
@@ -572,6 +555,18 @@ fetch user.sessions, from: ${tf.from}, to: ${tf.to}
 | expand fe = frontend.name
 | filter fe == "${fe}"
 | sort coalesce(error.count, 0) desc
+/* THE SAME READ, ALSO BY COUNTRY AND STATE (0.16.15). The session store
+   carries geo.region.iso_code / geo.region.name (measured: "SP", "São
+   Paulo"), so the sessions it already reads for the headline are summed once
+   more per country and per state — no second scan, the same bytes. Key "t"
+   is the headline, untouched: every session is counted exactly once under
+   it, as before. "c|<cc>" and "r|<cc>|<code>|<name>" are the places, the
+   sessions Users & Sessions lists for them. */
+| fieldsAdd _k = array("t",
+    concat("c|", coalesce(geo.country.iso_code, "")),
+    concat("r|", coalesce(geo.country.iso_code, ""), "|", coalesce(geo.region.iso_code, ""),
+      "|", coalesce(geo.region.name, "")))
+| expand _k
 | summarize sessions = countDistinct(dt.rum.session.id),
     hit = countDistinct(if(${err}, dt.rum.session.id)),
     realSessions = countDistinct(if(${real}, dt.rum.session.id)),
@@ -582,7 +577,10 @@ fetch user.sessions, from: ${tf.from}, to: ${tf.to}
       dt.rum.session.id)),
     exSid = takeFirst(dt.rum.session.id), exStart = takeFirst(start_time),
     exInst = takeFirst(dt.rum.instance.id),
-    exErrs = takeFirst(coalesce(error.count, 0))`;
+    exErrs = takeFirst(coalesce(error.count, 0)),
+  by: { _k }
+| sort sessions desc
+| limit 500`;
 };
 
 /* THE SESSIONS FACET'S NAME PER ENTITY.
@@ -1984,13 +1982,16 @@ timeseries {
 /** One counter, as the forecast analyzer's input: history [from, to], one
  *  series, explicit interval — the shape the platform documents. */
 export const qMetricForecastExpr = (
-  metric: "errors" | "requests" | "actions",
+  metric: "errors" | "requests" | "actions" | "sessions",
   frontendName: string, from: string, to: string, interval: string,
 ) => {
   const fe = frontendName.replace(/["\\]/g, "");
-  const key = { errors: "dt.frontend.error.count", requests: "dt.frontend.request.count",
-    actions: "dt.frontend.user_action.count" }[metric];
-  return `timeseries ${metric} = sum(${key}), from: ${from}, to: ${to}, interval: ${interval},
+  // sessions is a cardinality metric: countDistinct per bin, not sum
+  const agg = metric === "sessions"
+    ? "countDistinct(dt.frontend.session.active.estimated_count)"
+    : `sum(${{ errors: "dt.frontend.error.count", requests: "dt.frontend.request.count",
+      actions: "dt.frontend.user_action.count" }[metric]})`;
+  return `timeseries ${metric} = ${agg}, from: ${from}, to: ${to}, interval: ${interval},
   filter: { frontend.name == "${fe}" }
 | limit 1`;
 };
@@ -2806,14 +2807,23 @@ fetch spans, from: now()-10m, to: now()
  * null. That hop lives in the PurePath, not in the entity model. Drawing it
  * would mean inventing the edge that would justify drawing it.
  */
-export const qServicesGen2Calls = (serviceIds: string[]) => `
+export const qServicesGen2Calls = (serviceIds: string[]) => {
+  const ids = serviceIds.slice(0, 60).map((s) => `"${s.replace(/["\\]/g, "")}"`).join(",");
+  /* THE RIGHT SIDE IS ONLY THE CALLEES (0.17.4). It was every service of the
+     estate, joined in full — measured 29 s on a bank's environment for a
+     handful of rows. Narrowed to the ids the left side calls, the same rows. */
+  return `
 fetch dt.entity.service, from: now()-2h
-| filter in(id, {${serviceIds.slice(0, 60)
-  .map((s) => `"${s.replace(/["\\]/g, "")}"`).join(",")}})
+| filter in(id, {${ids}})
 | fields src = id, tgt = calls[dt.entity.service]
 | filter isNotNull(tgt)
 | expand tgt
 | join [ fetch dt.entity.service, from: now()-2h
+         | filter id in [ fetch dt.entity.service, from: now()-2h
+             | filter in(id, {${ids}})
+             | fields tgt = calls[dt.entity.service]
+             | expand tgt
+             | fields tgt ]
          | fields id, nm = entity.name, st = serviceType, ro = runs_on,
                   ext = isExternalService ],
     on: { left[tgt] == right[id] }, fields: { nm, st, ro, ext }
@@ -2850,6 +2860,7 @@ fetch dt.entity.service, from: now()-2h
 | fields src, id = tgt, name = nm, kind = st, host = ro[dt.entity.host],
     ext, stype = st
 | limit 80`;
+};
 
 /**
  * A service's vitals from the METRIC STORE, for services that have no spans.
@@ -3019,6 +3030,65 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeA
  * error share, not an absolute bar — a 2% hit rate is a finding in an app
  * averaging 0.5% and noise in one averaging 4%.
  */
+/**
+ * THE MAP FROM THE PLATFORM'S OWN METRICS (Marcelo, 2026-10-23: "a Dynatrace
+ * já tem os mapas e métricas"). The event-store map read the application's
+ * whole window — ~218 GiB and 12-19 s per open on a production application —
+ * and every country click read three more full scans (~750 GiB). The
+ * dt.frontend.* metrics carry geo.country.iso_code and answer in well under a
+ * second from the metric store. What they do not carry is said where it is
+ * shown: no states, no "sessions affected", and sessions are the platform's
+ * estimate. The application's verdict stays on the exact event pass.
+ */
+/* THREE READS, IN THE FORMS ALREADY PROVEN IN PRODUCTION. The first cut asked
+   for the session cardinality metric and the two counters in one braced
+   timeseries; that combination had never run against real data, and on the
+   a customer staging estate the map came back empty. Each read below is the exact
+   shape the comparison panel validated (sessions by country; summed counters;
+   first-byte percentile), joined by country in useGeo. */
+export const qGeoMetrics = (tf: Timeframe, frontendName: string) => `
+timeseries sessions = countDistinct(dt.frontend.session.active.estimated_count, scalar: true),
+  from: ${tf.from}, to: ${tf.to},
+  filter: { frontend.name == "${frontendName.replace(/["\\]/g, "")}" },
+  by: { geo.country.iso_code }
+| fieldsAdd country = geo.country.iso_code
+| filter isNotNull(country)
+| sort sessions desc
+| limit 40`;
+/* ONE METRIC PER READ. Two sums in one timeseries are joined on their
+   dimensions: an application with no user-action series (a mobile app whose
+   actions are not reported) made the joined answer EMPTY, errors included —
+   measured on a customer staging estate, every country read "—". Each counter
+   is its own read now; one missing cannot erase the other. */
+export const qGeoCountMetric = (tf: Timeframe, frontendName: string,
+  metric: "errors" | "actions") => `
+timeseries ${metric} = sum(${metric === "errors" ? "dt.frontend.error.count" : "dt.frontend.user_action.count"}, scalar: true),
+  from: ${tf.from}, to: ${tf.to},
+  filter: { frontend.name == "${frontendName.replace(/["\\]/g, "")}" },
+  by: { geo.country.iso_code }
+| fieldsAdd country = geo.country.iso_code
+| limit 200`;
+
+/** The platform's experience weights of real people's actions, per country
+ *  and level — the same rating the application's score is summed from, so a
+ *  country is judged by the verdict's own measure (0.17.0), for ≈0 GiB. */
+export const qGeoExperienceMetric = (tf: Timeframe, frontendName: string) => `
+timeseries w = sum(dt.frontend.experience.weight, scalar: true),
+  from: ${tf.from}, to: ${tf.to},
+  filter: { frontend.name == "${frontendName.replace(/["\\]/g, "")}" and dt.rum.user_type == "real_user" },
+  by: { geo.country.iso_code, experience.level }
+| fieldsAdd country = geo.country.iso_code, level = experience.level
+| limit 600`;
+
+/** First-byte time p75 per country, web only (mobile has no such metric). */
+export const qGeoTtfbMetric = (tf: Timeframe, frontendName: string) => `
+timeseries ttfb = percentile(dt.frontend.web.navigation.time_to_first_byte, 75, scalar: true),
+  from: ${tf.from}, to: ${tf.to},
+  filter: { frontend.name == "${frontendName.replace(/["\\]/g, "")}" },
+  by: { geo.country.iso_code }
+| fieldsAdd country = geo.country.iso_code
+| limit 40`;
+
 export const qGeo = (tf: Timeframe, rumAppId: string) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
@@ -3266,16 +3336,19 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 
 /** The Overview's verdict and score in one pass over the two event kinds that
  *  can hurt a person (0.16.0, validated beside qUxByApp + qExperience on staging). */
-export const qShadowLean = (tf: Timeframe, rumAppId: string) => qUxLean(tf, rumAppId);
+export const qShadowLean = (tf: Timeframe, rumAppId: string, exact = true) => qUxLean(tf, rumAppId, exact);
 
 /** Candidate verdict denominator: the census's countDistinct, with real people. */
-export const qShadowCensus = (tf: Timeframe, rumAppId: string) => `
+export const qShadowCensus = (tf: Timeframe, rumAppId: string, exact = true) => {
+  const D = distinctFn(exact);
+  return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${esc(rumAppId)}"
-| summarize sessions = countDistinctExact(dt.rum.session.id),
-    realSessions = countDistinctExact(if(coalesce(dt.rum.user_type, "") != "robot"
+| summarize sessions = ${D("dt.rum.session.id")},
+    realSessions = ${D(`if(coalesce(dt.rum.user_type, "") != "robot"
       and coalesce(dt.rum.user_type, "") != "synthetic" and isNull(dt.synthetic.monitor.id),
-      dt.rum.session.id, else: null))`;
+      dt.rum.session.id, else: null)`)}`;
+};
 
 /** Reference for the metric candidate: sessions from EVENTS over the same
  *  aligned window — total, per user type, per country, per 2-minute bin. */
@@ -3309,7 +3382,9 @@ export const qShadowSessionsMetric = (w: { from: string; to: string }, frontendN
 
 /** Candidate: the lean pass GROUPED by country and user type — one scan for
  *  the verdict, the score, the origins and the map's per-country harm. */
-export const qShadowLeanGrouped = (tf: Timeframe, rumAppId: string) => `
+export const qShadowLeanGrouped = (tf: Timeframe, rumAppId: string, exact = true) => {
+  const D = distinctFn(exact);
+  return `
 fetch user.events, from: ${tf.from}, to: ${tf.to}
 | filter dt.rum.application.id == "${esc(rumAppId)}"
 | filter characteristics.classifier == "error" or characteristics.classifier == "user_action"
@@ -3319,7 +3394,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
 | fieldsAdd _w = coalesce(experience.weight, 1)
 | fieldsAdd _err = _rated and ${ACT_ERR}
 | fieldsAdd _crash = _real and ${CRASH}
-| summarize hitReal = countDistinctExact(if(_real and ${USER_HIT}, dt.rum.session.id, else: null)),
+| summarize hitReal = ${D(`if(_real and ${USER_HIT}, dt.rum.session.id, else: null)`)},
     satisfied = sum(if(_real and _rated and not(_err) and experience.level == "satisfied", _w, else: 0)),
     tolerating = sum(if(_real and _rated and not(_err) and experience.level == "tolerating", _w, else: 0)),
     frustrated = sum(if(_crash, 1, else: if(_real and _rated and (_err or experience.level == "frustrated"), _w, else: 0))),
@@ -3327,6 +3402,7 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     anrs = countIf(characteristics.classifier == "error" and error.type == "anr"),
   by: { cc = geo.country.iso_code, ut = dt.rum.user_type }
 | limit 2000`;
+};
 
 /** Candidate: views and view times read off view_summary alone — the census
  *  reads every event to get them. */

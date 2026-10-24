@@ -9,7 +9,7 @@
 // final, so the candidates never compete with the page for Grail.
 import { useEffect, useState } from "react";
 import {
-  alignedTf, alignedWindow, qApps, qExperience, qGeo, qPulse, qPulseBreakdown, qPulseSeries,
+  alignedTf, alignedWindow, isExactLimit, qApps, qExperience, qGeo, qPulse, qPulseBreakdown, qPulseSeries,
   qShadowCensus, qShadowErrorMetrics,
   qShadowLean, qShadowLeanGrouped, qShadowSessionsEvents, qShadowSessionsMetric,
   qShadowTtfbEvents, qShadowTtfbMetric, qShadowViews, qUxByApp,
@@ -76,16 +76,31 @@ export function useShadow(
            queries the page uses today — is re-run on a minute-aligned,
            absolute window, and every candidate reads that same window. */
         const at = alignedTf(Math.max(1, Math.round(tf.minutes)));
+        /* OVER THE PLATFORM'S EXACT-COUNT LIMIT (1,000,000 values), an exact
+           query here fails — and inside one Promise.all it took the whole
+           panel down with it, including the comparisons that do work at that
+           scale. Each exact count falls back to the precision-16 estimate on
+           that one error, and the panel says which sides became estimates. */
+        const estimated: string[] = [];
+        const exactOr = async (label: string, build: (exact: boolean) => string, cap: number) => {
+          try {
+            return await runDql<Record<string, unknown>>(build(true), cap, undefined, undefined, meta(label));
+          } catch (e) {
+            if (!isExactLimit(e)) throw e;
+            estimated.push(label);
+            return runDql<Record<string, unknown>>(build(false), cap, undefined, undefined, meta(`${label} (estimate)`));
+          }
+        };
         const [refUx, refExp, refCensus, refGeo] = await Promise.all([
           runDql<Record<string, unknown>>(qUxByApp(at, appId), 8, undefined, undefined, meta("reference: per-session scan (today)")),
           runDql<Record<string, unknown>>(qExperience(at, appId), 1, undefined, undefined, meta("reference: experience score (today)")),
-          runDql<Record<string, unknown>>(qApps(at, null, appId), 200, undefined, undefined, meta("reference: census (today)")),
+          exactOr("reference: census (today)", (x) => qApps(at, null, appId, x), 200),
           runDql<Record<string, unknown>>(qGeo(at, appId), 12, undefined, undefined, meta("reference: geo (today)")),
         ]);
         const [lean, census, grouped, views, errM] = await Promise.all([
-          runDql<Record<string, unknown>>(qShadowLean(at, appId), 1, undefined, undefined, meta("candidate: lean affected + score")),
-          runDql<Record<string, unknown>>(qShadowCensus(at, appId), 1, undefined, undefined, meta("candidate: census sessions")),
-          runDql<Record<string, unknown>>(qShadowLeanGrouped(at, appId), 2000, undefined, undefined, meta("candidate: lean pass by country × user type")),
+          exactOr("candidate: lean affected + score", (x) => qShadowLean(at, appId, x), 1),
+          exactOr("candidate: census sessions", (x) => qShadowCensus(at, appId, x), 1),
+          exactOr("candidate: lean pass by country × user type", (x) => qShadowLeanGrouped(at, appId, x), 2000),
           runDql<Record<string, unknown>>(qShadowViews(at, appId), 1, undefined, undefined, meta("candidate: views from view_summary only")),
           frontendName
             ? runDql<Record<string, unknown>>(qShadowErrorMetrics(at, frontendName), 1, undefined, undefined, meta("candidate: error metrics"))
@@ -107,6 +122,10 @@ export function useShadow(
             frustrated: Number(L.frustrated) || 0 }),
         };
         const cur = "per-session scan (today)";
+        if (estimated.length) rows.push({ group: "platform limit", isShare: false,
+          measure: `estimated, not exact: ${estimated.join(" · ")}`, current: null, candidate: null,
+          currentSrc: "countDistinctExact refuses more than 1,000,000 values",
+          candidateSrc: "countDistinct(precision: 16), ~0.4%" });
         const win = `${at.from.slice(12, 17)}–${at.to.slice(12, 17)} UTC`;
         rows.push(
           { group: `verdict · ${win}`, measure: "sessions", current: ref.sessions, candidate: cand.sessions,

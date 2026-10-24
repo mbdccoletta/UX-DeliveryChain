@@ -1722,15 +1722,18 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   50% { box-shadow:0 0 18px 2px color-mix(in srgb, var(--bad-fill) 55%, transparent); }
 }
 .gnode--miss .gnode__c { border-style: dashed; opacity: 0.55; background: none; }
-/* A line may route wherever it likes; it may never cross TEXT. The label sits
-   above the edge layer on an opaque plate, so the rule holds by construction —
-   no routing algorithm required to keep it. */
+/* A line may route wherever it likes; the text stays readable over it. No
+   plate behind the label (Marcelo, 2026-10-24: "remover fundo preto do
+   texto") — a halo in the page's own colour, the way the edge labels already
+   carry one (paint-order: stroke), and nothing boxed. */
 .gnode__nm { font: 600 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink); text-align: center;
              max-width: 148px; overflow: hidden; text-overflow: ellipsis;
              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-             background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+             padding: 1px 5px;
+             text-shadow: 0 0 2px var(--bg), 0 0 3px var(--bg), 0 0 4px var(--bg); }
 .gnode__v { font: 500 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink-3); text-align: center;
-             background: var(--bg); padding: 0 5px; border-radius: 4px; }
+             padding: 0 5px;
+             text-shadow: 0 0 2px var(--bg), 0 0 3px var(--bg), 0 0 4px var(--bg); }
 .gnode__fc { font-style: normal; color: var(--warn); }
 .gnode--more .gnode__nm { color: var(--ink-3); }
 
@@ -3511,11 +3514,19 @@ div:has(> header):has(main) > div {
    nothing at runtime. These are the hashes strato-components 3.11.3 emits
    (forms/select/styles/Select.sty.js); a Strato upgrade changes them, and
    the .app-picker layer below is what still holds then. */
-.app-picker,
-._dlenfch-3-11-3,
-._dlenfcg-3-11-3 {
-  max-height: min(420px, calc(100vh - 140px)) !important;
+/* ONE SCROLL CONTAINER, THE ONE THE VIRTUALIZER WATCHES. The option list is
+   virtualized (@tanstack/react-virtual on the menu-list wrapper, _dlenfch):
+   it draws only the rows inside that element's scroll window. Capping the
+   inner virtualization wrapper (_dlenfcg, whose height IS the whole list) and
+   the overlay as well made three nested scroll boxes; the wheel scrolled one
+   the virtualizer does not listen to, the rows below were never drawn, and
+   the list could not be scrolled to its end ("não consigo correr a lista
+   toda com o scroll do mouse"). Only the menu-list wrapper is bounded now;
+   360 px plus the search field stays inside the overlay's 420. */
+._dlenfch-3-11-3 {
+  max-height: min(360px, calc(100vh - 200px)) !important;
   overflow-y: auto !important;
+  overscroll-behavior: contain;
 }
 
 /* Shadow comparison (?compare=1) — a working table, not a card: mono numbers,
@@ -3534,3 +3545,9 @@ div:has(> header):has(main) > div {
 .geo__why { padding: 8px 16px; font: 400 12px var(--sans); line-height: 1.45;
   color: var(--ink-2); border-bottom: 1px solid var(--border); }
 .geo__why b { color: var(--ink-hi); font-weight: 600; }
+
+/* the metric map's hand-off from a country's states to Users & Sessions */
+.geo__drill-go { margin-left: auto; font: 600 11px var(--mono); color: var(--ink-2);
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 3px 8px; cursor: pointer; }
+.geo__drill-go:hover { color: var(--ink-hi); border-color: var(--ink-3); }

@@ -26,7 +26,7 @@ for (const L of lean.filter((s) => !/by: \{ cc =/.test(s.query))) {
   const ux = first(/errsThird = countIf/, w)?.find((r) => r.sessions !== null) ?? null;
   const exp = first(/ratedActs = count/, w)?.[0] ?? null;
   // the shadow census: user.events, exactly two distinct counts (not the session store)
-  const cen = first(/^fetch user\.events[^|]*\| filter dt\.rum\.application\.id == "<APP>" \| summarize sessions = countDistinct(?:Exact)?\(dt\.rum\.session\.id\), realSessions = countDistinct/, w)?.[0] ?? null;
+  const cen = first(/^fetch user\.events[^|]*\| filter dt\.rum\.application\.id == "<APP>" \| summarize sessions = countDistinct(?:Exact)?\(dt\.rum\.session\.id(?:, precision: 16)?\), realSessions = countDistinct/, w)?.[0] ?? null;
   const grp = pick(/fieldsAdd _crash = _real[\s\S]*by: \{ cc =/, w)[0]?.final.records ?? [];
   const views = first(/filter characteristics\.classifier == "view_summary"\s*\| summarize views = count\(\)/, w)?.[0] ?? null;
   const census = first(/summarize sessions = countDistinct\(dt\.rum\.session\.id\), views = countIf/, w)?.[0] ?? null;

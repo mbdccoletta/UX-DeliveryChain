@@ -198,7 +198,16 @@ const filterChip = (label: string, value: string) =>
 const chipV = (v: string) =>
   /^[\w.:@/-]+$/.test(v) ? v : `"${v.replace(/["\\]/g, "")}"`;
 export const SESSION_CHIP = {
-  location: (enName: string) => `Location = ${chipV(enName)}`,
+  /** OBSERVED (a customer staging estate, 2026-10-23): `Country = Brazil` — the field is
+   *  Country, the value the country's ENGLISH NAME (`Country = US`, a code,
+   *  once emptied the whole segment). The older `Location` chip is silently
+   *  dropped by the current Users & Sessions. */
+  location: (enName: string): string | null => `Country = ${chipV(enName)}`,
+  /** OBSERVED (a customer staging estate, 2026-10-23): `Region = *Paraná*` in the
+   *  finished-sessions url. Written with the exact value, quoted when it has
+   *  spaces — the wildcard form would let "Mato Grosso" also match
+   *  "Mato Grosso do Sul". */
+  region: (name: string) => `Region = ${chipV(name)}`,
   /** ERROR INSPECTOR only — not a Sessions facet; in the Sessions bar it
    *  poisons the whole segment (measured from the reader's screenshot). */
   view: (view: string) => `"View Name" = ${chipV(view)}`,
@@ -392,7 +401,7 @@ export const errorsExplorerHref = (
    * `error.name`. Observed (decoded) on this estate:
    *
    *   #filtering="Error Name" = "Unexpected end of JSON input"
-   *              Frontend = "PDPJ - Mobile PJ - Web"
+   *              Frontend = "Mobile banking - Web"
    *
    * Two chips, name first, both sides quoted — the same grammar every other
    * facet here follows, which is why it composes with the ones above.

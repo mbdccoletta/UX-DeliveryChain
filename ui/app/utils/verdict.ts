@@ -21,10 +21,13 @@ export type Tone = "good" | "warn" | "bad" | "info";
 /** Sessions hit by an error, as a share of sessions in the window. */
 export const HIT_BAD = 0.5;
 export const HIT_WARN = 0.1;
-/** The experience score's own bands — Fair starts under 0.85, Poor under 0.70
- *  (utils/apdex apdexBand / apdexTone): the verdict reads the same lines. */
+/** The experience score's own bands (utils/apdex apdexBand): Fair and Poor
+ *  — under 0.85 — are Warning; Unacceptable — under 0.50 — is Critical. */
 export const SCORE_WARN = 0.85;
-export const SCORE_BAD = 0.7;
+export const SCORE_BAD = 0.5;
+/** A score on the verdict's lines, or null when nothing was rated. */
+export const scoreTone = (s: number | null | undefined): "good" | "warn" | "bad" | null =>
+  s === null || s === undefined ? null : s < SCORE_BAD ? "bad" : s < SCORE_WARN ? "warn" : "good";
 
 /**
  * The platform's status words. Every Gen3 app labels state with these, so this
@@ -41,6 +44,11 @@ export const davisCategory = (c?: string | null): string =>
   || "Problem";
 
 export interface VerdictInput {
+  /** An APPLICATION's status: judged on its Apdex alone (Marcelo,
+   *  2026-10-24: "o status da aplicação e mapa devem ser baseados no Apdex").
+   *  Davis problems and the rest are still printed beside it, never colour it.
+   *  Components (services, hosts, origins) keep the other signals. */
+  apdexOnly?: boolean;
   /** Active Davis problems on this element. */
   problems?: number;
   /** Their Davis categories — availability, error, slowdown, resource… */
@@ -104,7 +112,7 @@ export function verdictOf(v: VerdictInput): Verdict {
      verdict on purpose, and an application whose actions were all frustrated
      could read Healthy because few sessions had errors. */
   const score = v.score ?? null;
-  const scoreTxt = score === null ? "" : `experience score ${fmtApdex(score)} (${apdexBand(score).toLowerCase()})`;
+  const scoreTxt = score === null ? "" : `Apdex ${fmtApdex(score)} (${apdexBand(score).toLowerCase()})`;
   const sessions = v.sessions ?? 0;
   const hit = v.hit ?? 0;
   /* ── who actually felt it ──
@@ -124,6 +132,12 @@ export function verdictOf(v: VerdictInput): Verdict {
   const of = humansMeasured ? "of real-user sessions" : "of sessions";
   const say = (tone: Tone, reason: string, label?: string, cause?: VerdictCause): Verdict =>
     ({ tone, label: label ?? STATUS_LABEL[tone], reason, hitRate, cause });
+
+  if (v.apdexOnly) {
+    if (score === null) return say("info", "no Apdex in this window", "Not rated", "none");
+    const tone = scoreTone(score) as Tone;
+    return say(tone, scoreTxt, undefined, tone === "good" ? "healthy" : "score");
+  }
 
   // No people in this window at all: the errors are real but nobody met them.
   // Worth saying out loud, never worth outranking an application that is
@@ -151,32 +165,33 @@ export function verdictOf(v: VerdictInput): Verdict {
       + (cats.length ? ` · ${cats.join(", ")}` : ""), undefined, "problems");
   }
 
-  if (hitRate !== null && hitRate >= HIT_BAD)
-    return say("bad", `${pct(hitRate)} ${of} affected by errors`, undefined, "hit");
-
+  /* ONLY THE PLATFORM'S SIGNALS DECIDE (Marcelo, 2026-10-24). The share of
+     sessions with errors judged too — on lines (10%, 50%) that were this
+     app's, not Dynatrace's, over the sessions the store had CLOSED: six of
+     fifteen turned an application of 166 sessions amber. Now: an open Davis
+     problem, a Davis anomaly or alert, and Dynatrace's own experience score
+     in its own bands. The share is still measured and printed; it no longer
+     colours anything. */
   if (score !== null && score < SCORE_BAD)
     return say("bad", scoreTxt, undefined, "score");
 
   if (anomalies > 0)
     return say("warn", `${anomalies} anomal${anomalies > 1 ? "ies" : "y"} detected`, undefined, "anomalies");
 
-  if (hitRate !== null && hitRate >= HIT_WARN)
-    return say("warn", `${pct(hitRate)} ${of} affected by errors`, undefined, "hit");
-
   if (score !== null && score < SCORE_WARN)
     return say("warn", scoreTxt, undefined, "score");
 
-  if (forecastRising)
-    return say("warn", FORECAST_REASON, undefined, "forecast");
+  void forecastRising; // a projection is shown beside the facts, never judges
 
-  if (hitRate === null && score === null)
+  if (hitRate === null && score === null && sessions === 0)
     return say("info", "no impact measured in this window", undefined, "none");
 
   /* Healthy says BOTH halves: who was unaffected, and how the actions went */
   const unaffected = hitRate === null ? ""
     : hitRate > 0 ? `${pct(1 - hitRate)} ${of} unaffected`
     : humansMeasured ? "no real user affected by an error" : "no session affected by an error";
-  return say("good", [unaffected, scoreTxt].filter(Boolean).join(" · "), undefined, "healthy");
+  return say("good", ["no Davis problems", scoreTxt, unaffected].filter(Boolean).join(" · "),
+    undefined, "healthy");
 }
 
 /** The failure-rate cell in any table, judged by the same two thresholds. */
@@ -189,12 +204,9 @@ export const worseOf = (a: Tone, b: Tone): Tone => (WORST[b] > WORST[a] ? b : a)
 
 /** The legend every screen prints, so the thresholds are never hidden. */
 export const VERDICT_LEGEND =
-  `Critical = an active Davis problem, ≥${HIT_BAD * 100}% of sessions affected by errors, `
-  + `or an experience score under ${SCORE_BAD.toFixed(2)} · `
-  + `Warning = an anomaly, an error rate forecast to rise beyond its uncertainty, ≥${HIT_WARN * 100}% of sessions affected, `
-  + `or an experience score under ${SCORE_WARN.toFixed(2)} · `
-  + `Healthy = neither · affected = an error during the person's own action, `
-  + `or the app crashing or freezing; background errors are counted, never judged`;
+  `Critical = an active Davis problem, or Dynatrace's experience score under ${SCORE_BAD.toFixed(2)} (unacceptable) · `
+  + `Warning = a Davis anomaly or alert, or an experience score under ${SCORE_WARN.toFixed(2)} (fair or poor) · `
+  + `Healthy = neither · sessions with errors are measured and shown, never judged`;
 
 /**
  * How a FAILURE RATE on requests is judged — one rule, one home.

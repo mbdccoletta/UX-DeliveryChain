@@ -34,6 +34,18 @@ export interface Impacted {
    *  "events" is every session active in the window, which the list will
    *  not match. The card says which one it is showing. */
   base?: "sessions" | "events";
+  /** The same session-store read, per country and per state (key "c|"/"r|"
+   *  rows of qImpactedSessions) — what Users & Sessions lists for each. */
+  places?: StorePlace[];
+}
+
+export interface StorePlace {
+  kind: "country" | "region";
+  country: string;
+  /** state code as the store gives it ("SP") and its name ("São Paulo") */
+  region?: string; name?: string;
+  sessions: number; withErrors: number;
+  realSessions: number; realWithErrors: number;
 }
 
 const memo = new Map<string, Impacted | null>();
@@ -105,11 +117,33 @@ export function useImpacted(
          the first thing a reader looks at. The preview lands in a few
          seconds; `partial` marks it so the card can say it is still
          measuring, and the final answer replaces it. */
-      const ask = async (q: string) =>
-        shape((await runDql<Record<string, unknown>>(q, 1, undefined, (rows) => {
-          const early = shape(rows[0]);
-          if (early && live) setImp({ ...early, partial: true });
-        }))[0]);
+      /* The session query answers one row per key: "t" is the headline,
+         "c|…" and "r|…" are the places (see qImpactedSessions). The event
+         query answers its one row with no key, and is read as before. */
+      const placesOf = (rows: Record<string, unknown>[]): StorePlace[] => rows
+        .filter((r) => typeof r._k === "string" && r._k !== "t")
+        .map((r) => {
+          const parts = String(r._k).split("|");
+          return {
+            kind: parts[0] === "r" ? "region" as const : "country" as const,
+            country: parts[1] ?? "",
+            region: parts[0] === "r" ? parts[2] || undefined : undefined,
+            name: parts[0] === "r" ? parts.slice(3).join("|") || undefined : undefined,
+            sessions: Number(r.sessions) || 0, withErrors: Number(r.hit) || 0,
+            realSessions: Number(r.realSessions) || 0, realWithErrors: Number(r.hitReal) || 0,
+          };
+        });
+      const headline = (rows: Record<string, unknown>[]) =>
+        rows.find((r) => r._k === "t") ?? (rows.some((r) => "_k" in r) ? undefined : rows[0]);
+      const ask = async (q: string) => {
+        const rows = await runDql<Record<string, unknown>>(q, 500, undefined, (early) => {
+          const e = shape(headline(early));
+          if (e && live) setImp({ ...e, places: placesOf(early), partial: true });
+        });
+        const o = shape(headline(rows));
+        if (o) o.places = placesOf(rows);
+        return o;
+      };
       try {
         /* INSIDE THE STORE'S LAG, THE STORE IS NOT THE ANSWER. On a window
            shorter than the ~60 minutes the aggregator takes to write a
