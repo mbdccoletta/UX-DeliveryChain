@@ -3201,6 +3201,11 @@ div:has(> header):has(main) > div {
    nothing overlaps; on hover the one being pointed at wins, because it also
    takes the z-index above. */
 .gpin__lbl--off { display: none; }
+/* measured clash (Pulse geoOvRef): kept in layout so it can be re-measured,
+   invisible until the reader points at its mark */
+.gpin__lbl--clash { visibility: hidden; }
+.gpin:hover .gpin__lbl--clash, .gpin:focus-visible .gpin__lbl--clash,
+.gpin--sel .gpin__lbl--clash { visibility: visible; }
 .gpin:hover .gpin__lbl--off,
 .gpin:focus-visible .gpin__lbl--off,
 .gpin--sel .gpin__lbl--off { display: flex; }
@@ -3551,3 +3556,7 @@ div:has(> header):has(main) > div {
   background: none; border: 1px solid var(--border); border-radius: 6px;
   padding: 3px 8px; cursor: pointer; }
 .geo__drill-go:hover { color: var(--ink-hi); border-color: var(--ink-3); }
+
+/* the Journeys tab read a slice of the window (useJourneys sliceFor) */
+.j-slice { align-self: flex-end; font: 600 10px var(--mono); color: var(--ink-3);
+  letter-spacing: 0.02em; }

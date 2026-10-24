@@ -10,7 +10,7 @@
 // A store node appears exactly where a service was measured talking to one.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qServiceDataStores, runDql } from "../utils/dql";
+import { DATA_STORE_SAMPLE, qServiceDataStores, runDql } from "../utils/dql";
 
 export interface DataStore {
   /** The service that calls it — how the edge finds its source card. */
@@ -63,9 +63,9 @@ export function useDataStores(serviceIds: string[], active = true): DataStore[] 
           store: String(r.store ?? ""),
           sys: String(r.sys ?? ""),
           ns: r.ns ? String(r.ns) : undefined,
-          calls: Number(r.calls) || 0,
-          rated: Number(r.rated) || 0,
-          errors: Number(r.errors) || 0,
+          calls: (Number(r.calls) || 0) * DATA_STORE_SAMPLE,
+          rated: (Number(r.rated) || 0) * DATA_STORE_SAMPLE,
+          errors: (Number(r.errors) || 0) * DATA_STORE_SAMPLE,
           p50: Number(r.p50) || 0,
           p90: Number(r.p90) || 0,
         })).filter((s) => s.svc && s.store);

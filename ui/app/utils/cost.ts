@@ -73,6 +73,21 @@ export const PAGE_BUDGET_MS = 10000;
    instead. The estimate is measured, not guessed: the window's own event
    scan (the pulse) times the history's length over the window's. */
 export const OPTIONAL_SCAN_BUDGET_GIB = 25;
+
+/** What a click-time breakdown of raw events reads per session of the window
+ *  — measured on production, 118–140 GiB for a ~6M-session hour (≈25 KB),
+ *  kept a little above so the estimate errs towards the budget. */
+export const EVENT_BYTES_PER_SESSION = 30e3;
+/* A CLICK WAITS FOR ITS ANSWER (0.17.17). Sampled to the 25 GiB budget, the
+   breakdowns behind a click still took 10–18 s on production; a ranking of
+   eight rows and its percentiles hold on a much smaller sample. Clicks are
+   sized to this tighter budget — faster, and cheaper still. */
+export const CLICK_SCAN_BUDGET_GIB = 3;
+/** The smallest Grail sampling ratio (1, 10, 100…) that keeps a raw-event
+ *  read of a window with `sessions` inside the budget; 1 means exact. */
+export const scanRatio = (sessions: number, budgetGiB = CLICK_SCAN_BUDGET_GIB): number =>
+  [1, 10, 100, 1000, 10000].find((r) =>
+    (sessions * EVENT_BYTES_PER_SESSION) / 2 ** 30 / r <= budgetGiB) ?? 10000;
 let windowStartedAt = Date.now();
 /** Milliseconds of the page budget still left, or null once the first-load
  *  budget has fully elapsed (later queries are interactions, not the load). */

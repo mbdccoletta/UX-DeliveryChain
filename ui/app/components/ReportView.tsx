@@ -184,7 +184,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   // the same per-source rule as the Overview map (utils/geoVerdict placeJudge)
   const judgePlace = React.useMemo(() => placeJudge(geoRows ?? []), [geoRows]);
   const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs,
-    !!kpis && !kpis.partial);
+    !!kpis && !kpis.partial,
+    scopeApp ? data.apps.find((a) => a.appId === scopeApp)?.sessions ?? 0
+      : data.apps.reduce((n, a) => n + a.sessions, 0));
   const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
   /* the segment ranking read a capped number of session rows: past the cap it
      is built from a subset, and a subset that looks like a total is the one

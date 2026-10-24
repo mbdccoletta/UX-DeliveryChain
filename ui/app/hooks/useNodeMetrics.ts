@@ -10,6 +10,29 @@ import { useMemoGen } from "../utils/memo";
 import { qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql,
   type Timeframe } from "../utils/dql";
 import { forecast, type Forecast } from "../utils/forecast";
+import { frontendNodeOf, qFmScalar } from "../utils/frontendMetrics";
+
+/** An application's requests from dt.frontend.request.* — durations in ms
+ *  there, ns here (the unit every duration in this app is kept in). Null
+ *  when the application has no FRONTEND node or the store has no requests. */
+async function appRequestMetrics(rumAppId: string, tf: Timeframe): Promise<NodeMetrics | null> {
+  const node = await frontendNodeOf(rumAppId);
+  if (!node) return null;
+  const pct = (p: number) => runDql<Record<string, unknown>>(
+    qFmScalar(tf, `percentile(dt.frontend.request.duration, ${p}, scalar: true)`, node.id), 1);
+  const [p50, p90, p95, cnt] = await Promise.all([pct(50), pct(90), pct(95),
+    runDql<Record<string, unknown>>(qFmScalar(tf, "sum(dt.frontend.request.count, scalar: true)",
+      node.id, "http.response.status_code_class"), 20)]);
+  let thr = 0, fails = 0;
+  for (const r of cnt) {
+    const v = Number(r.v) || 0;
+    thr += v;
+    if (r["http.response.status_code_class"] === "4xx" || r["http.response.status_code_class"] === "5xx") fails += v;
+  }
+  if (!thr) return null;
+  const ns = (rows: Record<string, unknown>[]) => (Number(rows[0]?.v) || 0) * 1e6;
+  return { ready: true, p50: ns(p50), p90: ns(p90), p95: ns(p95), thr, fails };
+}
 
 export type MetricTarget =
   | { kind: "service"; id: string }
@@ -51,6 +74,9 @@ const keyOf = (t: MetricTarget) =>
  */
 export function useNodeMetrics(
   target: MetricTarget | null, tf: Timeframe,
+  /** The click budget's sampling ratio for a DOMAIN's raw-event read (utils/
+   *  cost scanRatio); its counts come back scaled by it. */
+  ratio = 1,
 ): NodeMetrics | null {
   const gen = useMemoGen();
   const win = `${tf.from}|${tf.to}`;
@@ -67,16 +93,27 @@ export function useNodeMetrics(
     let live = true;
     setM(EMPTY);
     (async () => {
-      const q = target.kind === "service" ? qSvcMetrics(target.id, tf)
-        : target.kind === "app" ? qAppMetrics(target.id, tf)
-        : qDomMetrics(target.appId, target.domain, tf);
       let out: NodeMetrics = { ...EMPTY };
-      try {
-        const r = (await runDql<Record<string, unknown>>(q, 1))[0] ?? {};
-        out = { ready: true,
-          p50: Number(r.p50) || 0, p90: Number(r.p90) || 0, p95: Number(r.p95) || 0,
-          thr: Number(r.thr) || 0, fails: Number(r.fails) || 0 };
-      } catch { /* no scope or empty window — tiles simply stay absent */ }
+      /* AN APPLICATION FROM THE METRIC STORE FIRST (0.17.15). Its request
+         percentiles, volume and 4xx/5xx are the platform's dt.frontend.request
+         counters — ≈0 GiB, where the event read measured 179 GiB on a bank's
+         production. A domain has no metric dimension and keeps the events,
+         sampled inside the click budget. */
+      const viaMetric = target.kind === "app"
+        ? await appRequestMetrics(target.id, tf).catch(() => null) : null;
+      if (viaMetric) out = viaMetric;
+      else {
+        const k2 = target.kind === "domain" ? ratio : 1;
+        const q = target.kind === "service" ? qSvcMetrics(target.id, tf)
+          : target.kind === "app" ? qAppMetrics(target.id, tf)
+          : qDomMetrics(target.appId, target.domain, tf, k2);
+        try {
+          const r = (await runDql<Record<string, unknown>>(q, 1))[0] ?? {};
+          out = { ready: true,
+            p50: Number(r.p50) || 0, p90: Number(r.p90) || 0, p95: Number(r.p95) || 0,
+            thr: (Number(r.thr) || 0) * k2, fails: (Number(r.fails) || 0) * k2 };
+        } catch { /* no scope or empty window — tiles simply stay absent */ }
+      }
       /* Spans are the right source for anything OneAgent traces into Grail,
        * and the wrong one for everything else. Measured on a live estate: `MF
        * easyTravelBusiness` has no spans at all, so the tiles announced p50
@@ -111,7 +148,7 @@ export function useNodeMetrics(
     })();
 
     return () => { live = false; };
-  }, [target ? keyOf(target) : null, win, gen]);
+  }, [target ? keyOf(target) : null, win, gen, ratio]);
 
   return m;
 }

@@ -2,7 +2,7 @@
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import { FC_HIST_CAP_MIN, histWindow } from "./forecast";
-import { isScanLimit, noteScan, noteScanStart, pageBudgetMs } from "./cost";
+import { isScanLimit, noteScan, noteScanStart, OPTIONAL_SCAN_BUDGET_GIB, pageBudgetMs } from "./cost";
 
 /**
  * The window every query runs over.
@@ -727,6 +727,43 @@ export const SAMPLE_TARGET = 8000;
 export const sampleRate = (sessions: number) =>
   sessions > SAMPLE_TARGET
     ? Math.max(1, Math.floor((SAMPLE_TARGET / sessions) * 65536)) / 65536 : 1;
+/* THE COHORT'S TIME SLICE (0.17.15). The hash above keeps ~8,000 sessions
+   of the window, but a filter on the session id cuts no Grail bytes: the
+   cohort and path scans still read every event of the hour — measured on
+   production 514 GiB for the current hour and 310 GiB for the one before,
+   9–11 s each, to keep eight thousand sessions. Reading a SLICE of the
+   window does cut the bytes, linearly. So on an application whose window
+   would read more than the budget, the scans read the window's last minutes
+   — settled minutes on a live window — sized to the budget, and the hash
+   then picks ~8,000 sessions inside the slice. Counts are scaled by the
+   product of both fractions, exactly as they were by the hash alone. A
+   window with an absolute end keeps the whole window and the hash. */
+export const COHORT_BYTES_PER_SESSION = 45e3;
+/** The settled slice of a window that reads `estGiB` in full and must read
+ *  at most the budget; null when the whole window fits (or its end is
+ *  absolute, where "the last minutes" has no stable meaning). */
+export function sliceFor(tf: Timeframe, estGiB: number): { tf: Timeframe; share: number } | null {
+  const to = tf.to.trim();
+  if (!/^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to) || !(tf.minutes > 0)) return null;
+  if (estGiB <= OPTIONAL_SCAN_BUDGET_GIB) return null;
+  const sliceMin = Math.max(2, Math.floor(tf.minutes * (OPTIONAL_SCAN_BUDGET_GIB / estGiB)));
+  if (sliceMin >= tf.minutes) return null;
+  const live = /^now\(?\)?$/i.test(to);
+  const end = live ? `now()-${EVENT_LAG_MIN}m` : to.replace(/^now(?!\()/i, "now()");
+  return { tf: { ...tf, from: `${end}-${sliceMin}m`, to: end, minutes: sliceMin },
+    share: sliceMin / tf.minutes };
+}
+export function cohortPlan(tf: Timeframe, sessions: number):
+  { tf: Timeframe; hash: number; rate: number; sliceMin: number | null } {
+  const s = sliceFor(tf, (sessions * COHORT_BYTES_PER_SESSION) / 2 ** 30);
+  if (!s) return { tf, hash: sampleRate(sessions), rate: sampleRate(sessions), sliceMin: null };
+  const hash = sampleRate(sessions * s.share);
+  return { tf: s.tf, hash, rate: s.share * hash, sliceMin: s.tf.minutes };
+}
+/** The Journeys tab's four mining scans together, per session of the window
+ *  (measured on production: ≈58 GiB for a ~6M-session hour). */
+export const JOURNEY_BYTES_PER_SESSION = 12e3;
+
 const sessionSample = (rate: number) => {
   if (rate >= 1) return "";
   const cut = Math.max(1, Math.round(rate * 65536)).toString(16).padStart(4, "0");
@@ -1517,13 +1554,13 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${onlySession(session)}${scopeA
 
 /** Contacted domains (layer 02). */
 /** Scoped like qOrigins, and for the same measured reason. */
-export const qDomains = (tf: Timeframe, rumAppId?: string | null) => {
+export const qDomains = (tf: Timeframe, rumAppId?: string | null, ratio = 1) => {
   /* On a shifted/absolute window tfMid is null — emit a literal null so the
    * client keeps its "no forecast" contract. The old fallback "now()" turned
    * unknown into a hard 0 and every leg's second half reading as empty. */
   const mid = tfMid(tf);
   return `
-fetch user.events, from: ${tf.from}, to: ${tf.to}${scopeApp(rumAppId)}
+fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}${scopeApp(rumAppId)}
 /* Requests UNION failed calls. Request records carry only 200/201 on both
  * measured estates (bwm: 445k requests, statuses {200, 0, null}) — every
  * failed call is filed as an error with source "fetch", so counting
@@ -2314,8 +2351,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
     thr = countIf(_req == 1), fails = countIf(_req == 0)
 | limit 1`;
 
-export const qDomMetrics = (rumAppId: string, domain: string, tf: Timeframe) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+export const qDomMetrics = (rumAppId: string, domain: string, tf: Timeframe, ratio = 1) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}
 /* failed CALLS ride as fetch-source errors, not status >= 400 on request
  * records (those carry only 200/201 — measured on both estates) */
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
@@ -2433,8 +2470,8 @@ export const perfScore = (ns: number) =>
  * views have none at all, and a click that opened an error page for those was
  * a click into an empty screen. The panel now knows before it offers.
  */
-export const qDetailExperience = (tf: Timeframe, rumAppId: string) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+export const qDetailExperience = (tf: Timeframe, rumAppId: string, ratio = 1) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and (characteristics.classifier == "user_action"
       or characteristics.classifier == "error")
@@ -2473,8 +2510,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * dropped now: what cannot be named by its own name is named by what it does
  * carry, which for those rows is "HTTP 500 · request".
  */
-export const qDetailErrors = (tf: Timeframe, rumAppId: string) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+export const qDetailErrors = (tf: Timeframe, rumAppId: string, ratio = 1) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and characteristics.classifier == "error"
 | fieldsAdd name = coalesce(
@@ -2517,8 +2554,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}
  * filed as an error with source "fetch". Counting 4xx/5xx off the request
  * records returned 0 failures against 598 real ones.
  */
-export const qDetailRequests = (tf: Timeframe, rumAppId: string) => `
-fetch user.events, from: ${tf.from}, to: ${tf.to}
+export const qDetailRequests = (tf: Timeframe, rumAppId: string, ratio = 1) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and (characteristics.classifier == "request" or (${FAILED_CALL}))
 /* THE ENDPOINT, NOT THE HOST. This grouped by url.domain, so the drill under
@@ -2767,8 +2804,12 @@ smartscapeNodes "AWS_LAMBDA_FUNCTION"
  * spans and the window is what it costs (0.08 GB at 10m). Who calls what does
  * not change within an hour.
  */
+/* 1-in-10 (0.17.17): measured 25 GiB on production for the stores a few
+   services call — a store a service uses at any rate still shows up; its
+   counts are scaled back by DATA_STORE_SAMPLE in useDataStores. */
+export const DATA_STORE_SAMPLE = 10;
 export const qServiceDataStores = (serviceIds: string[]) => `
-fetch spans, from: now()-10m, to: now()
+fetch spans, from: now()-10m, to: now(), samplingRatio: ${DATA_STORE_SAMPLE}
 | filter isNotNull(db.system)
 | filter ${serviceIds.slice(0, 40)
   .map((s) => `dt.entity.service == "${s.replace(/["\\]/g, "")}"`).join(" or ")}
