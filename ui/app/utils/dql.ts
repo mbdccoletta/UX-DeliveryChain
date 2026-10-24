@@ -2485,14 +2485,19 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio:
     p50 = percentile(if(_act, toLong(duration)), 50),
     p90 = percentile(if(_act, toLong(duration)), 90),
     p95 = percentile(if(_act, toLong(duration)), 95),
-    // an action with an error of its own is frustrated whatever its speed
-    sat = sum(if(_act and not(${ACT_ERR}) and experience.level == "satisfied", _w, else: 0)),
-    tol = sum(if(_act and not(${ACT_ERR}) and experience.level == "tolerating", _w, else: 0)),
-    // a crash or freeze on this screen is one more frustrated element
-    fru = sum(if(${CRASH}, 1, else: if(_act and isNotNull(experience.level) and (${ACT_ERR} or experience.level == "frustrated"), _w, else: 0))),
+    /* DYNATRACE'S OWN RATING, as the application's Apdex is (0.17.21): the
+       experience level of each action, weighted — no rule of this app's on
+       top, so a screen's Apdex and the application's are one arithmetic */
+    sat = sum(if(_act and experience.level == "satisfied", _w, else: 0)),
+    tol = sum(if(_act and experience.level == "tolerating", _w, else: 0)),
+    fru = sum(if(_act and experience.level == "frustrated", _w, else: 0)),
   by: { name = ${VIEW_NAME} }
 | filter isNotNull(name) and name != "" and vol > 0
-| sort vol desc | limit 8`;
+/* COSTLIEST FIRST, not busiest: the screens that keep the Apdex from 1.00 —
+   frustrated plus half the tolerating — lead, which is the list a team
+   improving a green score needs as much as one fixing a red one */
+| fieldsAdd lost = fru + tol / 2
+| sort lost desc, vol desc | limit 8`;
 
 /**
  * Errors: what is failing, once per KIND of failure.

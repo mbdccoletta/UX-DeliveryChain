@@ -64,6 +64,17 @@ export const OVERVIEW_STARTERS: Starter[] = [
       + "the Error Inspector, which Davis problem, which state's sessions; and "
       + "whether a customer-facing message is warranted, and what it should "
       + "say. Where a figure was not measured, name what to open instead." },
+  { label: "Make good better",
+    ask: "This application may already read Healthy. Using the Headroom line and "
+      + "the per-screen or per-action figures supplied, show how to raise its Apdex "
+      + "to the next band and towards 1.00. Rank the screens or actions by the "
+      + "points each would return (frustrated plus half the tolerating, over the "
+      + "application's rated actions), name the cheapest wins first — tolerating "
+      + "actions just over the threshold, slow requests behind a frequent screen, "
+      + "a heavy app start — and say what Apdex the application would reach after "
+      + "the top three, with the sum shown. Include places whose Apdex is below "
+      + "the application's. If the per-screen figures are not loaded, say to open "
+      + "the User experience card; do not estimate." },
   { label: "What happens next",
     ask: "From the projections supplied (sessions, errors, requests, each from "
       + "Dynatrace's forecast analyzer), what should the team expect over the "

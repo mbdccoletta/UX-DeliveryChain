@@ -1062,6 +1062,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           ? `Apdex: ${(scoreExplain({ ...uxRow!, crashes: uxRow!.scoreCrashes, platform: true }) ?? "").replace(/\n+/g, " ")}`
           : `Apdex: ${fmtApdex(apdex)} from RUM classic (builtin:apps.* — the rating Dynatrace's application list shows), because the new RUM rated no user action here`
             + (classic?.actions != null ? `; it rests on ${fmtN(classic.actions)} user actions — weigh it accordingly` : ""),
+      /* HEADROOM — what a green score still leaves on the table (0.17.21) */
+      ...(apdex !== null && uxRow && uxRow.satisfied + uxRow.tolerating + uxRow.frustrated > 0 ? (() => {
+        const rt = uxRow.satisfied + uxRow.tolerating + uxRow.frustrated;
+        const next = apdex < SCORE_BAD ? 0.5 : apdex < 0.7 ? 0.7 : apdex < SCORE_WARN ? SCORE_WARN : apdex < 0.94 ? 0.94 : 1;
+        return [`Headroom: Apdex ${fmtApdex(apdex)}; the next band starts at ${next.toFixed(2)} (+${Math.max(0, next - apdex).toFixed(2)}).`
+          + ` ${pc(uxRow.tolerating / rt)} of rated actions were tolerating and ${pc(uxRow.frustrated / rt)} frustrated —`
+          + ` every tolerating action made satisfying would add ${(uxRow.tolerating / 2 / rt).toFixed(3)} to the Apdex,`
+          + ` every frustrated one ${(uxRow.frustrated / rt).toFixed(3)}.`];
+      })() : []),
       fm ? `Sessions: ${fmtN(fm.sessions)} active in the window (Dynatrace's estimate), ${fmtN(fm.realSessions)} from real people`
         : impacted ? `Sessions: ${fmtN(impacted.sessions)}` : "Sessions: not measured",
       impacted && impacted.realSessions > 0
@@ -2776,6 +2785,18 @@ function CleanCard(p: CardProps) {
             <Stat v={fmtApdex(p.apdex)} l={p.apdexPartial ? "Apdex · measuring" : "Apdex"}
               tone={p.apdex === null ? undefined : apdexTone(p.apdex)}
               title={p.apdex === null ? p.apdexNote : apdexWords ?? undefined} />
+            {/* HEADROOM (0.17.21, Marcelo: "mesmo que o score esteja verde,
+                propor como melhorar o que já está bom"). A green score still
+                has a distance to the next band — Excellent from 0.94, then
+                1.00 — and the number says how far; the User experience card
+                lists the screens that hold it back, costliest first. */}
+            {p.apdex !== null && !p.apdexPartial && p.apdex >= SCORE_WARN && p.apdex < 0.995 && (
+              <Stat v={`+${(Math.max(0.01, (p.apdex < 0.94 ? 0.94 : 1) - p.apdex)).toFixed(2)}`}
+                l={p.apdex < 0.94 ? "to excellent" : "to 1.00"}
+                title={"How far the Apdex is from the next band. Open the User experience card: "
+                  + "its screens are listed costliest first — frustrated plus half the tolerating "
+                  + "actions each one carries."} />
+            )}
           </div>
           {/* THE OTHER BASE, ON THE SCREEN. A reader comparing this card with
               Users & Sessions found 427 here and 193 there, twice, and had to
@@ -3245,7 +3266,7 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
     <div className={`svcf${wide ? " svcf--wide" : ""}`} style={gridVar} ref={rootRef}>
       <div className="mch__hd">
         <span className="mch__t">{TITLE[metric]}
-          <em>· {tf.label}, busiest first
+          <em>· {tf.label}, {metric === "sessions" ? "costliest to the Apdex first" : "busiest first"}
             {metric === "requests"
               ? " · one row per endpoint, so these do not add up to a host's total"
               : ""}</em></span>
