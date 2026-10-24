@@ -2,6 +2,8 @@
 // Each query fails in isolation: a missing scope never takes the screen down.
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Q from "../utils/dql";
+import { metricCensus } from "../utils/frontendMetrics";
+import { markOverExactLimit, overExactLimit } from "../utils/prefs";
 import { bumpMemoGen } from "../utils/memo";
 import { noteCachedTruncation } from "../utils/cost";
 import { normalizeView, num, runDql, type Timeframe } from "../utils/dql";
@@ -167,6 +169,8 @@ export interface ChainData {
   /** The census's session totals are the precision-16 estimate, because the
    *  exact count exceeded the platform's element limit. */
   censusApprox?: boolean;
+  /** The Delivery Chain's origin split is on its way (useOrigins). */
+  originsLoading?: boolean;
   /** True when the census is scoped to ONE session (a session id in the url):
    *  its totals then describe that session, not the window. */
   sessionScoped?: boolean;
@@ -365,7 +369,18 @@ export function useChainData(
       let censusOk = false;
       const onCensusPreview = (rows: Record<string, unknown>[]) => { if (rows.length) settleEarly(rows); };
       const censusFinal = (async () => {
-        if (appId && Q.overExactLimit(appId)) {
+        /* 0.17.0: THE METRIC STORE FIRST (utils/frontendMetrics). Sessions,
+           real people's sessions, errors, crashes and ANRs per frontend —
+           the platform's own counters, ≈0 GiB, where the event census read
+           145 GiB scoped and 328 GiB for the estate on a bank's production.
+           The sessions are the platform's estimate, so the census is marked
+           approximate. A one-session url, or a frontend the store has
+           nothing for, keeps the event census below. */
+        if (!session) {
+          const m = await metricCensus(censusTf, appId).catch(() => null);
+          if (m) { censusApprox = true; onCensusPreview(m); return m; }
+        }
+        if (appId && overExactLimit(appId)) {
           censusApprox = true;
           return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId, false), 200,
             () => { cut.hit = true; }, onCensusPreview);
@@ -375,7 +390,7 @@ export function useChainData(
             () => { cut.hit = true; }, onCensusPreview);
         } catch (e) {
           if (!appId || !Q.isExactLimit(e)) throw e;
-          Q.markOverExactLimit(appId);
+          markOverExactLimit(appId);
           censusApprox = true;
           return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId, false), 200,
             () => { cut.hit = true; }, onCensusPreview);

@@ -117,3 +117,21 @@ fetch dt.system.events, from: -2d
     scanned_gib = sum(scanned) / 1073741824,
     billed_gib = sum(coalesce(billed, 0.0)) / 1073741824,
     billed_types = collectDistinct(types)
+
+
+// ── 8. PER QUERY, THE LAST HALF HOUR — includes the analyzer's own queries ──
+// Run right after opening the app. Forecasts run through the analyzer and
+// never appear as query:execute in a HAR; here they do. Measured on a
+// production estate this is where ~2 TiB per Overview open was hiding
+// (5 forecasts reading a 3-hour event history each).
+fetch dt.system.events, from: -30m
+| filter event.kind == "QUERY_EXECUTION_EVENT"
+| filter client.application_context == "my.deliverychain.ux"
+| fieldsAdd head = substring(query_string, from: 0, to: 140)
+| summarize statements = countDistinct(query_id),
+    scanned_gib = sum(toDouble(scanned_bytes)) / 1073741824,
+    avg_s = avg(toDouble(execution_duration_ms)) / 1000,
+    max_s = max(toDouble(execution_duration_ms)) / 1000,
+    by: {head}
+| sort scanned_gib desc
+| limit 40

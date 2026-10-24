@@ -24,7 +24,7 @@ import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
 import { deepestOf, routeCtxOf } from "./FlowSankey";
 import { fmtMs, fmtN, fmtPct, type OutcomeDefs } from "../utils/dql";
 import { useGeo } from "../hooks/useGeo";
-import { GEO_WORD, geoBecause, geoJudge, geoName, geoPop } from "../utils/geoVerdict";
+import { GEO_WORD, geoName, placeJudge, placeRate } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
 import { useFrontendNames } from "../hooks/useFrontendNames";
 import { SESSION_CHIP, chips, intentsAvailable, open as openIntent,
@@ -180,7 +180,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   /* Access and health by location — the same rows and the same three-arm
    * verdict the Overview map speaks (utils/geoVerdict), memoised per app and
    * window, so opening the board after the map costs no second scan. */
-  const geoRows = useGeo(data.tf, scopeApp || null);
+  const geoRows = useGeo(data.tf, scopeApp || null, feName || undefined, feNames !== null);
+  // the same per-source rule as the Overview map (utils/geoVerdict placeJudge)
+  const judgePlace = React.useMemo(() => placeJudge(geoRows ?? []), [geoRows]);
   const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs,
     !!kpis && !kpis.partial);
   const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
@@ -1009,10 +1011,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               "",
               geoRows && geoRows.length ? "WHERE THE CUSTOMERS ARE" : "",
               ...(geoRows ?? []).slice(0, 6).map((g) => {
-                const tot = (geoRows ?? []).reduce((a, x) => a + geoPop(x).n, 0) || 1;
-                const base = (geoRows ?? []).reduce((a, x) => a + geoPop(x).h, 0) / tot;
+                const j = judgePlace(g);
                 return `  ${geoName(g.country)}: ${fmtN(g.sessions)} sessions,`
-                  + ` ${GEO_WORD[geoJudge(g, base)]} — ${geoBecause(g, base)}`;
+                  + ` ${GEO_WORD[j.tone]} — ${j.because}`;
               }),
             ];
             return lines.filter(Boolean).join("\n");
@@ -1567,9 +1568,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           headline is the worst location or the negative finding, because "no
           region stands out" is also an answer the owner needs stated. */}
       {geoRows && geoRows.length > 0 && (() => {
-        const tot = geoRows.reduce((a, g) => a + geoPop(g).n, 0) || 1;
-        const base = geoRows.reduce((a, g) => a + geoPop(g).h, 0) / tot;
-        const judged = geoRows.map((g) => ({ g, tone: geoJudge(g, base) }));
+        const judged = geoRows.map((g) => ({ g, tone: judgePlace(g).tone }));
         const hurt = judged.filter((x) => x.tone !== "good")
           .sort((a, b) => (a.tone === b.tone ? b.g.sessions - a.g.sessions
             : a.tone === "bad" ? -1 : 1));
@@ -1582,19 +1581,21 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   tolerating country red contradicted its row two lines down */}
               <h3 className={`bc__seg-h bc__seg-h--${lead ? lead.tone : "good"}`}>
                 {lead
-                  ? `${geoName(lead.g.country)} is ${GEO_WORD[lead.tone]} — ${geoBecause(lead.g, base)}`
+                  ? `${geoName(lead.g.country)} is ${GEO_WORD[lead.tone]} — ${judgePlace(lead.g).because}`
                   : "no location stands out — every country reads satisfied under the map's own rule"}
               </h3>
               {judged.slice(0, 6).map(({ g, tone }) => (
                 <div className="bc__seg-r" key={g.country}
-                  title={`${fmtN(g.sessions)} sessions from ${geoName(g.country)} — ${GEO_WORD[tone]}: ${geoBecause(g, base)}`}>
-                  <span className="bc__seg-b">{geoName(g.country)}<em>{pct(g.sessions / tot)} of sessions</em></span>
+                  title={`${fmtN(g.sessions)} sessions from ${geoName(g.country)} — ${GEO_WORD[tone]}: ${judgePlace(g).because}`}>
+                  <span className="bc__seg-b">{geoName(g.country)}<em>{pct(g.sessions / (geoRows.reduce((a, x) => a + x.sessions, 0) || 1))} of sessions</em></span>
                   <b className="num">{fmtN(g.sessions)}</b>
                   <span className="bc__seg-lift" style={{ color: `var(--${tone})` }}>
                     {GEO_WORD[tone]}
                   </span>
                   <em className="bc__seg-n">
-                    {g.hit > 0 ? `${pct(g.hit / Math.max(g.sessions, 1))} met an error` : "no errors"}
+                    {g.source === "metric"
+                      ? (placeRate(g) === null ? "no user actions" : `${placeRate(g)!.toFixed(2)} errors per action`)
+                      : (g.hit ?? 0) > 0 ? `${pct((g.hit ?? 0) / Math.max(g.sessions, 1))} met an error` : "no errors"}
                   </em>
                 </div>
               ))}

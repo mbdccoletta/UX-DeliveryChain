@@ -18,7 +18,7 @@
 // Substance gate: below GEO_MIN_SESSIONS a rate is an anecdote; the place
 // stays uncoloured-green and its sentence says it was too small to judge.
 import { fmtApdex } from "./apdex";
-import { HIT_BAD, HIT_WARN } from "./verdict";
+import { HIT_BAD, HIT_WARN, SCORE_BAD, SCORE_WARN, scoreTone } from "./verdict";
 
 export type GeoTone = "good" | "warn" | "bad";
 
@@ -108,10 +108,12 @@ export const geoArms = (g: GeoArm, base: number): GeoArms => {
   const apx = rated > 0 ? (g.sat + g.tol / 2) / rated : null;
   const rel = pop.n >= 30 && pop.h >= 5 && rate >= 0.02
     ? (lift >= 1.5 ? 2 : lift >= 1.15 ? 1 : 0) : 0;
-  const abs = pop.n >= GEO_MIN_SESSIONS && rate >= GEO_ABS_BAD ? 2
-    : pop.n >= GEO_MIN_SESSIONS && rate >= GEO_ABS_WARN ? 1 : 0;
-  const spd = rated >= 30 && apx !== null
-    ? (apx < 0.7 ? 2 : apx < 0.85 ? 1 : 0) : 0;
+  // no sample minimums (Marcelo, 2026-10-23: not Dynatrace rules) — the
+  // place is judged on whatever it measured, by the application's own lines
+  // the share of sessions with errors is measured, never judged (0.17.2)
+  const abs = 0;
+  const st = scoreTone(apx);
+  const spd = st === "bad" ? 2 : st === "warn" ? 1 : 0;
   /* THE APPLICATION'S RULE COLOURS THE PLACE (see the header): the share of
    * its people an error affected, and its experience score, each on the
    * application's own lines — worst wins, exactly as utils/verdict decides.
@@ -149,24 +151,16 @@ export const geoBecause = (g: GeoArm, base: number): string => {
   const pct = `${(a.rate * 100).toFixed(a.rate >= 0.1 ? 0 : 1)}%`;
   /* the deviation and the speed, printed after the verdict's own reason */
   const tail = (base > 0 && geoPop(g).h > 0 ? ` · ${a.lift.toFixed(2)}× the application's rate` : "")
-    + (a.apx !== null ? ` · experience score ${fmtApdex(a.apx)}` : "");
+    + (a.apx !== null ? ` · Apdex ${fmtApdex(a.apx)}` : "");
   const pop = geoPop(g);
   const whose = pop.real ? "real-user sessions" : "sessions";
-  if (pop.h === 0) return `no ${whose.replace(/s$/, "")} was affected by an error` + tail;
-  /* A GATE IS NOT A THRESHOLD: too few sessions to judge is said as such. */
-  if (pop.n < GEO_MIN_SESSIONS) {
-    return `${pct} of its ${whose} were affected by an error, but ${fmtCount(pop.n)}`
-      + ` is too few to judge — a verdict needs ${GEO_MIN_SESSIONS}` + tail;
-  }
-  /* when the experience score set the colour, the sentence says so first */
-  if (a.spd === a.level && a.abs < a.level && a.apx !== null) {
-    return `experience score ${fmtApdex(a.apx)} — ${a.level === 2 ? "Critical under 0.70" : "Warning under 0.85"}, `
-      + `the application's own line · ${pct} of its ${whose} were affected by an error`
-      + (base > 0 && pop.h > 0 ? ` · ${a.lift.toFixed(2)}× the application's rate` : "");
-  }
-  if (a.level === 2) return `${pct} of its ${whose} were affected by an error — Critical starts at ${HIT_BAD * 100}%, the application's own line` + tail;
-  if (a.level === 1) return `${pct} of its ${whose} were affected by an error — Warning starts at ${HIT_WARN * 100}%, the application's own line` + tail;
-  return `${pct} of its ${whose} were affected by an error — under the ${HIT_WARN * 100}% warning line` + tail;
+  const hurt = pop.h === 0 ? `no ${whose.replace(/s$/, "")} affected by an error`
+    : `${pct} of its ${whose} affected by an error`;
+  if (a.apx === null) return `not rated — no Apdex here · ${hurt}`
+    + (base > 0 && pop.h > 0 ? ` · ${a.lift.toFixed(2)}× the application's rate` : "");
+  return `Apdex ${fmtApdex(a.apx)} — Critical under ${SCORE_BAD.toFixed(2)}, Warning under ${SCORE_WARN.toFixed(2)}, `
+    + `the application's own lines · ${hurt}`
+    + (base > 0 && pop.h > 0 ? ` · ${a.lift.toFixed(2)}× the application's rate` : "");
 };
 
 /** Country name in the reader's language (display) — falls back to the code. */
@@ -200,3 +194,115 @@ export const geoTag = (g: GeoArm, base: number): string => {
 };
 export const geoTagSub = (r: SubArm, base: number): string =>
   geoTag({ ...r, sat: r.sat ?? 0, tol: r.tol ?? 0, fru: r.fru ?? 0 }, base);
+
+
+/* ── THE METRIC MAP'S RULE (0.16.13) ─────────────────────────────────────────
+   Countries are coloured from the platform's metrics, which know errors and
+   user actions per country but not which sessions an error affected. So the
+   map judges a different, stated thing: each country's errors per user action
+   against THIS application's own rate, worst with first-byte time. Relative,
+   because errors per action has no absolute scale (a production application
+   measured ~80 — background errors included). A country needs enough actions
+   to be judged at all. This is NOT the verdict's rule; the tile says so. */
+export const GEO_RATE_WARN = 1.5;
+export const GEO_RATE_BAD = 3;
+export const GEO_MIN_ACTIONS = 100;
+export interface MetricPlace { country: string; sessions: number; errors?: number; actions?: number;
+  /** The platform's experience weights here (0.17.0) — the verdict's measure. */
+  sat?: number; tol?: number; fru?: number }
+/** THE VERDICT'S OWN MEASURE PER PLACE (0.17.0). The application was Critical
+ *  on its experience score while every country sat green — the map judged
+ *  errors per action against the application's own average, and when the
+ *  trouble is everywhere nothing is worse than the average. The metric store
+ *  carries the experience weights per country, so a country is now read on
+ *  the same score and the same bands as the application (apdexTone), and the
+ *  relative error rate can only add to that, never clear it. */
+export const placeScore = (g: MetricPlace): number | null => {
+  const rated = (g.sat ?? 0) + (g.tol ?? 0) + (g.fru ?? 0);
+  return rated > 0 ? ((g.sat ?? 0) + (g.tol ?? 0) / 2) / rated : null;
+};
+const worse = (a: GeoTone, b: GeoTone): GeoTone =>
+  a === "bad" || b === "bad" ? "bad" : a === "warn" || b === "warn" ? "warn" : "good";
+export const placeRate = (g: MetricPlace) =>
+  g.actions && g.actions > 0 ? (g.errors ?? 0) / g.actions : null;
+export const geoJudgeMetric = (g: MetricPlace, base: number): GeoTone => {
+  const r = placeRate(g);
+  // no sample minimum (Marcelo, 2026-10-23: not a Dynatrace rule) — a place
+  // is judged whenever it has the data
+  // the platform's score in the verdict's bands; the error rate is printed, never judged
+  void r; void base;
+  return scoreTone(placeScore(g)) ?? "good";
+};
+export const geoBecauseMetric = (g: MetricPlace, base: number): string => {
+  const r = placeRate(g);
+  const sc = placeScore(g);
+  const score = sc === null ? "" : `Apdex ${(Math.floor(Math.min(sc, 0.99) * 100) / 100).toFixed(2)} — `;
+  if (r === null) return `${score}no user actions recorded here`;
+  const lift = base > 0 ? r / base : 0;
+  return `${score || "not rated — no Apdex here · "}${r.toFixed(r >= 10 ? 0 : 2)} errors per user action, `
+    + `${lift.toFixed(2)}× this application's rate (${g.actions} user actions)`;
+};
+
+
+/** A map row from either source (hooks/useGeo GeoRow, structurally). */
+export interface PlaceRow extends MetricPlace {
+  source: "metric" | "events";
+  hit?: number; realSessions?: number; realHit?: number;
+  sat?: number; tol?: number; fru?: number;
+}
+const armOf = (g: PlaceRow): GeoArm => ({ sessions: g.sessions, hit: g.hit ?? 0,
+  realSessions: g.realSessions, realHit: g.realHit,
+  sat: g.sat ?? 0, tol: g.tol ?? 0, fru: g.fru ?? 0 });
+/** ONE JUDGE FOR A SET OF PLACES, whichever source they came from — the
+ *  Overview map and the board both call this, so they cannot disagree. */
+export function placeJudge(rows: PlaceRow[]): (g: PlaceRow) => { tone: GeoTone; because: string } {
+  if (rows.length && rows[0].source === "metric") {
+    const base = rows.reduce((a, g) => a + (g.errors ?? 0), 0)
+      / (rows.reduce((a, g) => a + (g.actions ?? 0), 0) || 1);
+    return (g) => ({ tone: geoJudgeMetric(g, base), because: geoBecauseMetric(g, base) });
+  }
+  const n = rows.reduce((a, g) => a + geoPop(armOf(g)).n, 0) || 1;
+  const base = rows.reduce((a, g) => a + geoPop(armOf(g)).h, 0) / n;
+  return (g) => ({ tone: geoJudge(armOf(g), base), because: geoBecause(armOf(g), base) });
+}
+
+
+/* ── STATES FROM THE SESSION STORE (0.16.15) ────────────────────────────────
+   The store knows, per session, its state and whether it had any error — not
+   whether the error landed on the person's own action. So a state is judged
+   on the share of its real-user sessions WITH ERRORS (as Users & Sessions
+   counts them) against its own country's share: relative, like the countries
+   on the metric map, and stated as such. Thirty sessions before judging. */
+export interface StoreRegion { sessions: number; hit: number; realSessions?: number; realHit?: number }
+const storeShare = (r: StoreRegion) => {
+  const n = r.realSessions && r.realSessions > 0 ? r.realSessions : r.sessions;
+  const h = r.realSessions && r.realSessions > 0 ? (r.realHit ?? 0) : r.hit;
+  return { n, h, share: n > 0 ? h / n : 0 };
+};
+export const STORE_MIN_SESSIONS = 30;
+/* NO PLACE IS JUDGED BY A SOFTER RULE THAN ITS APPLICATION (0.17.0). Read
+   only against its country's share, a state — and, on the metric map, a
+   country — that carried the very share which put the application in
+   Warning came out green: when the trouble is everywhere, nothing is worse
+   than the average. So the application's own lines (HIT_WARN, HIT_BAD on
+   the share of sessions with errors) apply to every place, and the relative
+   lift can only add to them. */
+export const geoJudgeStore = (r: StoreRegion, base: number): GeoTone => {
+  const { n, share } = storeShare(r);
+  if (n === 0) return "good";
+  const abs: GeoTone = share >= GEO_ABS_BAD ? "bad" : share >= GEO_ABS_WARN ? "warn" : "good";
+  if (!(base > 0)) return abs;
+  const lift = share / base;
+  return worse(abs, lift >= GEO_RATE_BAD ? "bad" : lift >= GEO_RATE_WARN ? "warn" : "good");
+};
+export const geoTagStore = (r: StoreRegion) => {
+  const { n, h, share } = storeShare(r);
+  return n === 0 ? "—" : h === 0 ? "no errors" : `${(share * 100).toFixed(1)}% with errors`;
+};
+export const geoBecauseStore = (r: StoreRegion, base: number) => {
+  const { n, share } = storeShare(r);
+  return `${(share * 100).toFixed(1)}% of its ${n} closed real-user session${n === 1 ? "" : "s"} had errors, `
+    + `${base > 0 ? (share / base).toFixed(2) : "—"}× its country's share`
+    + ` — Warning from ${Math.round(GEO_ABS_WARN * 100)}% or ${GEO_RATE_WARN}×, Critical from ${Math.round(GEO_ABS_BAD * 100)}% or ${GEO_RATE_BAD}×,`
+    + ` the application's own lines (session store, as Users & Sessions lists them)`;
+};

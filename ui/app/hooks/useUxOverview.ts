@@ -9,7 +9,8 @@
 // should not scan twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { isExactLimit, markOverExactLimit, overExactLimit, qExperience, qUxByApp, qUxLean, runDql, type Timeframe } from "../utils/dql";
+import { markOverExactLimit, overExactLimit } from "../utils/prefs";
+import { isExactLimit, qExperience, qUxByApp, qUxLean, runDql, type Timeframe } from "../utils/dql";
 
 export interface UxRow {
   sessions: number;

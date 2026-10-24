@@ -49,7 +49,8 @@ export function useAppForecast(
       : fe ? qMetricForecastExpr("errors", fe, win.from, win.to, plan.bin)
          : `fetch user.events, from: ${win.from}, to: ${win.to}
        | filter dt.rum.application.id == "${appId.replace(/"/g, "")}"
-       | makeTimeseries errors = countIf(characteristics.classifier == "error"), interval: ${plan.bin}`,
+       | filter characteristics.classifier == "error"
+       | makeTimeseries errors = countIf(characteristics.classifier == "error", default: 0), interval: ${plan.bin}`,
       plan.horizon,
     ).then((f) => { memo.set(key, f); if (live) setAhead(f); });
     return () => { live = false; };

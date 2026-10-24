@@ -17,6 +17,9 @@ import { qGeoRegions, runDql, type Timeframe } from "../utils/dql";
 export interface PlaceRow {
   /** ISO 3166-2 for a state ("US-CA"); the plain name for a city. */
   id: string;
+  /** "store": a state read from the session store with the headline
+   *  (sessions with errors, no score); absent: the event scan. */
+  source?: "store";
   name: string;
   sessions: number;
   hit: number;

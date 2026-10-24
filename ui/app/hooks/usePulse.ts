@@ -25,6 +25,10 @@ export interface PulseData {
    *  bins over the whole window (one event, one bin). */
   requests: number;
   reqFail: number;
+  /** GiB the window's event scan read — what an event history costs per
+   *  window-length, for the optional-read guardrail. Null when the query
+   *  reported no metadata (a shared in-flight answer): unknown, not free. */
+  scanGiB: number | null;
 }
 
 const memo = new Map<string, PulseData | null>();
@@ -71,8 +75,10 @@ export function usePulse(
            any bin count (binFor keeps a window near 60 bins); a capped answer
            would make the totals short, so it is refused rather than summed. */
         let capped = false;
+        let scanBytes: number | null = null;
         const [rows, sess, metricRows] = await Promise.all([
-          runDql<Record<string, unknown>>(qPulse(tf!, rumAppId!), 1000, () => { capped = true; }),
+          runDql<Record<string, unknown>>(qPulse(tf!, rumAppId!), 1000, () => { capped = true; },
+            undefined, { onMeta: (mm) => { scanBytes = mm.scannedBytes; } }),
           // not inside the store's lag: there the series would be empty by
           // construction, and the event series is the honest one
           fe && !withinSessionLag(tf!)
@@ -127,6 +133,7 @@ export function usePulse(
           }),
           requests: sumOf("reqAll"),
           reqFail: sumOf("failAll"),
+          scanGiB: scanBytes === null ? null : scanBytes / 1073741824,
         };
       } catch {
         /* the page still renders from the shared data — panels just close */

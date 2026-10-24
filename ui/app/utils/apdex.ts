@@ -44,9 +44,14 @@ export const apdexRated = (c: ApdexCounts) =>
   c.satisfied + c.tolerating + c.frustrated;
 
 /** The score, or null when nothing in the window was rateable. */
+/** THE DYNATRACE STANDARD, NO SAMPLE MINIMUM (Marcelo, 2026-10-23: "seguir
+ *  padrão Dynatrace"). The platform computes experience.score whenever at
+ *  least one element is rated — no minimum, no small-group mark — and so
+ *  does this. Kept as a named constant so the rule is visible in one place. */
+export const SCORE_MIN_RATED = 1;
 export function apdexOf(c: ApdexCounts): number | null {
   const rated = apdexRated(c);
-  return rated > 0 ? (c.satisfied + c.tolerating / 2) / rated : null;
+  return rated >= SCORE_MIN_RATED ? (c.satisfied + c.tolerating / 2) / rated : null;
 }
 
 /** The score's arithmetic with this window's own counts, so anyone can redo
@@ -54,12 +59,26 @@ export function apdexOf(c: ApdexCounts): number | null {
  *  screen that prints the score uses THIS sentence — the hero's word, the
  *  card's stat, the Intelligence facts — so the explanation cannot drift
  *  from the figure. */
-export function scoreExplain(c: ApdexCounts & { crashes?: number; errActions?: number }): string | null {
+export function scoreExplain(c: ApdexCounts & { crashes?: number; errActions?: number;
+  /** True when the counts are the platform's experience weights from the
+   *  metric store (0.17.0) — its own rating, summed as its Frontends app does. */
+  platform?: boolean }): string | null {
   const rated = apdexRated(c);
   if (!rated) return null;
   const v = apdexOf(c) as number;
   const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
   const pc = (n: number) => `${Math.round((n / rated) * 100)}%`;
+  if (c.platform) {
+    return `Apdex ${fmtApdex(v)} (${apdexBand(v)})\n`
+      + `= (satisfied + tolerating ÷ 2) ÷ all rated\n`
+      + `= (${fmt(c.satisfied)} + ${fmt(c.tolerating)} ÷ 2) ÷ ${fmt(rated)}\n\n`
+      + `The platform's own rating of real people's user actions `
+      + `(dt.frontend.experience.weight by experience.level) — the figure Dynatrace's `
+      + `Frontends app shows. ${pc(c.satisfied)} satisfied, ${pc(c.tolerating)} tolerating, `
+      + `${pc(c.frustrated)} frustrated. Robots and synthetic monitors are left out.\n\n`
+      + `Bands: excellent ≥ 0.94 · good ≥ 0.85 · fair ≥ 0.70 · poor ≥ 0.50 · `
+      + `unacceptable below.`;
+  }
   const crashes = c.crashes ?? 0, errActs = c.errActions ?? 0;
   const actions = rated - crashes;
   return `Experience score ${fmtApdex(v)} (${apdexBand(v)})\n`

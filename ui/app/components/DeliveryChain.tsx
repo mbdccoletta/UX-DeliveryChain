@@ -6,6 +6,8 @@ import { appHomeHref, intentsAvailable, investigationPaths, kindOf,
   KIND_LABEL as ENTITY_WORD, open,
   type Persona, type Route } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
+import { useFrontendMetrics } from "../hooks/useFrontendMetrics";
+import { useClassicApdex } from "../hooks/useClassicApdex";
 import { useDbEntities } from "../hooks/useDbEntities";
 import { useLayerStats } from "../hooks/useLayerStats";
 import { useJourneys } from "../hooks/useJourneys";
@@ -470,6 +472,13 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
     v: "—", tone: "info", miss: true,
     det: [["State", "the scope query is still running"],
           ["Why the wait", "layers below the application narrow to what this app reaches"]] };
+  /* NOT YET COUNTED IS NOT "NO COVERAGE". The origin split loads on demand
+     (up to 40 s on a production application); until it lands the device
+     layer said "nothing in Smartscape" about an application with millions of
+     sessions. */
+  const countingDevices: Elo = { nm: "Counting…", mt: "splitting sessions by origin",
+    v: "—", tone: "info", miss: true,
+    det: [["State", "the origin split is still running"]] };
   const noData: Elo = { nm: "No coverage", mt: "nothing in Smartscape", v: "—", tone: "info", miss: true,
     det: [["Action", "instrument with OneAgent"]] };
   // Resolved-and-empty is a finding, not a gap in our data: this application's
@@ -670,10 +679,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
                  hit === null ? "…"
                    : `${fmtN(hit)} of ${fmtN(n)} · ${vd.label}${impacted?.partial ? " · measuring" : ""}`],
                 ["Share", devSessions ? ((n / devSessions) * 100).toFixed(1) + "%" : "—"],
+                // a session always has a screen: zero means the source (the
+                // metric store) does not say, not that there were none
                 ["Device profiles",
                  String(devices.filter((r) => originOf(r.agent, r.utype) === o)
-                   .reduce((a, r) => a + r.profiles, 0))]],
-        }; }) : [quiet ? (() => {
+                   .reduce((a, r) => a + r.profiles, 0) || "—")]],
+        }; }) : [d.originsLoading ? countingDevices : quiet ? (() => {
           /* "quiet" and "uninstrumented" are different findings — the reader
            * saw an empty chain and asked whether the app had users AT ALL.
            * Measured then: 0 sessions in the window, 21 in the day. The card
@@ -1117,6 +1128,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
     const appProbs = d.problems.filter((p) => problemIds(p)
       .some((e) => (appElo.ids ?? []).includes(e)));
     const appVd = verdictOf({
+      apdexOnly: true,
       problems: appProbs.length,
       categories: appProbs.map((p) => p.category),
       anomalies: d.signals.filter((sg) => (appElo.ids ?? []).includes(sg.entityId)).length,
@@ -1163,13 +1175,25 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
      it decides which store that scan reads: with a name the figures come from
      user.sessions, the same population the Overview card counts and the
      sessions hand-off opens. One fact, one number, on both screens. */
-  const feNames = useFrontendNames(data.tf.minutes);
+  /* 0.17.3: the same metric-store reading the Overview uses (memoised, so
+     arriving from it is free) — the name, the experience weights the status
+     is judged on. The name scan and the event passes run only without it. */
+  const fm = useFrontendMetrics(data.tf, data.sessionScoped ? null : appId);
+  // the classic rating when the new RUM rates nothing — as on the Overview
+  const fmRated = !!fm && fm.satisfied + fm.tolerating + fm.frustrated > 0;
+  const classic = useClassicApdex(data.apps.find((a) => a.appId === appId)?.entity,
+    data.tf, !!fm && !fmRated);
+  const feNames = useFrontendNames(data.tf.minutes, fm === null);
   // declared AFTER the names it reads — a hook that read `feNames` above this
   // line hit the temporal dead zone at runtime, not at typecheck
-  const aheadFe = feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined;
-  const aheadCount = useAppForecast(appId, data.tf, aheadFe);
+  const aheadFe = fm?.feName
+    || feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined;
+  // started once the name lookup has answered: before that the name is ""
+  // and the forecast would read a 3-hour event history instead of the metric
+  const aheadApp = fm || feNames ? appId : undefined;
+  const aheadCount = useAppForecast(aheadApp, data.tf, aheadFe);
   // the verdict judges the error RATE's forecast, with the real-rise rule
-  const aheadRate = useAppForecast(appId, data.tf, aheadFe, "errorRate");
+  const aheadRate = useAppForecast(aheadApp, data.tf, aheadFe, "errorRate");
   const ahead = React.useMemo(
     () => (aheadCount ? { ...aheadCount, rising: riseIsReal(aheadRate) } : null),
     [aheadCount, aheadRate]);
@@ -1180,7 +1204,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
      still gives the headline count Users & Sessions lists. */
   /* the session-store count (what Users & Sessions lists), once the frontend
      name is known — the same headline the Overview shows */
-  const chainFe = feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined;
+  const chainFe = aheadFe;
   const impacted = useImpacted(appId, data.tf, !!chainFe || !withinSessionLag(data.tf), chainFe);
   /* WHO WAS HURT, judged exactly as the Overview judges it: sessions an
      error AFFECTED (utils/dql USER_HIT), from the same per-session scan —
@@ -1189,7 +1213,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   // the same lean pass + exact census as the Overview (0.16.0), so arriving
   // from it costs nothing and the two screens cannot disagree
   const leanOk = !data.sessionScoped;
-  const uxRaw = useUxOverview(data.tf, appId, false, true, leanOk);
+  const uxRaw = useUxOverview(data.tf, appId, false, fm === null, leanOk);
   const censusRow = data.apps.find((a) => a.appId === appId);
   const uxMap = React.useMemo(
     () => (leanOk ? withCensus(uxRaw, appId, censusRow, !!data.censusFinal, !!data.censusApprox) : uxRaw),
@@ -1199,7 +1223,14 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
      store Users & Sessions lists), every HIT figure — and the real-user base
      it is a share of — from the affected-sessions scan, so each ratio is
      taken on one base and judged by one definition. */
-  const judged: Impacted | null = harm
+  const judged: Impacted | null = fm
+    ? { sessions: impacted?.sessions ?? fm.sessions, hit: impacted?.hit ?? 0,
+        realSessions: impacted?.realSessions ?? fm.realSessions, hitReal: impacted?.hitReal ?? 0,
+        hitRobot: impacted?.hitRobot ?? 0, hitSynth: impacted?.hitSynth ?? 0,
+        partial: !!impacted?.partial, base: impacted?.base ?? "sessions",
+        score: apdexOf({ satisfied: fm.satisfied, tolerating: fm.tolerating, frustrated: fm.frustrated })
+          ?? classic?.value ?? null }
+    : harm
     ? { sessions: impacted?.sessions ?? harm.sessions, hit: harm.hit,
         realSessions: harm.realSessions, hitReal: harm.hitReal,
         hitRobot: harm.hitRobot, hitSynth: harm.hitSynth,
@@ -1250,8 +1281,12 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     ? fpCandidates.find((dm) => servedDomains.has(dm)) ?? null : null;
   /* the 24h probe, asked only when THIS window's sessions are zero —
    * "quiet" and "uninstrumented" must not share a card */
-  const appSessions = data.origins.filter((r) => r.appId === appId)
-    .reduce((a, r) => a + r.sessions, 0);
+  /* FROM THE CENSUS, NOT THE ORIGINS. The origin split loads on demand since
+     0.15.16 and takes up to 40 s on a production application; until it
+     landed this read zero, and the 24-hour probe (125 GB) ran for an
+     application with millions of sessions. The census is in the first load,
+     and an application with no row in it is exactly the quiet case. */
+  const appSessions = data.apps.find((a) => a.appId === appId)?.sessions ?? 0;
   /* the entity, derived when the qApps row is gone — which is EXACTLY the
    * quiet case: zero events in the window means no row to read it from.
    * Measured: a mobile RUM id is the entity's hex as a dashed uuid
@@ -1390,8 +1425,10 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
          * the same numbers, stayed amber. Locations keep their own three-arm
          * rule (geoVerdict); components and their legs speak verdict.ts. */
         const rate = e.bad != null && e.v > 0 ? e.bad / e.v : null;
-        const own: Tone = rate == null ? "info"
-          : rate >= HIT_BAD ? "bad" : rate >= HIT_WARN ? "warn" : "info";
+        /* 0.17.2: only the platform's signals colour (utils/verdict) — the
+           leg's error share is measured, never judged on lines of our own */
+        void rate;
+        const own: Tone = "info";
         const RANK: Record<Tone, number> = { info: 0, good: 0, warn: 1, bad: 2 };
         /* RED FLOWS INTO A PROBLEM, NEVER BACK OUT OF IT.
          *
@@ -1517,6 +1554,18 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
       const seen = new Set<string>();
       /* every label already drawn, so the next one can avoid it */
       const placed: Array<{ x: number; y: number; w: number }> = [];
+      /* NOR ON A NODE (Marcelo, 2026-10-24: "não permitir sobreposições").
+         The labels stepped around each other and nothing else, so a leg's
+         label landed on a node's own name and value. Every node's icon, name
+         and value is now a box the label must clear, in the same canvas
+         units the label is placed in. */
+      const nodeBoxes = [...host.querySelectorAll<HTMLElement>(
+        "[data-node] .gnode__c, [data-node] .gnode__nm, [data-node] .gnode__v")]
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { x: (r.left + r.width / 2 - box.left) / z, y: (r.top + r.height / 2 - box.top) / z,
+            w: r.width / z, h: r.height / z };
+        });
       /* ONE FINDING, SAID ONCE.
        *
        * The old rule deduplicated on value AND label, so every leg out of a
@@ -1581,8 +1630,11 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
              7.4px-per-glyph estimate. Measured in the shell, three pairs
              still touched. */
           const H = 19, pad = 8;
+          // a label's box: centred 4px above its baseline, ~15px tall
           const hits = (y: number) => placed.some((r) =>
-            Math.abs(r.x - lx) < (r.w + need) / 2 + pad && Math.abs(r.y - y) < H);
+            Math.abs(r.x - lx) < (r.w + need) / 2 + pad && Math.abs(r.y - y) < H)
+            || nodeBoxes.some((b) => Math.abs(b.x - lx) < (b.w + need) / 2 + 4
+              && Math.abs(b.y - (y - 4)) < (b.h + 15) / 2 + 2);
           const base = dd.my - 7;
           if (!hits(base)) return base;
           for (let step = 1; step <= 9; step++) {

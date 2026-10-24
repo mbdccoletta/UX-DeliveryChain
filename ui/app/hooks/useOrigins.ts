@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import { qOrigins, runDql, type Timeframe } from "../utils/dql";
+import { frontendNodeOf, qFmScalar } from "../utils/frontendMetrics";
 import type { OriginRow } from "./useChainData";
 
 const memo = new Map<string, OriginRow[]>();
@@ -23,10 +24,37 @@ export function useOrigins(tf: Timeframe, session: string | null | undefined,
     if (!key) { setOut(null); return; }
     const hit = memo.get(key);
     if (hit) { setOut(hit); return; }
+    // a new window or application: the previous answer is not this one
+    setOut(null);
     if (!active) return;
     let live = true;
     (async () => {
       try {
+        /* 0.17.6: FROM THE METRIC STORE FIRST. The origin is the platform's
+           dt.rum.user_type and the frontend's own kind (web / mobile), and the
+           session count per origin is its counter — ≈0 GiB, where the
+           per-session scan read 138 GiB and 29 s on a bank's production. What
+           the metric does not carry stays unknown rather than guessed: views
+           and screen profiles read 0, the half-window split is null (no trend
+           arrow), and who met an error comes from the session store, as on
+           the Overview (hitPerOrigin falls back to it). A one-session url, or
+           a frontend the store has nothing for, keeps the scan. */
+        const node = !session && appId ? await frontendNodeOf(appId).catch(() => null) : null;
+        if (node) {
+          const m = await runDql<Record<string, unknown>>(
+            qFmScalar(tf, "countDistinct(dt.frontend.session.active.estimated_count, scalar: true)",
+              node.id, "dt.rum.user_type"), 20).catch(() => [] as Record<string, unknown>[]);
+          if (m.length) {
+            const agent = node.kind === "mobile" ? "mobile" : "javascript";
+            const res: OriginRow[] = m.map((r) => ({
+              appId: appId!, agent, utype: r["dt.rum.user_type"] as string | null,
+              sessions: num(r.v), views: 0, profiles: 0, late: null, hit: null,
+            })).filter((r) => r.sessions > 0);
+            memo.set(key, res);
+            if (live) setOut(res);
+            return;
+          }
+        }
         const rows = await runDql<Record<string, unknown>>(qOrigins(tf, session, appId), 200);
         const res: OriginRow[] = rows.map((r) => ({
           appId: String(r.appId ?? ""),
