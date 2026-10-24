@@ -43,9 +43,15 @@ const GROUND =
   "Answer only from the measured facts supplied with this question. Every "
   + "number you cite must appear there — never invent one, never estimate, and "
   + "say plainly when something was not measured rather than filling the gap. "
-  + "Name the specific screens, routes, countries or services involved instead "
-  + "of giving generic advice. Lead with what the reader should act on. Keep "
-  + "it to a few short bullets.";
+  + "Name the specific actions, screens, routes, states, countries or services "
+  + "involved instead of giving generic advice. The application's status is "
+  + "its Apdex alone; Davis problems and error shares are context, not the "
+  + "colour. Treat any line marked SIGNAL as evidence that part of a figure "
+  + "may be a measurement artefact and say so before recommending work on "
+  + "it. When a figure comes from a sample, keep its shares and say counts "
+  + "are estimates. Lead with what the reader should act on, name who owns "
+  + "it, and give the number on the page that proves it was done. Keep it to "
+  + "a few short bullets.";
 
 export function Intelligence({ subject, starters, facts, scope, className }: {
   /** What this page IS, in the reader's words — it goes into every prompt. */

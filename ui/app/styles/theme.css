@@ -3560,3 +3560,21 @@ div:has(> header):has(main) > div {
 /* the Journeys tab read a slice of the window (useJourneys sliceFor) */
 .j-slice { align-self: flex-end; font: 600 10px var(--mono); color: var(--ink-3);
   letter-spacing: 0.02em; }
+
+/* the opened state, explained in place (Pulse, 0.17.18) */
+.geo__card { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; display: grid; gap: 6px; }
+.geo__card-h { display: flex; align-items: center; gap: 8px; font: 600 12px var(--sans); }
+.geo__card-h span { color: var(--ink-2); }
+.geo__card-h em { margin-left: auto; font: 600 11px var(--mono); color: var(--ink-3); font-style: normal; }
+.geo__card-why { font: 500 11px var(--mono); color: var(--ink-2); line-height: 1.5; }
+.geo__card .geo__drill-go { justify-self: start; }
+
+/* the opened state's costliest user actions (Pulse, 0.17.19) */
+.geo__acts { display: grid; gap: 2px; margin-top: 2px; }
+.geo__act { display: grid; grid-template-columns: minmax(0, 1fr) 56px 52px 64px 72px; gap: 8px;
+  align-items: baseline; font: 500 11px var(--mono); color: var(--ink-2); }
+.geo__act--hd { font: 600 9px var(--mono); color: var(--ink-3); text-transform: uppercase;
+  letter-spacing: 0.04em; }
+.geo__act > :not(:first-child) { text-align: right; }
+.geo__act-nm { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1937,9 +1937,18 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
    * drawn from a layer this app never resolved is a guess wearing the app's
    * credibility, so the gaps are listed as loudly as the measurements. */
   const chainFacts = () => {
+    const apx = judged?.score ?? null;
     const L: string[] = [
       `Application: ${data.apps.find((a) => a.appId === appId)?.name ?? appId}`,
       `Window: ${data.tf.label}`,
+      /* the status the chain is explaining (0.17.20): the Apdex, the rule,
+         and the client-side figures from the metric store */
+      `Application status: Apdex ${apx === null ? "not rated" : apx.toFixed(2)} — the status rule is the Apdex alone (Critical under 0.50, Warning under 0.85)`
+        + (fm && !(fm.satisfied + fm.tolerating + fm.frustrated > 0) && classic
+          ? `; rated by RUM classic${classic.actions != null ? ` on ${fmtN(classic.actions)} user actions` : ""}` : ""),
+      fm ? `Client side (metric store): ${fmtN(fm.sessions)} sessions, ${fmtN(fm.errors)} errors (${fmtN(fm.errorsThird)} third-party), `
+          + `${fmtN(fm.requests)} requests of which ${fmtN(fm.reqFail)} answered 4xx/5xx`
+        : "Client side: not available from the metric store",
       "",
       "The layers a user request crosses, outermost first:",
     ];
