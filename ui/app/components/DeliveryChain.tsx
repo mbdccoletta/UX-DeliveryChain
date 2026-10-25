@@ -390,6 +390,11 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
   const fanOut = d.calls.reduce<Record<string, number>>((acc, c) => {
     acc[c.src] = (acc[c.src] ?? 0) + 1; return acc;
   }, {});
+  // each service's callees, grouped once instead of filtered per card
+  const callsBySrc = new Map<string, typeof d.calls>();
+  for (const c of d.calls) {
+    const a = callsBySrc.get(c.src); if (a) a.push(c); else callsBySrc.set(c.src, [c]);
+  }
   // ids de entidade por elo — é o que liga cada sinal ao seu dono
   const svcIdOf = new Map<string, string>();
   d.calls.forEach((c) => { svcIdOf.set(c.src, c.srcId); svcIdOf.set(c.dst, c.dstId); });
@@ -636,7 +641,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
       det: [["Smartscape", "SERVICE · " + r.nm],
             ["Traces (10m)", scope.resolved && r.vol > 0 ? fmtN(r.vol) : "—"],
             ["Fan-out (calls)", String(r.fan)],
-            ["Calls", d.calls.filter((c) => c.src === r.nm)
+            ["Calls", (callsBySrc.get(r.nm) ?? [])
               .map((c) => str(c.dst).split(" - ")[0]).slice(0, 6).join(" · ") || "—"]],
     }));
     const extra = [...gen2Cards, ...storeCards];
@@ -1095,12 +1100,26 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
   // Davis problem (red), a baselining anomaly or custom alert (amber), or a
   // worsening forecast on the application (amber). Everything else stays
   // neutral, so the few coloured cards are the whole story of the screen.
-  const sigFor = (ids: string[]) => ({
-    prob: d.problems.filter((p) => (p.entityIds ?? []).some((e) => ids.includes(e))),
-    anom: d.signals.filter((sg) => ids.includes(sg.entityId) && sg.provider === "BASELINING"),
-    alert: d.signals.filter((sg) => ids.includes(sg.entityId)
-      && (sg.provider === "METRIC_EVENTS" || sg.provider === "EVENTS_REST_API_INGEST")),
-  });
+  /* indexed by entity once per build (0.17.46): scanning every signal for
+     every card was the bulk of rebuilding the chain on a large estate */
+  const sigIx = new Map<string, typeof d.signals>();
+  for (const sg of d.signals) {
+    const a = sigIx.get(sg.entityId); if (a) a.push(sg); else sigIx.set(sg.entityId, [sg]);
+  }
+  const probIx = new Map<string, typeof d.problems>();
+  for (const p of d.problems) for (const e of new Set(p.entityIds ?? [])) {
+    const a = probIx.get(e); if (a) a.push(p); else probIx.set(e, [p]);
+  }
+  const sigFor = (ids: string[]) => {
+    const u = [...new Set(ids)];
+    const sigs = u.flatMap((id) => sigIx.get(id) ?? []);
+    const probs = new Set(u.flatMap((id) => probIx.get(id) ?? []));
+    return {
+      prob: d.problems.filter((p) => probs.has(p)),
+      anom: sigs.filter((sg) => sg.provider === "BASELINING"),
+      alert: sigs.filter((sg) => sg.provider === "METRIC_EVENTS" || sg.provider === "EVENTS_REST_API_INGEST"),
+    };
+  };
   for (const layer of layers) {
     for (const n of layer.items) {
       if (n.miss || !n.ids?.length) continue;
@@ -1238,7 +1257,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
      impact scan started with no name, read the window's raw events
      (150–300 GiB), then ran again on the session store once the name came */
   const impacted = useImpacted(appId, data.tf,
-    feResolved && (!!chainFe || !withinSessionLag(data.tf)), chainFe);
+    feResolved && (!!chainFe || !withinSessionLag(data.tf)), chainFe, !!fm);
   /* WHO WAS HURT, judged exactly as the Overview judges it: sessions an
      error AFFECTED (utils/dql USER_HIT), from the same per-session scan —
      memoised, so arriving from the Overview costs nothing. The session
@@ -1403,10 +1422,39 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     return m;
   }, [tiers]);
 
-  const problemsFor = (ids: string[]) =>
-    data.problems.filter((p) => problemIds(p).some((id) => ids.includes(id)));
-  const signalsFor = (ids: string[]) =>
-    data.signals.filter((sg) => ids.includes(sg.entityId));
+  /* INDEXED ONCE, NOT SCANNED PER CARD (0.17.46). Every card asked for its
+     problems and signals by filtering the whole lists — up to 20,000 Davis
+     signals — on every render, and the chain re-renders on each hover, pan
+     and zoom: on a large estate about a million comparisons per frame, and
+     the page froze coming back to this tab. The lists are indexed by entity
+     id when they change; a card's lookup is then the size of its own ids. */
+  const problemIndex = useMemo(() => {
+    const m = new Map<string, typeof data.problems>();
+    for (const p of data.problems) {
+      for (const id of new Set(problemIds(p))) {
+        const arr = m.get(id); if (arr) arr.push(p); else m.set(id, [p]);
+      }
+    }
+    return m;
+  }, [data.problems]);
+  const signalIndex = useMemo(() => {
+    const m = new Map<string, typeof data.signals>();
+    for (const sg of data.signals) {
+      const arr = m.get(sg.entityId); if (arr) arr.push(sg); else m.set(sg.entityId, [sg]);
+    }
+    return m;
+  }, [data.signals]);
+  const problemsFor = (ids: string[]) => {
+    if (ids.length === 1) return problemIndex.get(ids[0]) ?? [];
+    // a problem touching two of the ids is listed once, in the list's order
+    const hit = new Set<(typeof data.problems)[number]>();
+    for (const id of ids) for (const p of problemIndex.get(id) ?? []) hit.add(p);
+    return data.problems.filter((p) => hit.has(p));
+  };
+  const signalsFor = (ids: string[]) => {
+    if (ids.length === 1) return signalIndex.get(ids[0]) ?? [];
+    return [...new Set(ids)].flatMap((id) => signalIndex.get(id) ?? []);
+  };
 
   /* animated mesh between columns */
   useEffect(() => {

@@ -62,6 +62,12 @@ const memo = new Map<string, Impacted | null>();
  */
 export function useImpacted(
   rumAppId?: string, tf?: Timeframe, active = false, frontendName?: string,
+  /** The metric store answered for this application: the per-session event
+   *  scan is then never the fallback (0.17.46). An application filter does not
+   *  cut the bytes Grail reads, so that scan read the estate's hour — measured
+   *  25 GiB, cut at the ceiling — to count an application the store had
+   *  already said little or nothing about. */
+  storeOnly = false,
 ): Impacted | null {
   const gen = useMemoGen();
   /* THE KEY NAMES ONLY WHAT CHANGES THE QUERY. Inside the session store's
@@ -165,7 +171,7 @@ export function useImpacted(
           /* inside the lag an empty store is the true answer for the list
              (the caller shows the running sessions next to it); past the lag
              an empty store means nothing was written, and the events answer */
-          if ((!out || out.sessions === 0) && !withinSessionLag(tf!)) {
+          if ((!out || out.sessions === 0) && !withinSessionLag(tf!) && !storeOnly) {
             out = await ask(qImpacted(tf!, rumAppId!));
             if (out) out.base = "events";
           }
@@ -175,7 +181,8 @@ export function useImpacted(
         }
       } catch {
         // no scope or the query failed — the row and the steps are not offered
-        try { out = await ask(qImpacted(tf!, rumAppId!)); } catch { out = null; }
+        if (storeOnly) out = null;
+        else { try { out = await ask(qImpacted(tf!, rumAppId!)); } catch { out = null; } }
       }
       memo.set(key, out);
       if (live) setImp(out);

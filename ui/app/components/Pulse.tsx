@@ -180,7 +180,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const lag = withinSessionLag(data.tf);
   /* the session-store count, once the frontend name is known — the number
      the "Analyze user sessions" button opens */
-  const impactedScan = useImpacted(appId, data.tf, !!feName, feName || undefined);
+  const impactedScan = useImpacted(appId, data.tf, !!feName, feName || undefined, !!fm);
   /* THE METRIC STORE ANSWERS FIRST. Pre-aggregated counts for this frontend
      — errors, crashes, ANRs, requests, actions — in milliseconds and for no
      Grail bytes. They hold the card up while the event scans that decide
