@@ -3621,3 +3621,7 @@ div:has(> header):has(main) > div {
 
 /* 0.17.48 — what sets the opened place apart: same grid as the action table */
 .geo__why .geo__act-nm em { font-style: normal; color: var(--ink-3); margin-right: 6px; }
+
+/* 0.17.50 — the map rides along a long country list instead of leaving an
+   empty column beside it */
+.geo__wrap > .geo__map { position: sticky; top: 12px; align-self: start; }

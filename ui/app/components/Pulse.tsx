@@ -1595,9 +1595,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           return (
             <div className="geo__acts">
               <div className="geo__act geo__act--hd">
-                <span>{acts.ratio
+                <span title={assist.available
+                  ? "Click an action to investigate it in Dynatrace Assist: its frustrated and tolerating runs, the sessions, what they waited on, the cause and the fix."
+                  : undefined}>{acts.ratio
                   ? `user action · sample 1:${acts.ratio}, ${fmtN(Math.round(acts.reduce((a, x) => a + x.n, 0) / acts.ratio))} read`
-                  : "user action"}</span><span>{acts.ratio ? "runs ≈" : "runs"}</span><span>Apdex</span>
+                  : acts.byMinute ? "user action · the minutes they ran in" : "user action"}
+                  {assist.available ? " · click to investigate ↗" : ""}</span><span>{acts.ratio ? "runs ≈" : "runs"}</span><span>Apdex</span>
                 <span>p50</span><span>of the loss</span>
               </div>
               {acts.map((x) => {
@@ -2123,7 +2126,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             {g.source === "metric" && storeOf(g)
                               ? geoTagStore(storeOf(g)!)
                               : g.source === "metric"
-                              ? ((g.actions ?? 0) > 0 ? `${rate.toFixed(rate >= 10 ? 0 : 2)} err/act` : "—")
+                              ? "not rated"
                               : geoTag(asArm(g), base)}
                           </em>
                         );
@@ -2325,7 +2328,17 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 onClick={() => setRegionSel((c) => (c === r.id ? null : r.id))}>
                                 <span>{r.name}</span>
                                 <b className="num">{fmtN(r.sessions)}</b>
-                                <em className="num">{(rate * 100).toFixed(0)}%</em>
+                                {/* the state's Apdex when it has one, coloured; the
+                                    error share otherwise, named and neutral (0.17.50) */}
+                                {(() => {
+                                  const own = r.source === "store"
+                                    ? regionScore(r as { id?: string; name?: string })
+                                      ?? classicRegion((r as { name?: string }).name)?.apdex ?? null
+                                    : null;
+                                  return own !== null
+                                    ? <em className="num" style={{ color: TOK[scoreTone(own) ?? "good"] }}>{fmtApdex(own)}</em>
+                                    : <em className="num" style={{ color: "var(--ink-3)" }}>{(rate * 100).toFixed(0)}% w/ errors</em>;
+                                })()}
                               </button>
                             );
                           })}

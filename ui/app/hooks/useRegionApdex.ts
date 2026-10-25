@@ -8,7 +8,8 @@
 // a Grail sample, which leaves a share — and the Apdex is one — unbiased.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { runRefined, type Timeframe } from "../utils/dql";
+import { runDql, runRefined, type Timeframe } from "../utils/dql";
+import { frontendNodeOf } from "../utils/frontendMetrics";
 
 export interface RegionApdex { sat: number; tol: number; fru: number }
 export type RegionApdexMap = Map<string, RegionApdex> & { ratio?: number };
@@ -72,7 +73,9 @@ export interface RegionAction {
   name: string; n: number; sat: number; tol: number; fru: number;
   p50?: number; p90?: number;
 }
-export type RegionActions = RegionAction[] & { ratio?: number };
+export type RegionActions = RegionAction[] & { ratio?: number;
+  /** Read whole from the minutes the metric says the actions ran in. */
+  byMinute?: boolean };
 
 export const qRegionActions = (tf: Timeframe, rumAppId: string, iso: string,
   region: string, ratio = 1) => `
@@ -97,6 +100,49 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio:
 
 const actMemo = new Map<string, RegionActions>();
 
+/* THE MINUTES THE ACTIONS HAPPENED IN (0.17.50). A country with a handful
+   of rated actions — Japan, 5 in the hour, on a 4.5M-session application —
+   came back empty from a 1:10 or 1:100 sample, and its card showed an Apdex
+   with no action behind it. The metric store knows WHEN those actions ran
+   (dt.frontend.user_action.count by country, per minute), so those minutes —
+   and only those — are read whole, without sampling. A few minutes of the
+   window instead of a sample of all of it. */
+const MAX_TARGET_MIN = 6;
+async function countryActionsByMinute(tf: Timeframe, rumAppId: string, iso: string)
+  : Promise<Record<string, unknown>[]> {
+  const node = await frontendNodeOf(rumAppId);
+  if (!node) return [];
+  const rows = await runDql<{ v?: unknown[]; timeframe?: { start?: string }; interval?: unknown }>(
+    `timeseries v = sum(dt.frontend.user_action.count), from: ${tf.from}, to: ${tf.to}, interval: 1m,
+  filter: { dt.smartscape.frontend == toSmartscapeId("${q(node.id)}") and geo.country.iso_code == "${q(iso)}" }`, 1);
+  const bins = (rows[0]?.v ?? []).map((x) => Number(x) || 0);
+  const start = Date.parse(String(rows[0]?.timeframe?.start ?? ""));
+  if (!Number.isFinite(start) || !bins.some((x) => x > 0)) return [];
+  // the busiest minutes first, a few of them, then read each one whole
+  const mins = bins.map((v, i) => ({ v, i })).filter((x) => x.v > 0)
+    .sort((a, b) => b.v - a.v).slice(0, MAX_TARGET_MIN);
+  const parts = await Promise.all(mins.map(({ i }) => {
+    const from = new Date(start + i * 6e4).toISOString(), to = new Date(start + (i + 1) * 6e4).toISOString();
+    return runDql<Record<string, unknown>>(
+      qRegionActions({ ...tf, from: `"${from}"`, to: `"${to}"`, minutes: 1 }, rumAppId, iso, "", 1), 8)
+      .catch(() => [] as Record<string, unknown>[]);
+  }));
+  // merge per action: counts add; the percentiles of the busiest part stand
+  const by = new Map<string, Record<string, unknown>>();
+  for (const part of parts) for (const r of part) {
+    const k = String(r.act ?? "unnamed action");
+    const cur = by.get(k);
+    if (!cur) { by.set(k, { ...r }); continue; }
+    const big = Number(r.n) > Number(cur.n);
+    by.set(k, { ...cur, n: Number(cur.n) + Number(r.n), sat: Number(cur.sat) + Number(r.sat),
+      tol: Number(cur.tol) + Number(r.tol), fru: Number(cur.fru) + Number(r.fru),
+      p50: big ? r.p50 : cur.p50, p90: big ? r.p90 : cur.p90 });
+  }
+  return [...by.values()]
+    .sort((a, b) => (Number(b.fru) + Number(b.tol) / 2) - (Number(a.fru) + Number(a.tol) / 2))
+    .slice(0, 8);
+}
+
 /** The state's costliest actions — or, with region "", the whole opened
  *  country's (0.17.42); null while asked or when nothing is open. */
 export function useRegionActions(tf: Timeframe, rumAppId: string | null | undefined,
@@ -111,7 +157,16 @@ export function useRegionActions(tf: Timeframe, rumAppId: string | null | undefi
     setOut(null);
     let live = true;
     runRefined((r) => qRegionActions(tf, rumAppId!, iso!, region!, r), 8, ratio)
-      .then(({ rows, ratio }) => {
+      .then(async (got) => {
+        /* a sampled read of an opened COUNTRY that found nothing: read the
+           minutes its actions ran in, whole (see countryActionsByMinute) */
+        if (region === "" && got.ratio > 1 && got.rows.length === 0) {
+          const exact = await countryActionsByMinute(tf, rumAppId!, iso!).catch(() => []);
+          if (exact.length) return { rows: exact, ratio: 1, partialWindow: true };
+        }
+        return { ...got, partialWindow: false };
+      })
+      .then(({ rows, ratio, partialWindow }) => {
         const k = ratio;
         const res: RegionActions = rows.map((r) => ({
           name: String(r.act ?? "unnamed action"), n: (Number(r.n) || 0) * k,
@@ -120,6 +175,7 @@ export function useRegionActions(tf: Timeframe, rumAppId: string | null | undefi
           p90: r.p90 == null ? undefined : Number(r.p90),
         }));
         if (ratio > 1) res.ratio = ratio;
+        if (partialWindow) res.byMinute = true;
         actMemo.set(key, res);
         if (live) setOut(res);
       })

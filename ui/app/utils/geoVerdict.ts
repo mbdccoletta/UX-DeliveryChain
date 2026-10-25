@@ -233,14 +233,20 @@ export const geoJudgeMetric = (g: MetricPlace, base: number): GeoTone => {
   void r; void base;
   return scoreTone(placeScore(g)) ?? "good";
 };
+/* THE REASON NAMES WHAT JUDGED (0.17.50). "98 errors per user action" was
+   every error in the place — background requests included — over its few
+   rated actions: a number that judged nothing and read as absurd beside
+   "Apdex 0.99 · Healthy". The reason is the Apdex and what it rests on. */
 export const geoBecauseMetric = (g: MetricPlace, base: number): string => {
-  const r = placeRate(g);
+  void base;
   const sc = placeScore(g);
-  const score = sc === null ? "" : `Apdex ${(Math.floor(Math.min(sc, 0.99) * 100) / 100).toFixed(2)} — `;
-  if (r === null) return `${score}no user actions recorded here`;
-  const lift = base > 0 ? r / base : 0;
-  return `${score || "not rated — no Apdex here · "}${r.toFixed(r >= 10 ? 0 : 2)} errors per user action, `
-    + `${lift.toFixed(2)}× this application's rate (${g.actions} user actions)`;
+  const rated = Math.round((g.sat ?? 0) + (g.tol ?? 0) + (g.fru ?? 0));
+  if (sc === null) {
+    return (g.actions ?? 0) > 0 ? `not rated — ${g.actions} user actions here, none rated by Dynatrace`
+      : "not rated — no user actions recorded here";
+  }
+  return `Apdex ${(Math.floor(Math.min(sc, 0.99) * 100) / 100).toFixed(2)} — Dynatrace's rating of `
+    + `${rated} real user action${rated === 1 ? "" : "s"} here`;
 };
 
 

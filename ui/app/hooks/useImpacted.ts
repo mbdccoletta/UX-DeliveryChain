@@ -157,38 +157,26 @@ export function useImpacted(
            which the guard below would catch, but a small true number that
            would read as the application's traffic. The event scan is the
            base there, and the card is told which base it got. */
+        /* THE SESSION STORE IS THE ONLY BASE (0.17.50). The per-session
+           event scan (qImpacted) stood in when the store was empty, when the
+           application had no frontend name, or when the store failed — and
+           an application filter does not cut the bytes Grail reads, so each
+           of those read the estate's whole window: measured on production,
+           25 GiB at the ceiling, for an 18-session application. The status
+           is the Apdex and does not need this count; without the store the
+           count is simply not measured ("—"). */
         if (fe) {
           out = await ask(qImpactedSessions(tf!, fe));
           /* the store answered with no row: it holds no closed session for
-             this application yet — a measured zero, said as one, so nothing
-             waits for a count that is not coming (0.17.48) */
-          if (!out && storeOnly) {
+             this application yet — a measured zero, said as one */
+          if (!out) {
             out = { sessions: 0, hit: 0, realSessions: 0, hitReal: 0, hitRobot: 0, hitSynth: 0, places: [] };
           }
-          if (out) out.base = "sessions";
-          /* NOTHING SERIALIZED IS NOT NOTHING HAPPENED. The session store
-             trails live traffic by the aggregation service's 30-minute
-             inactivity timeout, so a short or very recent window can hold
-             real activity and no session records at all. Reading that as
-             "0 sessions" would blank the verdict, the ring and the error
-             share over an application that is plainly busy, so the event
-             scan answers instead — fewer promises about the hand-off, but a
-             page that still describes what is happening. */
-          /* inside the lag an empty store is the true answer for the list
-             (the caller shows the running sessions next to it); past the lag
-             an empty store means nothing was written, and the events answer */
-          if ((!out || out.sessions === 0) && !withinSessionLag(tf!) && !storeOnly) {
-            out = await ask(qImpacted(tf!, rumAppId!));
-            if (out) out.base = "events";
-          }
-        } else {
-          out = await ask(qImpacted(tf!, rumAppId!));
-          if (out) out.base = "events";
+          out.base = "sessions";
         }
       } catch {
-        // no scope or the query failed — the row and the steps are not offered
-        if (storeOnly) out = null;
-        else { try { out = await ask(qImpacted(tf!, rumAppId!)); } catch { out = null; } }
+        // the store failed: not measured, and never replaced by an estate scan
+        out = null;
       }
       memo.set(key, out);
       if (live) setImp(out);
