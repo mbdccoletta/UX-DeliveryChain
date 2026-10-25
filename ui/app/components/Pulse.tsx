@@ -1915,7 +1915,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     .forEach((g) => {
                       const [la, lo] = CENTROID[g.country];
                       const sz = sizeOf(g);
-                      if (!(sz >= 26 || judge(g) !== "good")) return;
+                      /* every country is named where its label fits (0.17.53):
+                         healthy small marks used to stay anonymous dots */
                       const txt = (sz === 44 ? nameOf(g.country) : g.country)
                         + ` ${fmtK(g.sessions)}`;
                       if (claim(mx(lo) - cx, my(la) - cy, txt, sz)) labelled.add(g.country);
@@ -1963,7 +1964,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                               setGeoSel((c) => (c === g.country ? null : g.country));
                               if (opening) revealDrill();
                             }}>
-                            {(sz >= 26 || tone !== "good") && (
+                            {(
                               <span data-w={g.sessions} className={`gpin__lbl${
                                 labelled.has(g.country) ? "" : " gpin__lbl--off"}`}>
                                 {sz === 44 ? nameOf(g.country) : g.country}
