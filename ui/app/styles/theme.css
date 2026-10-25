@@ -496,7 +496,7 @@ svg { shape-rendering: geometricPrecision; }
   color: var(--ink-2); }
 
 /* the outcome strip: four filled tiles */
-.rinfo__strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.rinfo__strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
 .rinfo__kpi { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px;
   border-radius: 12px; background: color-mix(in srgb, var(--ink-hi) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent); }
@@ -3578,3 +3578,7 @@ div:has(> header):has(main) > div {
   letter-spacing: 0.04em; }
 .geo__act > :not(:first-child) { text-align: right; }
 .geo__act-nm { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* an action row that hands its investigation to Dynatrace Assist (0.17.25) */
+.geo__act--go { cursor: pointer; border-radius: 4px; }
+.geo__act--go:hover, .geo__act--go:focus-visible { background: var(--panel-2); outline: none; }
+.geo__act--go:hover .geo__act-nm { color: var(--accent); }

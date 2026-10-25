@@ -1955,3 +1955,48 @@ function tfIso(e: string): string {
   const d = new Date(v);
   return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
 }
+
+/* ── ONE ACTION, INVESTIGATED BY ASSIST (0.17.25) ────────────────────────────
+   Marcelo, 2026-10-25: a precise drill-down on what hurts the Apdex — and
+   Users & Sessions cannot filter by action or experience. Dynatrace Assist
+   can: it is handed the action, the place and the exact filters, and queries
+   the frustrated and tolerating executions itself. The prompt names what to
+   find (the sessions, what each waited on, the errors, the device and app
+   version) and what to come back with (cause, owner, fix). */
+export function askAssistAboutAction(a: {
+  appName: string; rumAppId: string; frontendName?: string; window: string;
+  windowFrom: string; windowTo: string;
+  country: string; countryName: string; region: string; regionName: string;
+  action: string; runs: number; ratio?: number;
+  apdex: number | null; p50?: number; p90?: number;
+  facts: string;
+}): void {
+  const q = (s: string) => s.replace(/["\\]/g, "");
+  const sec = (ns?: number) => (ns ? `${(ns / 1e9).toFixed(1)} s` : "unknown");
+  const prompt = `Investigate why the user action "${a.action}" in ${a.regionName}, ${a.countryName} `
+    + `pulls the Apdex of ${a.appName} down (${a.window}). It ran about ${a.runs.toLocaleString("en-US")} times`
+    + (a.ratio ? ` (estimated from a 1-in-${a.ratio} sample)` : "")
+    + `, Apdex ${a.apdex === null ? "unknown" : a.apdex.toFixed(2)}, p50 ${sec(a.p50)}, p90 ${sec(a.p90)}. `
+    + "Find its frustrated and tolerating executions by real users there, list the affected sessions "
+    + "(session ids), and determine what made them slow or frustrated: the requests they waited on, "
+    + "errors raised during them, device, OS, app version and network. Say whether the same action "
+    + "behaves the same in other states. Finish with the cause, who owns it and the fix.";
+  const filter = `fetch user.events, from: ${a.windowFrom}, to: ${a.windowTo}\n`
+    + `| filter dt.rum.application.id == "${q(a.rumAppId)}"\n`
+    + `    and characteristics.classifier == "user_action"\n`
+    + `    and dt.rum.user_type == "real_user"\n`
+    + `    and geo.country.iso_code == "${q(a.country)}" and geo.region.iso_code == "${q(a.region)}"\n`
+    + `    and coalesce(user_action.name, view.name, view.detected_name, page.name, "unnamed action") == "${q(a.action)}"\n`
+    + `    and in(experience.level, {"frustrated", "tolerating"})`;
+  sendIntent({
+    prompt, execute: false,
+    contexts: [
+      { type: "supplementary", value: (`The exact filter for these executions (DQL):\n${filter}\n\n`
+        + `Frontend name: ${a.frontendName ?? "unknown"}\n\nWhat the UX Delivery Chain app shows:\n${a.facts}`).slice(0, 100_000) },
+      { type: "instruction", value: "Query only the window and the filter given; keep reads small (add "
+        + "a limit, sample if the application is large). Every number you cite must come from the "
+        + "data. Name the specific sessions, requests, errors and devices. Lead with the cause and the "
+        + "action to take, and who owns it." },
+    ],
+  } as never, { recommendedAppId: "dynatrace.davis.copilot", recommendedIntentId: "ask-question" });
+}

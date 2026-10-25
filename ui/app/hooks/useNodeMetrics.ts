@@ -7,7 +7,7 @@
 // is orders cheaper than re-scanning spans for 24 hours.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { svcIs, qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql,
+import { svcIs, qAppMetrics, qDomMetrics, qServiceVitals, qSvcMetrics, qSvcMetricsFallback, runDql,
   type Timeframe } from "../utils/dql";
 import { forecast, type Forecast } from "../utils/forecast";
 import { frontendNodeOf, qFmScalar } from "../utils/frontendMetrics";
@@ -100,7 +100,23 @@ export function useNodeMetrics(
          production. A domain has no metric dimension and keeps the events,
          sampled inside the click budget. */
       const viaMetric = target.kind === "app"
-        ? await appRequestMetrics(target.id, tf).catch(() => null) : null;
+        ? await appRequestMetrics(target.id, tf).catch(() => null)
+        /* A SERVICE FROM ITS METRICS FIRST (0.17.28): dt.service.request.* give
+           the same percentiles, volume and failures for ≈0 GiB; the span read
+           — the whole window of spans filtered to one service, unbounded on a
+           large estate — is now only the fallback for a service the metric
+           store does not know. */
+        : target.kind === "service"
+        ? await runDql<Record<string, unknown>>(qServiceVitals(tf, [target.id]), 1)
+            .then((rows) => {
+              const r = rows[0];
+              return r && Number(r.calls) > 0
+                ? { ready: true, p50: Number(r.p50) || 0, p90: Number(r.p90) || 0,
+                    p95: Number(r.p95) || 0, thr: Number(r.calls) || 0,
+                    fails: Number(r.fails) || 0 } as NodeMetrics
+                : null;
+            }).catch(() => null)
+        : null;
       if (viaMetric) out = viaMetric;
       else {
         const k2 = target.kind === "domain" ? ratio : 1;

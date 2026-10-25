@@ -30,7 +30,7 @@ import { useFrontendNames } from "../hooks/useFrontendNames";
 import { SESSION_CHIP, chips, intentsAvailable, open as openIntent,
   sessionsLink } from "../utils/links";
 import { Intelligence } from "./Intelligence";
-import { BOARD_STARTERS } from "../utils/starters";
+import { PAGE_ABOUT, BOARD_STARTERS } from "../utils/starters";
 
 type Dir = "good" | "bad" | "flat";
 /** the shared share formatter (utils/dql) — three copies had drifted */
@@ -1036,7 +1036,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
         </div>
       )}
 
-      <Intelligence subject="the Business Control board" className="bc__intel"
+      <Intelligence subject="the Business Control board" about={PAGE_ABOUT.board} className="bc__intel"
         scope={`${scopeApp}|${data.tf.from}|${data.tf.to}`}
         starters={BOARD_STARTERS} facts={boardFacts} />
 

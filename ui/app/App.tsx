@@ -244,7 +244,11 @@ export function App() {
   /* and only while Journeys is the page — the one consumer of this map
      (FlowSankey); every other page was paying a full scan for a prop it
      never received. Warmed with the journeys, on the tab's hover. */
-  const uxMap = useUxOverview(tf, state.app, false, tab === "flow");
+  /* NOT READ ANY MORE (0.17.28): this per-session scan of the whole window
+     existed to count "window fragments" for the Journeys denominator — an
+     unbounded read (≈145 GiB on a bank's hour) for a correction the "without
+     a screen" figure now carries, sliced and measured, one click away. */
+  const uxMap = useUxOverview(tf, state.app, false, false);
   /* Users & Sessions filters by frontend.name, not the inventory name —
    * see useFrontendNames for the measured mismatch. */
   const feNames = useFrontendNames(tf.minutes);

@@ -40,7 +40,8 @@ const SUPP_MAX = 100_000;
 const INSTR_MAX = 2_500;
 
 const GROUND =
-  "Answer only from the measured facts supplied with this question. Every "
+  "Answer only about this application and only from the page description and "
+  + "the measured facts supplied with this question — no generic advice. Every "
   + "number you cite must appear there — never invent one, never estimate, and "
   + "say plainly when something was not measured rather than filling the gap. "
   + "Name the specific actions, screens, routes, states, countries or services "
@@ -50,12 +51,19 @@ const GROUND =
   + "may be a measurement artefact and say so before recommending work on "
   + "it. When a figure comes from a sample, keep its shares and say counts "
   + "are estimates. Lead with what the reader should act on, name who owns "
-  + "it, and give the number on the page that proves it was done. Keep it to "
-  + "a few short bullets.";
+  + "it, and give the number on the page that proves it was done. When asked "
+  + "to prevent, recommend only Dynatrace capabilities (SLOs, Davis anomaly "
+  + "detectors, alerting workflows, Site Reliability Guardian, synthetic "
+  + "monitors, RUM agent configuration) tied to a metric or field the facts "
+  + "name, with a starting threshold derived from those facts. Structure the "
+  + "answer with short headings that match the question. Keep it concise.";
 
-export function Intelligence({ subject, starters, facts, scope, className }: {
+export function Intelligence({ subject, about, starters, facts, scope, className }: {
   /** What this page IS, in the reader's words — it goes into every prompt. */
   subject: string;
+  /** The page explained — sources, rules, samples (utils/starters PAGE_ABOUT).
+   *  Sent first, so "what am I looking at" is answered from the page itself. */
+  about?: string;
   /** The questions this page can answer, most useful first. */
   starters: Starter[];
   /** The page's measured facts, built by the caller from what it renders. */
@@ -101,7 +109,7 @@ export function Intelligence({ subject, starters, facts, scope, className }: {
    * query, so it always goes. */
   const contexts = () => [
     { type: "supplementary" as const,
-      value: (`What is on screen in ${subject}${agentic
+      value: (`${about ? `${about}\n\n` : ""}What is on screen in ${subject}${agentic
         ? " — this is the app's own state, which you cannot query for yourself"
         : ""}:\n\n${facts()}`).slice(0, SUPP_MAX) },
     { type: "instruction" as const, value: GROUND.slice(0, INSTR_MAX) },

@@ -19,7 +19,7 @@ import { useAssist } from "../hooks/useAssist";
 import { type AppMap, useApps } from "../hooks/useApps";
 import { useAppScope, type AppScope } from "../hooks/useAppScope";
 import { Intelligence } from "./Intelligence";
-import { CHAIN_STARTERS } from "../utils/starters";
+import { PAGE_ABOUT, CHAIN_STARTERS } from "../utils/starters";
 import { useAppForecast } from "../hooks/useForecast";
 import { useImpacted, type Impacted } from "../hooks/useImpacted";
 import { useUxOverview, withCensus } from "../hooks/useUxOverview";
@@ -1723,7 +1723,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   const [routesOpen, setRoutesOpen] = useState(true);
   const [tpickAll, setTpickAll] = useState(false);
   /* the retired "-all" drawer's own data, fetched only if someone opens it */
-  const layerStats = useLayerStats(data.tf, sel !== null && sel.endsWith("-all"), appId);
+  const layerStats = useLayerStats(data.tf, sel !== null && sel.endsWith("-all"), appId,
+    fm?.sessions ?? data.apps.find((a) => a.appId === appId)?.sessions ?? 0);
   const layerJourneys = useJourneys(data.tf, sel !== null && sel.endsWith("-all"),
     null, appId);
   useEffect(() => { setDrawerAll(false); setLedgerOpen(false); setRoutesOpen(true);
@@ -1985,7 +1986,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
       {/* INTELLIGENCE — root-cause questions, asked of the chain on screen.
           chainFacts names every layer the app could NOT resolve, so an answer
           cannot quietly reason across a gap. */}
-      <Intelligence subject="the Delivery Chain of this application"
+      <Intelligence subject="the Delivery Chain of this application" about={PAGE_ABOUT.chain}
         scope={`${appId}|${data.tf.from}|${data.tf.to}`}
         starters={CHAIN_STARTERS} facts={chainFacts} />
 

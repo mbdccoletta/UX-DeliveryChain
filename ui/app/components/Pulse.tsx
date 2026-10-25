@@ -14,7 +14,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fmtK, fmtMs, fmtN, NO_SCREEN, withinSessionLag } from "../utils/dql";
 import * as Q from "../utils/dql";
-import { SESSION_CHIP, chips, open as openIntent, sessionsLink } from "../utils/links";
+import { SESSION_CHIP, askAssistAboutAction, chips, open as openIntent, sessionsLink } from "../utils/links";
 import { useFrontendNames } from "../hooks/useFrontendNames";
 import { geoCol, geoJudgeSub, geoBecauseSub, geoTag, geoTagSub, geoPop, GEO_ABS_WARN, GEO_WORD,
   geoArms, geoBecause, geoEnName, geoJudge, geoName, geoJudgeMetric, geoBecauseMetric, placeRate, placeScore,
@@ -29,7 +29,7 @@ import { useAppVitals } from "../hooks/useAppVitals";
 import { useGeo, type GeoRow } from "../hooks/useGeo";
 import { useRegions } from "../hooks/useGeoDetail";
 import { Intelligence } from "./Intelligence";
-import { OVERVIEW_STARTERS } from "../utils/starters";
+import { PAGE_ABOUT, OVERVIEW_STARTERS } from "../utils/starters";
 import { BubbleLayer, ChoroplethLayer, DotLayer, MapView,
   type MapViewRef } from "@dynatrace/strato-geo";
 import { CENTROID, REGION_CENTROID as BR_REGIONS,
@@ -52,6 +52,7 @@ import { useFrontendMetrics } from "../hooks/useFrontendMetrics";
 import { scanRatio } from "../utils/cost";
 import { useClassicApdex, useClassicGeo } from "../hooks/useClassicApdex";
 import { useRegionActions, useRegionApdex } from "../hooks/useRegionApdex";
+import { useAssistState } from "../hooks/useAssist";
 import { mergePlaces, type ClassicPlace } from "../utils/classicApdex";
 import { originOf } from "./DeliveryChain";
 import { XmarkIcon,
@@ -380,6 +381,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      budget (hooks/useRegionApdex). */
   const regionApdex = useRegionApdex(data.tf, appId, geoMetric ? geoSel : null,
     scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0), fmRated);
+  // whether Dynatrace Assist can take an action's investigation (0.17.25)
+  const assist = useAssistState();
   /* the opened state's costliest actions — read on the click (0.17.19) */
   const regionActs = useRegionActions(data.tf, appId, geoMetric ? geoSel : null,
     geoMetric && geoSel && regionSel?.startsWith(`${geoSel}-`) ? regionSel.slice(geoSel.length + 1) : null,
@@ -1187,7 +1190,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
       {/* INTELLIGENCE — this application's own questions. overviewFacts is
           built from what the page rendered, so an answer can only cite what
           the reader can also see. */}
-      <Intelligence subject="the Overview of this application"
+      <Intelligence subject="the Overview of this application" about={PAGE_ABOUT.overview}
         scope={`${appId}|${data.tf.from}|${data.tf.to}`}
         starters={OVERVIEW_STARTERS} facts={overviewFacts} />
       {shadow && <ShadowPanel shadow={shadow} />}
@@ -1314,7 +1317,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           : uxRow && apdexOf(uxRow) === null
           ? (uxRow.realSessions === 0 && uxRow.sessions > 0
             ? "No people to rate: every session this window is robot or synthetic traffic, "
-              + "and the experience score counts real users only."
+              + "and the Apdex counts real users only."
             : uxRow.actions === 0
               ? `No user actions recorded in this window — ${fmtN(uxRow.sessions)} sessions, `
                 + `and not one navigation or interaction among them. The platform rates user actions, `
@@ -1322,7 +1325,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                 + `about the speed: RUM is reporting requests and errors for this application `
                 + `and not what people do on the screen.`
               : `${fmtN(uxRow.actions)} user actions in this window and none of them rated. `
-                + `The experience score counts real users only, so actions belonging to robots or synthetic `
+                + `The Apdex counts real users only, so actions belonging to robots or synthetic `
                 + `monitors are excluded — if that is all of them, the score has nothing left `
                 + `to measure.`)
           : undefined}
@@ -2140,13 +2143,26 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                               return (
                                 <div className="geo__acts">
                                   <div className="geo__act geo__act--hd">
-                                    <span>user action</span><span>runs</span><span>Apdex</span>
+                                    <span>{regionActs.ratio
+                                      ? `user action · sample 1:${regionActs.ratio}, ${fmtN(Math.round(regionActs.reduce((a, x) => a + x.n, 0) / regionActs.ratio))} read`
+                                      : "user action"}</span><span>{regionActs.ratio ? "runs ≈" : "runs"}</span><span>Apdex</span>
                                     <span>p50</span><span>of the loss</span>
                                   </div>
                                   {regionActs.map((x) => {
                                     const ap = apdexOf({ satisfied: x.sat, tolerating: x.tol, frustrated: x.fru });
                                     return (
-                                      <div className="geo__act" key={x.name} title={`${x.name} — `
+                                      <div className={`geo__act${assist.available ? " geo__act--go" : ""}`} key={x.name}
+                                        role={assist.available ? "button" : undefined}
+                                        tabIndex={assist.available ? 0 : undefined}
+                                        onClick={assist.available && feName ? () => askAssistAboutAction({
+                                          appName: app.name, rumAppId: appId, frontendName: feName,
+                                          window: data.tf.label, windowFrom: data.tf.from, windowTo: data.tf.to,
+                                          country: geoSel!, countryName: enName(geoSel!),
+                                          region: (regionSel ?? "").slice(geoSel!.length + 1), regionName: r.name,
+                                          action: x.name, runs: x.n, ratio: regionActs.ratio,
+                                          apdex: ap, p50: x.p50, p90: x.p90, facts: `${PAGE_ABOUT.overview}\n\n${overviewFacts()}`,
+                                        }) : undefined}
+                                        title={(assist.available ? "Investigate in Dynatrace Assist — " : "") + `${x.name} — `
                                         + `${fmtN(Math.round(x.sat))} satisfied, ${fmtN(Math.round(x.tol))} tolerating, `
                                         + `${fmtN(Math.round(x.fru))} frustrated`
                                         + (x.p90 ? ` · p90 ${fmtMs(x.p90)}` : "")
@@ -2162,11 +2178,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 </div>
                               );
                             })()}
-                            {feName && (
-                              <button type="button" className="geo__drill-go" onClick={() => openRegion(r)}>
-                                its sessions in Users &amp; Sessions →
-                              </button>
-                            )}
+
                           </div>
                         );
                       })()}
@@ -2372,16 +2384,24 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                        * carry the screen, the LABEL must not promise it — a
                        * reader sent to "Product detail sessions" landed on an
                        * ANR session and rightly asked where the screen went. */
+                      /* ONE DOOR, THE ONE ON SCREEN (0.17.24). With a state
+                         open this opened the whole country — the reader
+                         picked Piauí, clicked, and met every state of
+                         Brazil. It now opens what is selected. */
+                      const st = regionSel ? regions?.find((x) => x.id === regionSel) : null;
                       const chip = chips(
                         SESSION_CHIP.location(enName(geoSel)),
+                        st ? SESSION_CHIP.region(st.name) : null,
                         SESSION_CHIP.realUsers(),
                         chasing ? SESSION_CHIP.withErrors() : null,
                       );
-                      const n = geo.find((g) => g.country === geoSel)?.sessions ?? 0;
+                      const n = st ? st.sessions : geo.find((g) => g.country === geoSel)?.sessions ?? 0;
+                      const what = st ? st.name : geoSel;
                       openIntent(sessionsLink(data.tf, feName, n, chip,
-                        chasing ? `${geoSel} sessions with errors` : `Analyze ${geoSel} sessions`));
+                        chasing ? `${what} sessions with errors` : `Analyze ${what} sessions`));
                     }}>
-                    analyze {geoSel} sessions{chasing ? " with errors" : ""} in Users &amp; Sessions →
+                    analyze {regionSel ? regions?.find((x) => x.id === regionSel)?.name ?? geoSel : geoSel} sessions
+                    {chasing ? " with errors" : ""} in Users &amp; Sessions →
                   </button>
                   {/* The screen itself is filterable only in the ERROR
                     * INSPECTOR — its bar takes "View Name" and the inventory
@@ -2945,7 +2965,7 @@ function CleanCard(p: CardProps) {
           errPerMin={p.verdictLabel === "Measuring" ? 0 : Number(p.errorsPerMin)}
           errors={p.verdictLabel === "Measuring" ? 0 : p.errors} />
         <button className="tk-core__b" onClick={p.onOpen}
-          aria-label={`${p.name} — ${p.verdictLabel}: ${p.verdictReason}; experience score ${fmtApdex(p.apdex)}, open its delivery chain`}>
+          aria-label={`${p.name} — ${p.verdictLabel}: ${p.verdictReason}; Apdex ${fmtApdex(p.apdex)}, open its delivery chain`}>
           <i className="tk-core__ic">{p.isMobile ? <MobileIcon /> : <DesktopIcon />}</i>
           {/* The WORD leads — "Good" reads instantly where 0.92 needs a
               scale; the number moves to the caption for whoever audits it. */}

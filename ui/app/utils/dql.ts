@@ -1010,32 +1010,49 @@ data record(kind = "", bucket = "", n = 0, meas = 0, cacheMs = 0.0, dnsMs = 0.0,
  * robots. Two legs: the composition, and the pages those stray beacons name
  * (per-session collectDistinct expanded back out — verified on a live estate).
  */
+/* DYNATRACE'S OWN AGENT IS NOT THE APPLICATION'S TRAFFIC (0.17.27). The RUM
+   JavaScript agent's download is recorded as a request event — measured on
+   the lab: ruxitagentjs_*.js from the application's own host and
+   jstag/ruxitagent from js-cdn.dynatrace*, thousands in two hours. Counted,
+   it made a session that only loaded the agent read as "API traffic", and
+   it sat in the endpoint and domain lists as if the application called it.
+   The beacons the agent sends are not request events and need no rule. */
+export const DT_AGENT_REQUEST = `(contains(lower(coalesce(url.path, "")), "ruxitagent")
+    or contains(lower(coalesce(url.path, "")), "/jstag/")
+    or startsWith(lower(coalesce(url.domain, "")), "js-cdn.dynatrace"))`;
+
+/** What the sessions without a recorded view are made of — read on a click,
+ *  on the (sliced) window the caller sizes to the budget. One scan: the
+ *  screens their other events name ride in the same summary. */
 export const qNoTelemetry = (tf: Timeframe, rumAppId: string) => {
   const app = rumAppId.replace(/["\\]/g, "");
-  const base = `fetch user.events, from: ${tf.from}, to: ${tf.to}
-  | filter dt.rum.application.id == "${app}"
-  | summarize navs = countIf(characteristics.classifier == "navigation"
-        or characteristics.classifier == "view_summary"),
-      reqs = countIf(characteristics.classifier == "request"),
-      n = count(), pages = collectDistinct(page.url.path),
-      isReal = takeAny(dt.rum.user_type == "real_user"),
-      dur = max(toLong(duration)),
-    by: { sid = dt.rum.session.id }
-  | filter navs == 0`;
   return `
-data record(kind = "", bucket = "", sessions = 0, real = 0, robots = 0,
-  oneEvent = 0, reqOnly = 0, p50dur = 0)
-| filter false
-| append [ ${base}
-  | summarize sessions = count(), real = countIf(isReal), robots = countIf(not(isReal)),
-      oneEvent = countIf(n == 1), reqOnly = countIf(reqs > 0),
-      p50dur = percentile(dur, 50),
-    by: { kind = "mix", bucket = "" } ]
-| append [ ${base}
-  | expand pg = pages
-  | filter isNotNull(pg)
-  | summarize sessions = count(), by: { kind = "page", bucket = pg }
-  | sort sessions desc | limit 8 ]
+fetch user.events, from: ${tf.from}, to: ${tf.to}
+| filter dt.rum.application.id == "${app}"
+| fieldsAdd _agent = characteristics.classifier == "request" and ${DT_AGENT_REQUEST}
+| summarize navs = countIf(characteristics.classifier == "navigation"
+      or characteristics.classifier == "view_summary"),
+    reqs = countIf(characteristics.classifier == "request" and not(_agent)),
+    acts = countIf(characteristics.classifier == "user_action"
+      or characteristics.classifier == "user_interaction"),
+    n = countIf(not(_agent)),
+    screen = takeAny(coalesce(view.name, view.detected_name, page.url.path)),
+    isReal = takeAny(dt.rum.user_type == "real_user"),
+    dur = max(toLong(duration)),
+  by: { sid = dt.rum.session.id }
+| filter navs == 0
+/* one row for the mix, then the screens their other events name — the agent
+   knew where these people were, it recorded no view there */
+| fieldsAdd k = array(record(kind = "mix", bucket = ""),
+    record(kind = "page", bucket = screen))
+| expand k
+| filter k[kind] == "mix" or isNotNull(k[bucket])
+| summarize sessions = count(), real = countIf(isReal), robots = countIf(not(isReal)),
+    oneEvent = countIf(n <= 1), reqOnly = countIf(reqs > 0 and acts == 0),
+    withActs = countIf(acts > 0), named = countIf(isNotNull(screen)),
+    p50dur = percentile(dur, 50),
+  by: { kind = k[kind], bucket = k[bucket] }
+| sort kind asc, sessions desc
 | limit 20`;
 };
 
@@ -1582,8 +1599,9 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio:
  * the same scan; on gru they carry url.domain (99%), on bwm they do not —
  * those group under domain "" and the client reports them as unattributable
  * instead of pretending zero. */
-| filter (characteristics.classifier == "request" and isNotNull(url.domain))
-    or (characteristics.classifier == "error" and error.source == "fetch")
+| filter ((characteristics.classifier == "request" and isNotNull(url.domain))
+    or (characteristics.classifier == "error" and error.source == "fetch"))
+    and not(${DT_AGENT_REQUEST})
 | fieldsAdd _req = if(characteristics.classifier == "request", 1, else: 0)
 | summarize reqs = countIf(_req == 1),
     p50 = percentile(if(_req == 1, toLong(duration)), 50),
@@ -2577,6 +2595,7 @@ export const qDetailRequests = (tf: Timeframe, rumAppId: string, ratio = 1) => `
 fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}"
     and (characteristics.classifier == "request" or (${FAILED_CALL}))
+    and not(${DT_AGENT_REQUEST})
 /* THE ENDPOINT, NOT THE HOST. This grouped by url.domain, so the drill under
    "Web requests" listed the same handful of hostnames the Called services
    card lists — two cards saying the same thing, and neither of them saying
