@@ -567,14 +567,16 @@ fetch user.sessions, from: ${tf.from}, to: ${tf.to}
     concat("r|", coalesce(geo.country.iso_code, ""), "|", coalesce(geo.region.iso_code, ""),
       "|", coalesce(geo.region.name, "")))
 | expand _k
-| summarize sessions = countDistinct(dt.rum.session.id),
-    hit = countDistinct(if(${err}, dt.rum.session.id)),
-    realSessions = countDistinct(if(${real}, dt.rum.session.id)),
-    hitReal = countDistinct(if(${err} and ${real}, dt.rum.session.id)),
-    hitRobot = countDistinct(if(${err} and dt.rum.user_type == "robot",
-      dt.rum.session.id)),
-    hitSynth = countDistinct(if(${err} and dt.rum.user_type == "synthetic",
-      dt.rum.session.id)),
+/* COUNTED, NOT DISTINCT-COUNTED (0.17.23). A row of user.sessions IS one
+   session, so six countDistinct over the session id were six hash sets
+   estimating a number a plain count gives exactly — the slowest read left on
+   the page (5–7 s on a bank's production). Exact and cheaper. */
+| summarize sessions = count(),
+    hit = countIf(${err}),
+    realSessions = countIf(${real}),
+    hitReal = countIf(${err} and ${real}),
+    hitRobot = countIf(${err} and dt.rum.user_type == "robot"),
+    hitSynth = countIf(${err} and dt.rum.user_type == "synthetic"),
     exSid = takeFirst(dt.rum.session.id), exStart = takeFirst(start_time),
     exInst = takeFirst(dt.rum.instance.id),
     exErrs = takeFirst(coalesce(error.count, 0)),
@@ -1128,6 +1130,18 @@ const CRASH = `(characteristics.classifier == "error"
 const ACT_ERR = ACT_ERR_ANY;
 
 const esc = (x: string) => x.replace(/["\\]/g, "");
+
+/* A SERVICE IN EITHER MODEL (0.17.22). On a Gen3-only estate spans and the
+   dt.service.* metrics carry dt.smartscape.service and leave
+   dt.entity.service null — measured on the lab tenant: 102 of 102 spans,
+   every service metric series. Every read keyed on a service now matches
+   either id and reports whichever is present, so the service layer works on
+   an estate with or without the classic entity model. */
+export const SVC_ID = "coalesce(toString(dt.entity.service), toString(dt.smartscape.service))";
+export const svcIs = (id: string) => {
+  const v = id.replace(/["\\]/g, "");
+  return `(dt.entity.service == "${v}" or dt.smartscape.service == toSmartscapeId("${v}"))`;
+};
 /** The DQL contains-any over a lowercased view-name variable (fallback). */
 export const OUTCOME_SUFFIX = "/book";
 const outcomeDql = (v: string) =>
@@ -2210,7 +2224,7 @@ fetch spans, from: now()-2h
 | summarize spans = count(),
     otel = countIf(telemetry.sdk.name == "opentelemetry"),
     sessionSpans = countIf(isNotNull(session.id)),
-    services = countDistinct(dt.entity.service)`;
+    services = countDistinct(${SVC_ID})`;
 
 /**
  * @param since how far back to look. Ten minutes answers a busy application
@@ -2237,8 +2251,8 @@ fetch spans, from: ${since}
 | fieldsAdd tid = toString(trace.id)
 | filter in(tid, { ${traceIds.slice(0, 300)
     .map((i) => `"${String(i).replace(/["\\]/g, "")}"`).join(", ")} })
-| filter isNotNull(dt.entity.service)
-| summarize traces = countDistinctExact(trace.id), by: { svc = dt.entity.service }
+| filter isNotNull(dt.entity.service) or isNotNull(dt.smartscape.service)
+| summarize traces = countDistinctExact(trace.id), by: { svc = ${SVC_ID} }
 // The name rides along from Smartscape (free): leaf services — the ones that
 // only RECEIVE calls — appear in no call edge, so resolving their names from
 // the calls table was silently dropping them from the chain.
@@ -2319,7 +2333,7 @@ smartscapeEdges "runs_on"
  */
 export const qSvcMetrics = (id: string, tf: Timeframe) => `
 fetch spans, from: ${tf.from}, to: ${tf.to}
-| filter dt.entity.service == "${id.replace(/["\\]/g, "")}"
+| filter ${svcIs(id)}
 | summarize p50 = percentile(toLong(duration), 50), p90 = percentile(toLong(duration), 90),
     p95 = percentile(toLong(duration), 95), thr = count(),
     fails = countIf(request.is_failed == true)
@@ -2626,15 +2640,14 @@ timeseries p50 = percentile(dt.service.request.response_time, 50),
     calls = sum(dt.service.request.count),
     fails = sum(dt.service.request.failure_count),
   from: ${tf.from}, to: ${tf.to}, interval: ${durStr(tf.minutes)},
-  by: { dt.entity.service, dt.service.name },
-  filter: { ${ids.slice(0, 40)
-    .map((i) => `dt.entity.service == "${i.replace(/["\\]/g, "")}"`).join(" or ")} }
+  by: { dt.entity.service, dt.smartscape.service, dt.service.name },
+  filter: { ${ids.slice(0, 40).map(svcIs).join(" or ")} }
 | fieldsAdd p50 = arrayFirst(p50) * 1000, p90 = arrayFirst(p90) * 1000,
     p95 = arrayFirst(p95) * 1000,
     calls = arrayFirst(calls), fails = arrayFirst(fails)
 // the name is carried out of the SAME field the Services Explorer filters on,
 // so the drill-down cannot be filtering by a name that field does not hold
-| fields id = dt.entity.service, name = dt.service.name, p50, p90, p95, calls, fails
+| fields id = ${SVC_ID}, name = dt.service.name, p50, p90, p95, calls, fails
 | limit 40`;
 
 /**
@@ -2816,14 +2829,13 @@ export const DATA_STORE_SAMPLE = 10;
 export const qServiceDataStores = (serviceIds: string[]) => `
 fetch spans, from: now()-10m, to: now(), samplingRatio: ${DATA_STORE_SAMPLE}
 | filter isNotNull(db.system)
-| filter ${serviceIds.slice(0, 40)
-  .map((s) => `dt.entity.service == "${s.replace(/["\\]/g, "")}"`).join(" or ")}
+| filter ${serviceIds.slice(0, 40).map(svcIs).join(" or ")}
 | fieldsAdd store = coalesce(server.address, db.namespace, db.system)
 | summarize calls = count(),
     rated = countIf(isNotNull(span.status_code)),
     errors = countIf(span.status_code == "ERROR"),
     p50 = percentile(duration, 50), p90 = percentile(duration, 90),
-  by: { svc = dt.entity.service, store, sys = db.system, ns = db.namespace }
+  by: { svc = ${SVC_ID}, store, sys = db.system, ns = db.namespace }
 | sort calls desc
 | limit 40`;
 
@@ -2931,7 +2943,7 @@ timeseries { rt = avg(dt.service.request.response_time),
              ct = sum(dt.service.request.count),
              fl = sum(dt.service.request.failure_count) },
   from: ${tf.from}, to: ${tf.to},
-  filter: { dt.entity.service == "${id.replace(/["\\]/g, "")}" }
+  filter: { ${svcIs(id)} }
 | fieldsAdd avgNs = arrayAvg(rt) * 1000, calls = arraySum(ct), fails = arraySum(fl)
 | fields avgNs, calls, fails
 | limit 1`;

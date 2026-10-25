@@ -8,7 +8,7 @@
 // measured at 0 scanned bytes.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { binFor, runDql, type Timeframe } from "../utils/dql";
+import { svcIs, binFor, runDql, type Timeframe } from "../utils/dql";
 import { forecast } from "../utils/forecast";
 
 export interface ServiceSeries {
@@ -45,7 +45,7 @@ export function useServiceSeries(
         // capped: the filter is an OR chain and a 200-service application would
         // build a query longer than the point of the chart
         const list = ids.slice(0, 40)
-          .map((i) => `dt.entity.service == "${i.replace(/["\\]/g, "")}"`).join(" or ");
+          .map(svcIs).join(" or ");
         // ONE expression, measured and projected — a second one written for
         // the forecast could drift from the bars it is drawn beside
         const expr = `timeseries calls = sum(dt.service.request.count),

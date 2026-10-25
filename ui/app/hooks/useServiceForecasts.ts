@@ -1,3 +1,4 @@
+import { svcIs } from "../utils/dql";
 // Where each backend service is heading, one analyzer run per service.
 //
 // The projection rides the metric store, not Grail: `dt.service.request.count`
@@ -34,7 +35,7 @@ const memo = new Map<string, { thr: Forecast | null; fails: Forecast | null }>()
 
 const expr = (metric: string, id: string) =>
   `timeseries v = sum(${metric}),
-     filter: { dt.entity.service == "${id.replace(/"/g, "")}" },
+     filter: { ${svcIs(id)} },
      from: now()-24h, interval: 1h`;
 
 /**

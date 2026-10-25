@@ -7,7 +7,7 @@
 // is orders cheaper than re-scanning spans for 24 hours.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql,
+import { svcIs, qAppMetrics, qDomMetrics, qSvcMetrics, qSvcMetricsFallback, runDql,
   type Timeframe } from "../utils/dql";
 import { forecast, type Forecast } from "../utils/forecast";
 import { frontendNodeOf, qFmScalar } from "../utils/frontendMetrics";
@@ -139,7 +139,7 @@ export function useNodeMetrics(
       if (out.ready && target.kind === "service") {
         const fc = await forecast(
           `timeseries thr = sum(dt.service.request.count),
-             filter: { dt.entity.service == "${target.id.replace(/"/g, "")}" },
+             filter: { ${svcIs(target.id)} },
              from: now()-24h, interval: 1h`, 12);
         const cur = memo.get(k);
         if (cur) { cur.fc = fc; memo.set(k, cur); }
