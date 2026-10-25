@@ -279,8 +279,19 @@ export function App() {
      So a resolved application counts the moment the census names one, loaded
      or not. While there are no rows at all, the url's own choice stands, so
      the selection does not flicker away and back. */
-  const current = appId && d.apps.some((a) => a.appId === appId)
-    ? appId
+  /* A PICK IS VALID IF THE ESTATE HAS IT, NOT ONLY IF THE CENSUS ON SCREEN
+     DOES (0.17.30). The census is scoped to the application on screen — one
+     row, from the metric store — so the moment the reader picked another,
+     the old row was still the only one, the pick "did not exist", and this
+     fell back to apps[0]: the previous application, which the effect below
+     then wrote back into the url. The inventory (every FRONTEND node, the
+     list the picker itself shows) is what decides; the census only fills
+     the numbers in once it lands. */
+  const known = (id: string | null | undefined) => !!id
+    && (d.apps.some((a) => a.appId === id)
+      || d.inventory.some((a) => a.appId.toLowerCase() === id.toLowerCase()));
+  const current = known(appId)
+    ? appId!
     : d.apps[0]?.appId ?? (d.loading ? (appId ?? "") : "");
   /* THE AUTO-PICK HAS TO REACH THE SCANS.
    *
@@ -620,7 +631,16 @@ export function App() {
         <Boundary label="No RUM application"><NoRumState /></Boundary>
       ) : (
         <>
-          {tab === "home" && current && (
+          {/* A PICK IN FLIGHT IS SHOWN AS ONE (0.17.31). The census is scoped
+              to the application on screen, so a fresh pick has no row until
+              its own census lands — and the Overview drew nothing at all in
+              between, which read as broken. */}
+          {tab === "home" && current && !d.apps.some((a) => a.appId === current) && (
+            d.loading
+              ? <div className="loading"><i />measuring this application…</div>
+              : <div className="loading">no sessions for this application in {tf.label}</div>
+          )}
+          {tab === "home" && current && d.apps.some((a) => a.appId === current) && (
             <Boundary label="Overview">
               <Pulse data={d} appId={current}
                 onOpenChain={() => { setAppId(current); setTab("chain"); }}
