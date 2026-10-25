@@ -45,6 +45,10 @@ const SAMPLES = {
 const W = { from: "2026-10-23T04:08:00.000Z", to: "2026-10-23T05:08:00.000Z" };
 const EXTRA = Object.fromEntries(["total", "user type", "country", "bin"].map((b) =>
   [`qShadowSessionsMetric_${b.replace(" ", "_")}`, () => m.qShadowSessionsMetric(W, "Sample frontend", b)]));
+// the settled slice runSized reads when a window does not fit the budget
+const sliceTf = { from: "now()-3m-5m", to: "now()-3m", minutes: 5, label: "last 1h" };
+EXTRA.qBizCube_slice = () => m.qBizCube(sliceTf, {}, app);
+EXTRA.qBizPrev_slice = () => m.qBizPrev(sliceTf, {}, app);
 const GENERIC = [[tf, app], [tf, null, app], [tf], [], [app, tf], [tf, app, {}], [tf, {}, app], [60], [tf, [app]]];
 // a query may open with comment lines before its first command
 const looksDql = (s) => typeof s === "string"

@@ -22,6 +22,13 @@ cd "$root"
 live="$root/.dt-app/.tokens.json"
 store="$root/.dt-app/sso"
 mkdir -p "$store" && chmod 700 "$store"
+# --skip-build below deploys whatever is in dist/. A dist older than the code
+# shipped 0.17.35–0.17.37 as a stale bundle under new version numbers, so a
+# stale dist is refused: run `npx dt-app build` first.
+bundle="$root/dist/ui/main.js"
+if [ ! -s "$bundle" ] || [ -n "$(find "$root/ui/app" "$root/app.config.json" -newer "$bundle" -type f -print -quit)" ]; then
+  echo "dist is older than the code — run: npx dt-app build"; exit 1
+fi
 for t in "$@"; do
   if [ -s "$root/.dt-app/deploy-refuse.txt" ] && grep -qx "$t" "$root/.dt-app/deploy-refuse.txt"; then
     echo "== $t: refused (listed in .dt-app/deploy-refuse.txt)"; continue

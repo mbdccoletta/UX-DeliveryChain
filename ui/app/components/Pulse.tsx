@@ -1814,7 +1814,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           The country marks step aside the moment there are
                           states to show. If the drill comes back with none,
                           they stay: there is nothing to step aside for. */}
-                      {!(geoSel && regions && regions.length > 0)
+                      {/* …only for states the map can PLACE. States come
+                          back for every country, but only some countries'
+                          states have a coordinate here — Poland's Mazovia
+                          has none, and stepping aside for it left the zoomed
+                          map with no mark at all. */}
+                      {!(geoSel && regions && regions.some((r) => REGION_CENTROID[r.id]))
                         && located.map((g) => {
                         const [la, lo] = CENTROID[g.country];
                         const sz = sizeOf(g);

@@ -186,7 +186,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   const fc = useBizForecast(data.tf, scopeApp || null, outcomeDefs,
     !!kpis && !kpis.partial,
     scopeApp ? data.apps.find((a) => a.appId === scopeApp)?.sessions ?? 0
-      : data.apps.reduce((n, a) => n + a.sessions, 0));
+      : data.apps.reduce((n, a) => n + a.sessions, 0), kpis?.gibPerMin ?? 0);
   const breakdown = useBizBreakdown(data.tf, outcomeDefs, scopeApp || null);
   /* the segment ranking read a capped number of session rows: past the cap it
      is built from a subset, and a subset that looks like a total is the one
@@ -585,6 +585,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   /* While the figures are a preview, every card says so — the mark travels
      with the number it qualifies, the same way it does on the Overview and
      the Delivery Chain. */
+  const sliceMark = kpis?.sliceMin
+    ? <em className="dim" title={`To stay inside the app's scan budget, these figures were read from the last ${kpis.sliceMin} settled minutes of the window, compared with the ${kpis.sliceMin} minutes before them; counts are scaled to the whole window, rates are the sample's own.`}> · sample · last {kpis.sliceMin} min</em>
+    : null;
   const measuringMark = kpis?.partial
     ? <em className="dim" title="Preview figures — real, measured, still firming up as Grail finishes. The final replaces them."> · measuring</em>
     : kpis?.cachedAt
@@ -598,7 +601,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
      * where pricing a keyword guess was not. */
     if (isBrand && noPeople) return (
       <div className="bc__hero" style={{ ["--ht" as string]: "var(--ink-2)" }}>
-        <span className="bc__hero-l">customers at risk{measuringMark}</span>
+        <span className="bc__hero-l">customers at risk{sliceMark}{measuringMark}</span>
         <b className="bc__hero-v num" title={NO_PEOPLE}>•••</b>
         <span className="bc__hero-s">{NO_PEOPLE}</span>
       </div>
@@ -625,7 +628,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
         + (scoped ? " · whole application, not the picked routes" : "");
     return (
       <div className="bc__hero" style={{ ["--ht" as string]: TONE[t.dir] }}>
-        <span className="bc__hero-l">{label}</span>
+        <span className="bc__hero-l">{label}{isBrand ? sliceMark : null}</span>
         <b className="bc__hero-v num">{fmt(heroVal)}</b>
         <span className="bc__hero-t" style={{ color: TONE[t.dir] }}>
           {isBrand ? <>

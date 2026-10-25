@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { sliceFor, COHORT_BYTES_PER_SESSION, DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
   OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql, cohortPlan,
-  type OutcomeDefs, type Timeframe } from "../utils/dql";
+  type OutcomeDefs, type Timeframe, runSized, sampleRate, fmtK} from "../utils/dql";
 
 /** The poster's scans, shared and remembered: keyed by the query text itself
  *  (which already carries window, app and definitions), so a re-open costs
@@ -1299,9 +1299,11 @@ export function FlowSankey({
       /* a per-session read of the whole window: inside the budget it reads a
          settled slice of it, and every count is scaled back (0.17.27) */
       const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
-      const slice = sliceFor(tf, (appSessions * COHORT_BYTES_PER_SESSION) / 2 ** 30);
-      const k = slice ? 1 / slice.share : 1;
-      const rows = await runDql<Record<string, unknown>>(qNoTelemetry(slice ? slice.tf : tf, appId), 20);
+      // sized by a measured probe (runSized, 0.17.33)
+      const sized = await runSized(tf, [{ build: (t) => qNoTelemetry(t, appId), max: 20 }]);
+      const slice = sized.share < 1 ? { tf: sized.tf, share: sized.share } : null;
+      const k = 1 / sized.share;
+      const rows = sized.rows[0];
       const mix = rows.find((r) => r.kind === "mix");
       const x = (v: unknown) => Math.round((Number(v) || 0) * k);
       setNtel({
@@ -1331,10 +1333,6 @@ export function FlowSankey({
        * so the join below is exact inside the sample and every count is the
        * sample's scaled by 1/rate. On a small one the rate is 1: everything. */
       const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
-      /* read inside the budget: a settled slice of the window, then the hash
-         (cohortPlan, utils/dql) — `rate` is the fraction the counts stand for */
-      const plan = cohortPlan(tf, appSessions);
-      const rate = plan.rate;
       /* "NO NAVIGATION" IS A COHORT TOO. Its sessions have no mined path by
        * definition, so matching them through the path scan found nobody and
        * the poster said "0 of 197,171" for the biggest band on the diagram.
@@ -1342,12 +1340,17 @@ export function FlowSankey({
        * counts directly — the same test the mining applies. */
       const noNav = mode !== "unconverted"
         && picks.some((id) => id === "j-none" || id === "st-none");
-      const [rows, pr] = await Promise.all([
-        memoDql(qCohortSessions(plan.tf, appId, outcomeDefs, plan.hash), 10000),
-        mode === "unconverted" || noNav
-          ? Promise.resolve(null)
-          : memoDql(qPathSessions(plan.tf, appId, plan.hash), 10000),
+      /* read inside the budget, sized by a measured probe (runSized), then
+         the hash inside the read — `rate` is the fraction the counts stand for */
+      const wantPaths = !(mode === "unconverted" || noNav);
+      const sized = await runSized(tf, [
+        { build: (t, share) => qCohortSessions(t, appId, outcomeDefs, sampleRate(appSessions * share)), max: 10000 },
+        ...(wantPaths ? [{ build: (t: Timeframe, share: number) =>
+          qPathSessions(t, appId, sampleRate(appSessions * share)), max: 10000 }] : []),
       ]);
+      const rate = sized.share * sampleRate(appSessions * sized.share);
+      const rows = sized.rows[0];
+      const pr = wantPaths ? sized.rows[1] : null;
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
       // used, so the cohort is provably the ribbon's.
@@ -1991,32 +1994,32 @@ export function FlowSankey({
                 <>
                   <section className="rinfo__strip">
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.oneEvent)}</b>
+                      <b className="num" title={fmtN(d.oneEvent)}>{fmtK(d.oneEvent)}</b>
                       <span className="rinfo__kpi-l">one stray beacon</span>
                       <em>a real page, seen for ~{fmtMs(d.p50dur)}</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.reqOnly)}</b>
+                      <b className="num" title={fmtN(d.reqOnly)}>{fmtK(d.reqOnly)}</b>
                       <span className="rinfo__kpi-l">API traffic only</span>
                       <em>requests without any page</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.robots)}</b>
+                      <b className="num" title={fmtN(d.robots)}>{fmtK(d.robots)}</b>
                       <span className="rinfo__kpi-l">robots</span>
                       <em>declared non-human</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.real)}</b>
+                      <b className="num" title={fmtN(d.real)}>{fmtK(d.real)}</b>
                       <span className="rinfo__kpi-l">real people</span>
                       <em>of the {fmtN(d.sessions)}</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.named)}</b>
+                      <b className="num" title={fmtN(d.named)}>{fmtK(d.named)}</b>
                       <span className="rinfo__kpi-l">screen known</span>
                       <em>named on their other events</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.withActs)}</b>
+                      <b className="num" title={fmtN(d.withActs)}>{fmtK(d.withActs)}</b>
                       <span className="rinfo__kpi-l">people acting</span>
                       <em>with a user action or tap</em>
                     </div>

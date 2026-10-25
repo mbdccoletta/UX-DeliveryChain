@@ -12,10 +12,11 @@ import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
 import { useOrigins } from "./hooks/useOrigins";
 import { useDomains } from "./hooks/useDomains";
+import { useAppActivity } from "./hooks/useAppActivity";
 import { scanRatio } from "./utils/cost";
 import { rememberApp } from "./utils/prefs";
 import { useChainData } from "./hooks/useChainData";
-import { tfFrom } from "./utils/dql";
+import { fmtK, tfFrom } from "./utils/dql";
 import { hasTruncation, subscribeScan, scanTotals, scanByLabel,
   fmtBytes, fmtMoney } from "./utils/cost";
 /* THE FOUR PAGES ARRIVE WHEN THEY ARE OPENED.
@@ -256,9 +257,15 @@ export function App() {
    * Control) — four user.events scans Overview and the chain stopped paying */
   /* warmed the moment the pointer TOUCHES the Journeys/Business Control
    * tab — by the click, the four scans are usually already in flight */
+  /* AN APPLICATION WITH NO SESSIONS HAS NO JOURNEYS (0.17.36). A mobile
+     application can send RUM events with no session at all — the census
+     names it with 0 sessions — and the four mining scans still ran, to draw
+     an empty diagram reading "0 · 0 paths discovered". */
+  const appSessions = d.apps.find((a) => a.appId === state.app)?.sessions ?? 0;
+  const idleApp = !!state.app && !state.session && !d.loading && !(appSessions > 0);
   const jd = useJourneys(tf,
-    (warmJourneys || tab === "flow" || tab === "report") && !d.loading, state.session, state.app,
-    d.apps.find((a) => a.appId === state.app)?.sessions ?? 0);
+    (warmJourneys || tab === "flow" || tab === "report") && !d.loading && !idleApp,
+    state.session, state.app, appSessions);
   // the customer's own conversion definitions — taught on Journeys, read by
   // every screen that speaks of conversion
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
@@ -366,10 +373,22 @@ export function App() {
   const isDetected = (a: { name: string }) =>
     /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(a.name.trim())
     || /^[a-z0-9.-]+\.(com|br|net|io|org)(\.[a-z]{2})?$/i.test(a.name.trim());
+  /* A SMARTER PICKER (0.17.32, Marcelo: "separar app mobile de web; separar
+     aplicações que não têm dados das demais"). Sessions per application come
+     from the metric store for every frontend at once (useAppActivity, ≈0
+     GiB): applications with sessions lead, busiest first, each with its
+     count; the ones with none in the window sit together at the end. While
+     the counts are unknown the list keeps its old shape. */
+  const activity = useAppActivity(tf);
+  const sessOf = (a: { appId: string }) => activity?.get(a.appId.toLowerCase()) ?? 0;
+  const live = (a: { appId: string }) => !activity || sessOf(a) > 0;
+  const bySessions = (x: { appId: string; name: string }, y: { appId: string; name: string }) =>
+    sessOf(y) - sessOf(x) || x.name.localeCompare(y.name);
   const named = pick.filter((a) => !isDetected(a));
-  const detected = pick.filter(isDetected);
-  const mobileApps = named.filter(isMobile);
-  const webApps = named.filter((a) => !isMobile(a));
+  const detected = pick.filter((a) => isDetected(a) && live(a)).sort(bySessions);
+  const mobileApps = named.filter((a) => isMobile(a) && live(a)).sort(bySessions);
+  const webApps = named.filter((a) => !isMobile(a) && live(a)).sort(bySessions);
+  const idleApps = activity ? pick.filter((a) => !live(a)) : [];
 
   const view = TABS.find(([id]) => id === tab);
 
@@ -460,7 +479,10 @@ export function App() {
               {/* the estate line (apps · sessions · problems · env alerts)
                   was removed by request — the pages themselves carry their
                   numbers, and the bar keeps only the controls */}
-              {!d.loading && pick.length > 0 && (
+              {/* THE PICKER STAYS WHILE A PICK LOADS (0.17.32): it was hidden for
+                  the whole load, so choosing an application made the menu you
+                  had just used vanish until the numbers came back. */}
+              {pick.length > 0 && (
                 <Select
                   value={current}
                   onChange={(v) => { if (v) setAppId(v as string); }}>
@@ -493,32 +515,31 @@ export function App() {
                         session count. `entity` is the reliable signal: RUM and
                         the classic-model fallback both key a mobile app's
                         entity as MOBILE_APPLICATION-…, web apps never do. */}
-                    {webApps.length > 0 && (
+                    {([["Mobile", mobileApps], ["Web", webApps],
+                      ["Detected · unnamed", detected]] as const).map(([label, list]) => (
+                      list.length > 0 && (
+                        <Select.Group key={label}>
+                          <Select.GroupLabel>{label}</Select.GroupLabel>
+                          {list.map((a) => (
+                            <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
+                              <span className="app-picker__row">
+                                <span>{a.name}</span>
+                                {activity && <em className="app-picker__n">{fmtK(sessOf(a))}</em>}
+                              </span>
+                            </Select.Option>
+                          ))}
+                        </Select.Group>
+                      )
+                    ))}
+                    {idleApps.length > 0 && (
                       <Select.Group>
-                        <Select.GroupLabel>Web</Select.GroupLabel>
-                        {webApps.map((a) => (
+                        <Select.GroupLabel>{`No sessions · ${tf.label}`}</Select.GroupLabel>
+                        {idleApps.map((a) => (
                           <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
-                            {a.name}
-                          </Select.Option>
-                        ))}
-                      </Select.Group>
-                    )}
-                    {mobileApps.length > 0 && (
-                      <Select.Group>
-                        <Select.GroupLabel>Mobile</Select.GroupLabel>
-                        {mobileApps.map((a) => (
-                          <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
-                            {a.name}
-                          </Select.Option>
-                        ))}
-                      </Select.Group>
-                    )}
-                    {detected.length > 0 && (
-                      <Select.Group>
-                        <Select.GroupLabel>Detected · unnamed</Select.GroupLabel>
-                        {detected.map((a) => (
-                          <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
-                            {a.name}
+                            <span className="app-picker__row app-picker__row--idle">
+                              <span>{a.name}</span>
+                              <em className="app-picker__n">{isMobile(a) ? "mobile" : "web"}</em>
+                            </span>
                           </Select.Option>
                         ))}
                       </Select.Group>
@@ -665,7 +686,10 @@ export function App() {
             </Boundary>
           )}
 
-          {tab === "flow" && !jd && (
+          {(tab === "flow" || tab === "report") && idleApp && (
+            <div className="loading">no sessions for this application in {tf.label}</div>
+          )}
+          {tab === "flow" && !jd && !idleApp && (
             <div className="loading"><i />mining the journeys…</div>
           )}
           {tab === "flow" && jd && (
@@ -696,14 +720,14 @@ export function App() {
                 onHighlightClear={() => set({ hl: null }, false)} />
             </Boundary>
           )}
-          {tab === "report" && !jd && (
+          {tab === "report" && !jd && !idleApp && (
             <div className="loading"><i />mining the journeys…</div>
           )}
           {/* MOUNTED even while journeys mine — hidden. Gating the mount on
               jd serialised the board: 2.9s of journeys THEN 3.3s of its own
               KPI scans (measured, 6.2s total). Mounted hidden, both waves
               run in parallel and the board appears in the slower one. */}
-          {tab === "report" && (
+          {tab === "report" && !idleApp && (
             <div style={jd ? undefined : { display: "none" }}>
             <Boundary label="Report">
               <ReportView data={{ ...d, views: jd?.views ?? [], sequences: jd?.sequences ?? [],

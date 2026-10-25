@@ -12,7 +12,7 @@ import { stateClient } from "@dynatrace-sdk/client-state";
 
 /** Bump when the cached shape changes, so old entries are ignored, not misread. */
 // v2: device and domain rows gained appId — v1 entries would filter to nothing
-const VERSION = "17"; // v17: runtime rows never carry a null pod or node name (0.16.1)
+const VERSION = "18"; // v18: Business Control stores its cube in columns (0.17.40)
 
 /**
  * How long a window's data stays usable. A 7-day window barely moves minute to
@@ -66,7 +66,10 @@ export async function read<T>(tf: string): Promise<Cached<T> | null> {
 const CACHE_MAX_CHARS = 512 * 1024;
 
 /** Stores a payload. Failure is silent: a cache miss is never worth an error. */
-export async function write<T>(tf: string, value: T, minutes?: number): Promise<void> {
+export async function write<T>(tf: string, value: T, minutes?: number,
+  /** An explicit expiry ("now+10m") for a payload whose re-read is costly
+   *  enough that the reader agreed to see it older — the screen says how old. */
+  validUntil?: string): Promise<void> {
   try {
     const text = JSON.stringify({ version: VERSION, at: Date.now(), value });
     /* NOT A BYTE OVER WHAT THE STORE WILL TAKE. The platform allows 1 MiB of
@@ -80,7 +83,7 @@ export async function write<T>(tf: string, value: T, minutes?: number): Promise<
       key: keyFor(tf),
       body: {
         value: text,
-        validUntilTime: ttlFor(minutes),
+        validUntilTime: validUntil ?? ttlFor(minutes),
       },
     });
   } catch {

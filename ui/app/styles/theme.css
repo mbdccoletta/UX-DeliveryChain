@@ -3582,3 +3582,18 @@ div:has(> header):has(main) > div {
 .geo__act--go { cursor: pointer; border-radius: 4px; }
 .geo__act--go:hover, .geo__act--go:focus-visible { background: var(--panel-2); outline: none; }
 .geo__act--go:hover .geo__act-nm { color: var(--accent); }
+
+/* the picker's rows: name, and the window's sessions beside it (0.17.32) */
+.app-picker__row { display: flex; align-items: baseline; gap: 12px; width: 100%; }
+.app-picker__row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-picker__n { font: 600 11px var(--mono); font-style: normal; color: var(--ink-3); }
+.app-picker__row--idle > span { color: var(--ink-3); }
+
+/* the no-screen breakdown: numbers fit their card, nothing scrolls sideways
+   (0.17.34) — compact figures, the exact one in the tooltip */
+.ntel { overflow-x: hidden; }
+.ntel .rinfo__strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ntel .rinfo__kpi { min-width: 0; }
+.ntel .rinfo__kpi b { font-size: clamp(20px, 3.2vw, 30px); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.ntel .rinfo__bar-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -24,6 +24,10 @@ export interface BizKpis {
   partial?: boolean;
   /** When they were measured, if they came back from the cache. */
   cachedAt?: number;
+  /** Read from the window's last N settled minutes, scaled (see useBizCube). */
+  sliceMin?: number;
+  /** Measured cost of one minute of this scope's events. */
+  gibPerMin?: number;
 }
 
 const ZERO: BizPeriod = { sessions: 0, realSessions: 0, converted: 0, convertedReal: 0,
@@ -51,7 +55,8 @@ export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs,
       const prev = cube.prev.get(id);
       byApp.set(id, { cur: period(cur), prev: prev ? period(prev) : ZERO });
     }
-    return cube.partial ? { byApp, partial: true }
-      : cube.cachedAt ? { byApp, cachedAt: cube.cachedAt } : { byApp };
+    const sized = { sliceMin: cube.sliceMin, gibPerMin: cube.gibPerMin };
+    return cube.partial ? { byApp, partial: true, ...sized }
+      : cube.cachedAt ? { byApp, cachedAt: cube.cachedAt, ...sized } : { byApp, ...sized };
   }, [cube]);
 }

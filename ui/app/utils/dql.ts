@@ -2,7 +2,7 @@
 // before it became code.
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import { FC_HIST_CAP_MIN, histWindow } from "./forecast";
-import { isScanLimit, noteScan, noteScanStart, OPTIONAL_SCAN_BUDGET_GIB, pageBudgetMs } from "./cost";
+import { CLICK_SCAN_BUDGET_GIB, isScanLimit, noteScan, noteScanStart, OPTIONAL_SCAN_BUDGET_GIB, pageBudgetMs } from "./cost";
 
 /**
  * The window every query runs over.
@@ -137,6 +137,9 @@ export function binFor(minutes: number): string {
 const inFlightDql = new Map<string, {
   p: Promise<unknown[]>;
   subs: Array<(rows: unknown[]) => void>;
+  /* a joined caller is told what the scan cost too — runSized sizes a window
+     from it, and a joiner that heard "0 bytes" would read the window whole */
+  metas: Array<NonNullable<DqlOptions["onMeta"]>>;
 }>();
 
 export interface DqlOptions {
@@ -168,14 +171,17 @@ export function runDql<T = Record<string, unknown>>(
   const hit = inFlightDql.get(key);
   if (hit) {
     if (onPartial) hit.subs.push(onPartial as (rows: unknown[]) => void);
+    if (opts.onMeta) hit.metas.push(opts.onMeta);
     return hit.p as Promise<T[]>;
   }
   const subs: Array<(rows: unknown[]) => void> = [];
   if (onPartial) subs.push(onPartial as (rows: unknown[]) => void);
+  const metas: Array<NonNullable<DqlOptions["onMeta"]>> = opts.onMeta ? [opts.onMeta] : [];
   const p = runDqlOnce<T>(query, maxResultRecords, onTruncated, (rows) => {
     for (const f of subs) { try { f(rows as unknown[]); } catch { /* a draw must never break a fetch */ } }
-  }, opts).finally(() => { inFlightDql.delete(key); });
-  inFlightDql.set(key, { p: p as Promise<unknown[]>, subs });
+  }, { ...opts, onMeta: (m) => { for (const f of metas) { try { f(m); } catch { /* never break a fetch */ } } } })
+    .finally(() => { inFlightDql.delete(key); });
+  inFlightDql.set(key, { p: p as Promise<unknown[]>, subs, metas });
   return p;
 }
 
@@ -762,6 +768,79 @@ export function cohortPlan(tf: Timeframe, sessions: number):
   const hash = sampleRate(sessions * s.share);
   return { tf: s.tf, hash, rate: s.share * hash, sliceMin: s.tf.minutes };
 }
+/* THE SLICE IS MEASURED, NOT ESTIMATED (0.17.33). Sizing it from sessions
+   failed on production by an order of magnitude: a mobile application emits
+   far more events per session than a web one, the estimate said "fits" and
+   the cohort read 141–163 GiB per window, 28–34 s. So the reads run first on
+   a settled two-minute probe of the window; Grail reports what that cost
+   (scannedBytes), which gives the bytes per minute of exactly these queries
+   on exactly this application; the window is then read whole if it fits the
+   budget, or as many settled minutes as fit. When even the probe is all that
+   fits, its own answer is used. Worst case: the probe plus the budget. A
+   window with an absolute end has no "last minutes" and keeps the session
+   estimate (sliceFor). */
+export async function runSized(
+  tf: Timeframe,
+  queries: Array<{ build: (t: Timeframe, share: number) => string; max: number }>,
+  budgetGiB = OPTIONAL_SCAN_BUDGET_GIB,
+  /** Minutes the probe reads. Two by default; one where the probe itself is
+   *  a large share of the bill (Business Control, 0.17.40). */
+  probeMin = 2,
+): Promise<{ rows: Array<Record<string, unknown>[]>; tf: Timeframe; share: number;
+  /** What these reads cost per minute of window, measured (0 when unknown). */
+  gibPerMin: number }> {
+  const to = tf.to.trim();
+  const live = /^now\(?\)?$/i.test(to);
+  const relative = /^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to);
+  const runAll = async (t: Timeframe, share: number) => {
+    let bytes = 0;
+    const rows = await Promise.all(queries.map((q) => runDql<Record<string, unknown>>(
+      q.build(t, share), q.max, undefined, undefined,
+      { onMeta: (m) => { bytes += m.scannedBytes; } })));
+    return { rows, bytes };
+  };
+  const PROBE = Math.max(1, Math.round(probeMin));
+  const whole = async () => {
+    const r = await runAll(tf, 1);
+    return { ...r, tf, share: 1, gibPerMin: r.bytes / 2 ** 30 / Math.max(1, tf.minutes) };
+  };
+  if (!relative || !(tf.minutes > PROBE * 2)) return whole();
+  const end = live ? `now()-${EVENT_LAG_MIN}m` : to.replace(/^now(?!\()/i, "now()");
+  const at = (min: number): Timeframe => ({ ...tf, from: `${end}-${min}m`, to: end, minutes: min });
+  const probe = await runAll(at(PROBE), PROBE / tf.minutes);
+  const perMin = probe.bytes / 2 ** 30 / PROBE;
+  if (!(perMin > 0) || perMin * tf.minutes <= budgetGiB) return whole();
+  const mins = Math.floor(budgetGiB / perMin);
+  if (mins <= PROBE) return { rows: probe.rows, tf: at(PROBE), share: PROBE / tf.minutes, gibPerMin: perMin };
+  const t = at(Math.min(mins, tf.minutes));
+  return { ...(await runAll(t, t.minutes / tf.minutes)), tf: t, share: t.minutes / tf.minutes,
+    gibPerMin: perMin };
+}
+
+/* A SAMPLE SIZED BY WHAT THE READ ACTUALLY COSTS (0.17.41). Click-time
+   breakdowns pick their Grail sampling ratio from the application's sessions
+   × the bytes of ALL its events — but a read filtered on one event class
+   (user actions) scans a fraction of that, so on a 4.5M-session application
+   a state's Apdex came from a 1-in-100 sample, and a country of 422 sessions
+   kept almost no rated action per state: every state "not rated". The first
+   read reports what it scanned; times its ratio that is the whole read's
+   cost. When a smaller ratio still fits the click budget, the read is asked
+   once more at that ratio and its answer is used. Worst case: the first
+   sample plus the budget. */
+export async function runRefined(
+  build: (ratio: number) => string, max: number, ratio: number,
+  budgetGiB = CLICK_SCAN_BUDGET_GIB,
+): Promise<{ rows: Record<string, unknown>[]; ratio: number }> {
+  let bytes = 0;
+  const rows = await runDql<Record<string, unknown>>(build(ratio), max, undefined, undefined,
+    { onMeta: (m) => { bytes += m.scannedBytes; } });
+  if (ratio <= 1 || !(bytes > 0)) return { rows, ratio };
+  const fullGiB = (bytes / 2 ** 30) * ratio;
+  const best = [1, 10, 100, 1000, 10000].find((r) => fullGiB / r <= budgetGiB) ?? ratio;
+  if (best >= ratio) return { rows, ratio };
+  return { rows: await runDql<Record<string, unknown>>(build(best), max), ratio: best };
+}
+
 /** The Journeys tab's four mining scans together, per session of the window
  *  (measured on production: ≈58 GiB for a ~6M-session hour). */
 export const JOURNEY_BYTES_PER_SESSION = 12e3;

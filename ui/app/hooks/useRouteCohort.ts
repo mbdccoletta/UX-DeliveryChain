@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import {
-  cohortPlan, normalizeView, qCohortSessions, qPathSessions, runDql,
+  normalizeView, qCohortSessions, qPathSessions, runSized, sampleRate,
   type OutcomeDefs, type Timeframe,
 } from "../utils/dql";
 import { matchesRoutes, type RouteCtx } from "../components/FlowSankey";
@@ -38,18 +38,20 @@ const memo = new Map<string, RouteCohort>();
 /** One window's facts for the sessions whose journey matches the picks. */
 async function windowFacts(
   tf: Timeframe, appId: string, picks: string[], ctx: RouteCtx | null,
-  defs?: OutcomeDefs, rate = 1,
-  /** The session hash inside the read (cohortPlan); `rate` is the whole
-   *  fraction the counts stand for — the slice times the hash. */
-  hash = rate,
+  defs?: OutcomeDefs,
+  /** Sessions of the window — sizes the session hash inside the read. */
+  sessions = 0,
 ): Promise<{ facts: CohortFacts; sampled: boolean }> {
   /* ONE SAMPLE FOR BOTH SCANS (sampleRate, utils/dql): the same sessions in
-     the facts and the paths, so the join is exact inside the sample; every
-     count below is scaled by 1/rate before it reaches the board. */
-  const [rows, paths] = await Promise.all([
-    runDql<Record<string, unknown>>(qCohortSessions(tf, appId, defs, hash), 10000),
-    runDql<Record<string, unknown>>(qPathSessions(tf, appId, hash), 10000),
+     the facts and the paths, so the join is exact inside the sample. The read
+     is sized by a measured probe (runSized, 0.17.33); every count below is
+     scaled by 1/rate — the slice read times the hash inside it. */
+  const sized = await runSized(tf, [
+    { build: (t, share) => qCohortSessions(t, appId, defs, sampleRate(sessions * share)), max: 10000 },
+    { build: (t, share) => qPathSessions(t, appId, sampleRate(sessions * share)), max: 10000 },
   ]);
+  const [rows, paths] = sized.rows;
+  const rate = sized.share * sampleRate(sessions * sized.share);
   const inCohort = new Set<string>();
   for (const r of paths) {
     const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
@@ -115,11 +117,10 @@ export function useRouteCohort(
       try {
         const span = `${Math.max(1, Math.round(tf.minutes))}m`;
         const prevTf: Timeframe = { ...tf, from: `${tf.from}-${span}`, to: tf.from };
-        // each window read inside the budget: a settled slice of it (cohortPlan)
-        const pc = cohortPlan(tf, appSessions), pp = cohortPlan(prevTf, appSessions);
+        // each window read inside the budget, sized by a measured probe
         const [a, b] = await Promise.all([
-          windowFacts(pc.tf, appId, picks, ctx, defs, pc.rate, pc.hash),
-          windowFacts(pp.tf, appId, picks, ctx, defs, pp.rate, pp.hash),
+          windowFacts(tf, appId, picks, ctx, defs, appSessions),
+          windowFacts(prevTf, appId, picks, ctx, defs, appSessions),
         ]);
         const res: RouteCohort = { cur: a.facts, prev: b.facts, sampled: a.sampled || b.sampled };
         memo.set(key, res);

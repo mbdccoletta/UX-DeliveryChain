@@ -475,9 +475,16 @@ export function useChainData(
          page rendered an estate with no applications in it while the picker
          sat on a placeholder. When the scope finds nothing, the estate
          answers once, the way it did before any of this. */
+      /* …from the METRIC STORE (0.17.33). The estate answered with the
+         event census — every event of every application in the window,
+         ≈221 GiB on a bank's production — each time an idle application was
+         picked. The same list per frontend is free from dt.frontend.*; the
+         event census stays only for an environment that publishes none. */
       const rawApps = scopedApps.length || !appId
         ? scopedApps
-        : await safe<Record<string, unknown>>(
+        : session ? [] as Record<string, unknown>[]
+        : (await metricCensus(tf).catch(() => null))
+          ?? await safe<Record<string, unknown>>(
             "applications", Q.qApps(tf, session), bag, 200, cut);
 
       /* Names are keyed three ways. A web app's RUM id is the entity id's hex

@@ -9,8 +9,8 @@
 // Control costs nothing new.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { JOURNEY_BYTES_PER_SESSION, num, qFriction, qSequences, qTransitions, qViews, runDql,
-  sliceFor, type Timeframe } from "../utils/dql";
+import { num, qFriction, qSequences, qTransitions, qViews, runDql,
+  runSized, type Timeframe } from "../utils/dql";
 import { mergeJourneys, type FrictionRow, type SeqRow, type TransitionRow,
   type ViewRow } from "./useChainData";
 
@@ -33,8 +33,8 @@ export function useJourneys(
    *  scoped: these four were the most expensive page in the app once the
    *  Overview was dealt with. */
   appId?: string | null,
-  /** Sessions of the window, to size the read to the budget (0.17.16). */
-  sessions = 0,
+  /** Sessions of the window (no longer used to size the read: 0.17.33). */
+  _sessions = 0,
 ): JourneysData | null {
   const gen = useMemoGen();
   /* INSIDE THE BUDGET. The four mining scans read ≈58 GiB of a ~6M-session
@@ -43,10 +43,8 @@ export function useJourneys(
      whole inside it, so the mined paths are real paths — and every count is
      scaled to the window; shares, rankings and paths are the slice's. A
      one-session url reads the whole window: it is one session. */
-  const slice = session ? null : sliceFor(tf, (sessions * JOURNEY_BYTES_PER_SESSION) / 2 ** 30);
-  const rt = slice ? slice.tf : tf;
-  const k = slice ? 1 / slice.share : 1;
-  const key = active ? `${rt.from}|${rt.to}|${session ?? ""}|${appId ?? ""}|${gen}` : "";
+  /* …sized by a measured probe since 0.17.33 (runSized), not by sessions. */
+  const key = active ? `${tf.from}|${tf.to}|${session ?? ""}|${appId ?? ""}|${gen}` : "";
   const [out, setOut] = useState<JourneysData | null>(key ? memo.get(key) ?? null : null);
 
   useEffect(() => {
@@ -62,12 +60,22 @@ export function useJourneys(
     let live = true;
     (async () => {
       try {
-        const [views, sequences, transitions, friction] = await Promise.all([
-          runDql<Record<string, unknown>>(qViews(rt, session, appId), 200),
-          runDql<Record<string, unknown>>(qSequences(rt, session, appId), 1000),
-          runDql<Record<string, unknown>>(qTransitions(rt, session, appId), 200),
-          runDql<Record<string, unknown>>(qFriction(rt, session, appId), 30),
-        ]);
+        const sized = session
+          ? { rows: await Promise.all([
+                runDql<Record<string, unknown>>(qViews(tf, session, appId), 200),
+                runDql<Record<string, unknown>>(qSequences(tf, session, appId), 1000),
+                runDql<Record<string, unknown>>(qTransitions(tf, session, appId), 200),
+                runDql<Record<string, unknown>>(qFriction(tf, session, appId), 30),
+              ]), tf, share: 1 }
+          : await runSized(tf, [
+              { build: (t) => qViews(t, session, appId), max: 200 },
+              { build: (t) => qSequences(t, session, appId), max: 1000 },
+              { build: (t) => qTransitions(t, session, appId), max: 200 },
+              { build: (t) => qFriction(t, session, appId), max: 30 },
+            ]);
+        const [views, sequences, transitions, friction] = sized.rows;
+        const slice = sized.share < 1 ? { tf: sized.tf, share: sized.share } : null;
+        const k = 1 / sized.share;
         const res: JourneysData = {
           views: views.map((r) => ({
             appId: String(r.appId ?? ""), view: String(r.view ?? ""),

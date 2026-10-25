@@ -5,14 +5,13 @@
 // difficulty are all derived from these rows in memory, so the four sections
 // cannot disagree: they are sums over the same table.
 //
-// Previews paint, finals decide, only finals are memoised — the Overview's
-// rule, unchanged. Both legs run from the start; the cube's preview is what
-// lets the board draw within seconds on an estate where a full hour of RUM
-// takes twenty seconds to read.
+// Read inside the scan budget since 0.17.35 (runSized): whole when the
+// window fits, otherwise its last settled minutes against the same number of
+// minutes before them, scaled. Only finals are memoised and cached.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import * as cache from "../utils/cache";
-import { BIZ_CUBE_CAP, qBizCube, qBizPrev, runDql, type OutcomeDefs, type Timeframe } from "../utils/dql";
+import { BIZ_CUBE_CAP, qBizCube, qBizPrev, runSized, type OutcomeDefs, type Timeframe } from "../utils/dql";
 import type { ErrBucket } from "./useDifficulty";
 
 export interface CubeRow {
@@ -37,6 +36,11 @@ export interface BizCube {
   /** Set when these came back from the per-user cache rather than Grail —
    *  the board says how old they are instead of passing them off as live. */
   cachedAt?: number;
+  /** Set when the window was read from its last N settled minutes to stay
+   *  inside the scan budget; every count is scaled to the whole window. */
+  sliceMin?: number;
+  /** What one minute of this application's events costs to read, measured. */
+  gibPerMin?: number;
 }
 
 const n = (v: unknown) => Number(v) || 0;
@@ -70,7 +74,104 @@ export const sumRows = (rows: CubeRow[], appId = ""): CubeRow => {
   return z;
 };
 
+/** Rows read from a share of the window, scaled to the whole of it. Every
+ *  column is additive over sessions, so the ratios the board shows are the
+ *  slice's own and the totals are the slice's times the window it stands for. */
+const scaleRow = (r: CubeRow, f: number): CubeRow => {
+  if (f === 1) return r;
+  const o = { ...r, err: { ...r.err } };
+  for (const k of Object.keys(o) as Array<keyof CubeRow>) {
+    if (typeof o[k] === "number") (o as unknown as Record<string, number>)[k] = Math.round((o[k] as number) * f);
+  }
+  for (const b of Object.keys(o.err) as ErrBucket[]) o.err[b] = Math.round(o.err[b] * f);
+  return o;
+};
+
+/* THE CACHE HOLDS COLUMNS, NOT OBJECTS (0.17.40). One row per country ×
+   OS × browser × device × user type, each spelled out with ~40 key names,
+   passed the store's 512 KB allowance on a large application and was never
+   written — every reload read Grail again. The same rows as value arrays
+   under one header are a fraction of the size. */
+const ERR_KEYS = Object.keys(shapeRow({}).err) as ErrBucket[];
+const COLS = (Object.keys(shapeRow({})) as Array<keyof CubeRow>).filter((k) => k !== "err");
+type Packed = { c: string[]; r: unknown[][] };
+const pack = (rows: CubeRow[]): Packed => ({
+  c: [...COLS, ...ERR_KEYS.map((b) => `err.${b}`)],
+  // whole numbers: counts already are, and the ns sums lose nothing a reader sees
+  r: rows.map((x) => [...COLS.map((k) => (typeof x[k] === "number" ? Math.round(x[k] as number) : x[k])),
+    ...ERR_KEYS.map((b) => x.err[b])]),
+});
+const unpack = (p: Packed | undefined): CubeRow[] | null => {
+  if (!p || !Array.isArray(p.c) || !Array.isArray(p.r)) return null;
+  return p.r.map((vals) => {
+    const o = shapeRow({});
+    p.c.forEach((k, i) => {
+      if (k.startsWith("err.")) o.err[k.slice(4) as ErrBucket] = Number(vals[i]) || 0;
+      else (o as unknown as Record<string, unknown>)[k] = vals[i];
+    });
+    return o;
+  });
+};
+/** How long Business Control's reading stays usable after a reload. Marcelo,
+ *  2026-10-25: up to ten minutes old, the board saying "cached Nm ago", is
+ *  worth not paying ≈35 GiB per reload of a large application. */
+const BIZ_CACHE_TTL = "now+10m";
+
 const memo = new Map<string, BizCube>();
+const pending = new Map<string, Promise<BizCube>>();
+
+async function loadCube(tf: Timeframe, defs: OutcomeDefs | undefined,
+  appId: string | null | undefined, fromCache: boolean): Promise<BizCube> {
+  const prevMap = (rows: Record<string, unknown>[], f: number) => {
+    const m = new Map<string, CubeRow>();
+    for (const r of rows) { const row = scaleRow(shapeRow(r), f); if (row.appId) m.set(row.appId, row); }
+    return m;
+  };
+  /* THE SAME CACHE THE CHAIN USES, for the same reason: a reader validating
+     the page reloads it several times a minute. Refresh bypasses it (the
+     generation is part of every key), and only finals are ever written. */
+  const cacheKey = `biz|${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs ?? {})}`;
+  if (fromCache) {
+    const hit = await cache.read<{ cur: Packed; prev: Packed; sliceMin?: number;
+      gibPerMin?: number }>(cacheKey);
+    const cur = unpack(hit?.value?.cur);
+    if (hit && cur) {
+      const prevM = new Map<string, CubeRow>();
+      for (const r of unpack(hit.value.prev) ?? []) prevM.set(r.appId, r);
+      return { cur, prev: prevM, partial: false,
+        capped: cur.length >= BIZ_CUBE_CAP, cachedAt: hit.at,
+        sliceMin: hit.value.sliceMin, gibPerMin: hit.value.gibPerMin };
+    }
+  }
+  /* INSIDE THE BUDGET (0.17.35). Both legs read the full window and the
+     one before it: measured on a bank's production estate, ≈141 + 163 GiB
+     per open, 34 s. They now run through runSized — a settled two-minute
+     probe measures what a minute of THIS application costs, and the
+     window is read whole if it fits OPTIONAL_SCAN_BUDGET_GIB, or as its
+     last settled minutes against the same number of minutes before them,
+     scaled. Previews are given up for it: a sliced read lands in seconds. */
+  let res: BizCube;
+  try {
+    // a one-minute probe: at two it was ≈15 of the ≈35 GiB an open cost
+    const sized = await runSized(tf, [
+      { build: (t) => qBizCube(t, defs, appId), max: BIZ_CUBE_CAP },
+      { build: (t) => qBizPrev(t, defs, appId), max: 50 },
+    ], undefined, 1);
+    const f = sized.share > 0 ? 1 / sized.share : 1;
+    const cur = sized.rows[0].map((r) => scaleRow(shapeRow(r), f)).filter((r) => r.appId);
+    res = { cur, prev: prevMap(sized.rows[1], f), partial: false,
+      capped: sized.rows[0].length >= BIZ_CUBE_CAP,
+      sliceMin: sized.share < 1 ? sized.tf.minutes : undefined,
+      gibPerMin: sized.gibPerMin || undefined };
+  } catch {
+    return { cur: [], prev: new Map(), partial: false, capped: false };
+  }
+  if (res.cur.length) {
+    void cache.write(cacheKey, { cur: pack(res.cur), prev: pack([...(res.prev?.values() ?? [])]),
+      sliceMin: res.sliceMin, gibPerMin: res.gibPerMin }, tf.minutes, BIZ_CACHE_TTL);
+  }
+  return res;
+}
 
 export function useBizCube(tf: Timeframe, defs?: OutcomeDefs,
   appId?: string | null): BizCube | null {
@@ -83,78 +184,21 @@ export function useBizCube(tf: Timeframe, defs?: OutcomeDefs,
     if (hit) { setOut(hit); return; }
     setOut(null);
     let live = true;
-    let cur: CubeRow[] | null = null, prev: Map<string, CubeRow> | null = null;
-    let curFinal = false;
-    /* THE SAME CACHE THE CHAIN USES, for the same reason. Measured on a
-       bank's production estate: the two legs behind this board take 36–40 s
-       to finish, and a reader validating the page reloads it several times
-       a minute — every reload a fresh ~300 GB. The chain loader already
-       keeps its payload in the per-user state store for a window-sized TTL
-       and prints "cached Ns ago"; the cube does the same. Refresh bypasses
-       it (the generation is part of every key, and a bumped generation is
-       the reader saying "go to Grail"), and only the two FINALS together are
-       ever written — a preview is never served back as a measurement. */
-    const cacheKey = `biz|${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs ?? {})}`;
-    const fromCache = gen === 0;
-    const paint = () => {
-      if (!live || !cur) return;
-      setOut({ cur, prev, partial: true, capped: cur.length >= BIZ_CUBE_CAP });
-    };
-    const prevMap = (rows: Record<string, unknown>[]) => {
-      const m = new Map<string, CubeRow>();
-      for (const r of rows) { const row = shapeRow(r); if (row.appId) m.set(row.appId, row); }
-      return m;
-    };
-    (async () => {
-      if (fromCache) {
-        const hit = await cache.read<{ cur: CubeRow[]; prev: CubeRow[] }>(cacheKey);
-        if (!live) return;
-        if (hit && Array.isArray(hit.value?.cur)) {
-          const prevM = new Map<string, CubeRow>();
-          for (const r of hit.value.prev ?? []) prevM.set(r.appId, r);
-          const res: BizCube = { cur: hit.value.cur, prev: prevM, partial: false,
-            capped: hit.value.cur.length >= BIZ_CUBE_CAP, cachedAt: hit.at };
-          memo.set(key, res);
-          setOut(res);
-          return;
-        }
-      }
-      const curP = runDql<Record<string, unknown>>(qBizCube(tf, defs, appId), BIZ_CUBE_CAP,
-        undefined, (early) => {
-          if (!live || !early.length || curFinal) return;
-          cur = early.map(shapeRow).filter((r) => r.appId); paint();
-        });
-      /* THE PAST PREVIEWS TOO. Measured on a bank's production estate: the
-         cube's first rows land at ~6 s and its final at ~40 s; the previous
-         window's first rows at ~3 s and its final at ~36 s. Holding the
-         cards for the past's FINAL meant a blank board for half a minute
-         while both legs had real rows in hand. Both are the same
-         measurement, incomplete, and the board marks them "measuring…"
-         until both are whole — the delta is read as a preview of a delta,
-         which is what it is. Only the two finals together are memoised. */
-      let prevFinal = false;
-      const prevP = runDql<Record<string, unknown>>(qBizPrev(tf, defs, appId), 50,
-        undefined, (early) => {
-          if (!live || !early.length || prevFinal) return;
-          prev = prevMap(early); paint();
-        });
-      const paintState = () => {
-        if (!live || !cur) return;
-        setOut({ cur, prev, partial: !(curFinal && prevFinal),
-          capped: cur.length >= BIZ_CUBE_CAP });
-      };
-      try {
-        const rows = await curP;
-        cur = rows.map(shapeRow).filter((r) => r.appId); curFinal = true; paintState();
-      } catch { cur = []; curFinal = true; paintState(); }
-      try { prev = prevMap(await prevP); } catch { prev = new Map(); }
-      prevFinal = true; paintState();
-      if (live && cur) {
-        const res: BizCube = { cur, prev, partial: false, capped: cur.length >= BIZ_CUBE_CAP };
-        memo.set(key, res);
-        void cache.write(cacheKey, { cur, prev: [...(prev?.values() ?? [])] }, tf.minutes);
-      }
-    })();
+    /* ONE READ PER KEY, SHARED (0.17.39). Three panels ask for this cube —
+       KPIs, breakdown, difficulty — and runDql only shares a query while it
+       is still running: a panel that asked a moment later paid the probe and
+       the slice again. Measured on production: every Business Control
+       statement ran twice, ≈74 GiB for one open where one read is ≈35. The
+       load is now one promise per key, finished and memoised whether or not
+       the panel that started it is still on screen. */
+    let p = pending.get(key);
+    if (!p) {
+      p = loadCube(tf, defs, appId, gen === 0)
+        .then((res) => { memo.set(key, res); return res; })
+        .finally(() => { pending.delete(key); });
+      pending.set(key, p);
+    }
+    void p.then((res) => { if (live) setOut(res); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);

@@ -8,7 +8,7 @@
 // a Grail sample, which leaves a share — and the Apdex is one — unbiased.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { runDql, type Timeframe } from "../utils/dql";
+import { runRefined, type Timeframe } from "../utils/dql";
 
 export interface RegionApdex { sat: number; tol: number; fru: number }
 export type RegionApdexMap = Map<string, RegionApdex> & { ratio?: number };
@@ -43,8 +43,9 @@ export function useRegionApdex(tf: Timeframe, rumAppId: string | null | undefine
     if (hit) { setOut(hit); return; }
     setOut(null);
     let live = true;
-    runDql<Record<string, unknown>>(qRegionApdex(tf, rumAppId!, iso!, ratio), 200)
-      .then((rows) => {
+    // the ratio is refined by the read's measured cost (runRefined)
+    runRefined((r) => qRegionApdex(tf, rumAppId!, iso!, r), 200, ratio)
+      .then(({ rows, ratio }) => {
         const m: RegionApdexMap = new Map();
         for (const r of rows) {
           const v = { sat: Number(r.sat) || 0, tol: Number(r.tol) || 0, fru: Number(r.fru) || 0 };
@@ -108,8 +109,8 @@ export function useRegionActions(tf: Timeframe, rumAppId: string | null | undefi
     if (hit) { setOut(hit); return; }
     setOut(null);
     let live = true;
-    runDql<Record<string, unknown>>(qRegionActions(tf, rumAppId!, iso!, region!, ratio), 8)
-      .then((rows) => {
+    runRefined((r) => qRegionActions(tf, rumAppId!, iso!, region!, r), 8, ratio)
+      .then(({ rows, ratio }) => {
         const k = ratio;
         const res: RegionActions = rows.map((r) => ({
           name: String(r.act ?? "unnamed action"), n: (Number(r.n) || 0) * k,

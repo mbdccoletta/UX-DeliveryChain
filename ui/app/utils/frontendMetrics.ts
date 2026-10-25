@@ -98,7 +98,11 @@ export async function metricCensus(tf: Timeframe, rumAppId?: string | null): Pro
     read(qFmScalar(tf, SESS, fid, BY, REAL)),
     read(qFmScalar(tf, "sum(dt.frontend.error.count, scalar: true)", fid, `${BY}, error.type`)),
   ]);
-  if (!sess.length) return null;
+  /* A KNOWN FRONTEND WITH NO SESSIONS IS AN ANSWER (0.17.33): "none in this
+     window". Returning null sent the caller to the event census, and from
+     there — scoped census empty — to the estate-wide one: ≈221 GiB per pick
+     of an idle application, measured five times in six minutes. */
+  if (!sess.length) return node ? [] : null;
   const byNode = new Map(nodes.map((x) => [x.id, x]));
   const rows = new Map<string, Row>();
   for (const r of sess) {

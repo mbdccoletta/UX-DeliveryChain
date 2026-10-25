@@ -80,7 +80,11 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
   /** Sessions in the window, for the scan guardrail (0.17.17): the series is a
    *  per-session read of the whole history — 28 GiB for two hours measured on
    *  production — and a projection is never allowed to cost like a fact. */
-  sessions = 0): BizForecast | null {
+  sessions = 0,
+  /** Measured cost of one minute of the same events (Business Control's
+   *  probe). When known it replaces the per-session estimate, which on a
+   *  mobile application was an order of magnitude low. */
+  gibPerMin = 0): BizForecast | null {
   const gen = useMemoGen();
   const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs?.[appId ?? ""] ?? null)}|${gen}`;
   const [out, setOut] = useState<BizForecast | null>(memo.get(key) ?? null);
@@ -98,7 +102,8 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
        * the analyzer — measured as the heaviest in the app. Volume is what is
        * directly projectable, so volume is what is projected. */
       const { histMin } = bizSeriesShape(tf);
-      const est = (sessions * (histMin / Math.max(1, tf.minutes)) * COHORT_BYTES_PER_SESSION) / 2 ** 30;
+      const est = gibPerMin > 0 ? gibPerMin * histMin
+        : (sessions * (histMin / Math.max(1, tf.minutes)) * COHORT_BYTES_PER_SESSION) / 2 ** 30;
       const proj = est <= OPTIONAL_SCAN_BUDGET_GIB
         ? await forecastOne(tf, "sessions", appId, defs) : null;
       const res = { sessions: proj, conversions: null };
@@ -107,7 +112,7 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, ready, sessions > 0]);
+  }, [key, ready, sessions > 0, gibPerMin]);
 
   return out;
 }
