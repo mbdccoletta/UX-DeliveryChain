@@ -22,6 +22,8 @@ export interface BizKpis {
   /** True while these came from a PREVIEW: real, measured, not yet whole.
    *  The cards say so; the final replaces them; only the final is memoised. */
   partial?: boolean;
+  /** The read failed: the board says so instead of drawing zeroes. */
+  failed?: boolean;
   /** When they were measured, if they came back from the cache. */
   cachedAt?: number;
   /** Read from the window's last N settled minutes, scaled (see useBizCube). */
@@ -48,6 +50,7 @@ export function useBizKpis(tf: Timeframe, defs?: OutcomeDefs,
     /* both periods must be present for a comparison to mean anything — the
        board draws nothing until the previous window has landed whole */
     if (!cube || !cube.prev) return null;
+    if (cube.failed) return { byApp: new Map(), failed: true };
     const byApp = new Map<string, { cur: BizPeriod; prev: BizPeriod }>();
     const ids = new Set<string>([...cube.cur.map((r) => r.appId), ...cube.prev.keys()]);
     for (const id of ids) {

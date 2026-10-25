@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import {
-  normalizeView, qCohortSessions, qPathSessions, runSized, sampleRate,
+  normalizeView, memoSized, qCohortSessions, qPathSessions, runSized, sampleRate, shiftBack,
   type OutcomeDefs, type Timeframe,
 } from "../utils/dql";
 import { matchesRoutes, type RouteCtx } from "../components/FlowSankey";
@@ -46,10 +46,16 @@ async function windowFacts(
      the facts and the paths, so the join is exact inside the sample. The read
      is sized by a measured probe (runSized, 0.17.33); every count below is
      scaled by 1/rate — the slice read times the hash inside it. */
-  const sized = await runSized(tf, [
-    { build: (t, share) => qCohortSessions(t, appId, defs, sampleRate(sessions * share)), max: 10000 },
-    { build: (t, share) => qPathSessions(t, appId, sampleRate(sessions * share)), max: 10000 },
-  ]);
+  /* remembered by window, application and definitions only — the picks and
+     the route context are matched below, client-side, so a new context (a
+     shared link landing before the mine) no longer pays the same read twice;
+     the Journeys poster asks under the same key */
+  const sized = await memoSized(
+    `cohort|${tf.from}|${tf.to}|${appId}|${JSON.stringify(defs?.[appId] ?? null)}|true`,
+    () => runSized(tf, [
+      { build: (t, share) => qCohortSessions(t, appId, defs, sampleRate(sessions * share)), max: 10000 },
+      { build: (t, share) => qPathSessions(t, appId, sampleRate(sessions * share)), max: 10000 },
+    ]));
   const [rows, paths] = sized.rows;
   const rate = sized.share * sampleRate(sessions * sized.share);
   const inCohort = new Set<string>();
@@ -115,8 +121,8 @@ export function useRouteCohort(
     let live = true;
     (async () => {
       try {
-        const span = `${Math.max(1, Math.round(tf.minutes))}m`;
-        const prevTf: Timeframe = { ...tf, from: `${tf.from}-${span}`, to: tf.from };
+        const span = Math.max(1, Math.round(tf.minutes));
+        const prevTf: Timeframe = { ...tf, from: shiftBack(tf.from, span), to: tf.from };
         // each window read inside the budget, sized by a measured probe
         const [a, b] = await Promise.all([
           windowFacts(tf, appId, picks, ctx, defs, appSessions),

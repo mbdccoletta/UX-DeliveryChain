@@ -140,9 +140,21 @@ const inFlightDql = new Map<string, {
   /* a joined caller is told what the scan cost too — runSized sizes a window
      from it, and a joiner that heard "0 bytes" would read the window whole */
   metas: Array<NonNullable<DqlOptions["onMeta"]>>;
+  /* …and that it was cut short: a joiner whose own result is cached would
+     otherwise store a truncated answer as whole */
+  truncs: Array<() => void>;
 }>();
 
+/** THE HARD CEILING (0.17.42). No query this app sends may read more than
+ *  this, whatever its window or fallback: the platform's own scan limit,
+ *  sent with every execute. ≈25 GiB (the optional-read budget), in the GB the
+ *  API counts. A query that hits it comes back partial and says so (the
+ *  scan-limit notification feeds the partial-data banner). */
+export const SCAN_LIMIT_GB = 27;
+
 export interface DqlOptions {
+  /** Override the ceiling for this query, in GB (rarely: never upwards). */
+  scanLimitGb?: number;
   /**
    * Retained for call-site compatibility; it no longer changes behaviour.
    * There was, for a few versions, a mode that let a query SETTLE on a
@@ -172,16 +184,20 @@ export function runDql<T = Record<string, unknown>>(
   if (hit) {
     if (onPartial) hit.subs.push(onPartial as (rows: unknown[]) => void);
     if (opts.onMeta) hit.metas.push(opts.onMeta);
+    if (onTruncated) hit.truncs.push(onTruncated);
     return hit.p as Promise<T[]>;
   }
   const subs: Array<(rows: unknown[]) => void> = [];
   if (onPartial) subs.push(onPartial as (rows: unknown[]) => void);
   const metas: Array<NonNullable<DqlOptions["onMeta"]>> = opts.onMeta ? [opts.onMeta] : [];
-  const p = runDqlOnce<T>(query, maxResultRecords, onTruncated, (rows) => {
+  const truncs: Array<() => void> = onTruncated ? [onTruncated] : [];
+  const p = runDqlOnce<T>(query, maxResultRecords, () => {
+    for (const f of truncs) { try { f(); } catch { /* never break a fetch */ } }
+  }, (rows) => {
     for (const f of subs) { try { f(rows as unknown[]); } catch { /* a draw must never break a fetch */ } }
   }, { ...opts, onMeta: (m) => { for (const f of metas) { try { f(m); } catch { /* never break a fetch */ } } } })
     .finally(() => { inFlightDql.delete(key); });
-  inFlightDql.set(key, { p: p as Promise<unknown[]>, subs, metas });
+  inFlightDql.set(key, { p: p as Promise<unknown[]>, subs, metas, truncs });
   return p;
 }
 
@@ -238,7 +254,7 @@ async function runDqlOnce<T = Record<string, unknown>>(
   let res = await queryExecutionClient.queryExecute({
     body: {
       query, requestTimeoutMilliseconds: Math.min(4000, HARD_DEADLINE_MS), maxResultRecords,
-      enablePreview: true,
+      enablePreview: true, defaultScanLimitGbytes: opts.scanLimitGb ?? SCAN_LIMIT_GB,
     } as never,
   });
   /* The execute itself can come back with a preview attached. */
@@ -750,15 +766,30 @@ export const COHORT_BYTES_PER_SESSION = 45e3;
 /** The settled slice of a window that reads `estGiB` in full and must read
  *  at most the budget; null when the whole window fits (or its end is
  *  absolute, where "the last minutes" has no stable meaning). */
+/** A DQL time value moved back by `min` minutes. Relative values chain
+ *  ("now()-3m-5m"); an absolute one ("2026-…Z", quoted) is computed here, since
+ *  a quoted timestamp minus a duration is not valid DQL. */
+export function shiftBack(t: string, min: number): string {
+  const v = t.trim();
+  const iso = /^"(.+)"$/.exec(v);
+  if (iso) {
+    const ms = Date.parse(iso[1]);
+    if (Number.isFinite(ms)) return `"${new Date(ms - min * 6e4).toISOString()}"`;
+  }
+  return `${v.replace(/^now(?!\()/i, "now()")}-${min}m`;
+}
+const isAbsolute = (t: string) => /^"[^"]+"$/.test(t.trim());
+
 export function sliceFor(tf: Timeframe, estGiB: number): { tf: Timeframe; share: number } | null {
   const to = tf.to.trim();
-  if (!/^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to) || !(tf.minutes > 0)) return null;
+  const relative = /^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to);
+  if (!(relative || isAbsolute(to)) || !(tf.minutes > 0)) return null;
   if (estGiB <= OPTIONAL_SCAN_BUDGET_GIB) return null;
   const sliceMin = Math.max(2, Math.floor(tf.minutes * (OPTIONAL_SCAN_BUDGET_GIB / estGiB)));
   if (sliceMin >= tf.minutes) return null;
   const live = /^now\(?\)?$/i.test(to);
-  const end = live ? `now()-${EVENT_LAG_MIN}m` : to.replace(/^now(?!\()/i, "now()");
-  return { tf: { ...tf, from: `${end}-${sliceMin}m`, to: end, minutes: sliceMin },
+  const end = live ? `now()-${EVENT_LAG_MIN}m` : relative ? to.replace(/^now(?!\()/i, "now()") : to;
+  return { tf: { ...tf, from: shiftBack(end, sliceMin), to: end, minutes: sliceMin },
     share: sliceMin / tf.minutes };
 }
 export function cohortPlan(tf: Timeframe, sessions: number):
@@ -791,7 +822,9 @@ export async function runSized(
   gibPerMin: number }> {
   const to = tf.to.trim();
   const live = /^now\(?\)?$/i.test(to);
-  const relative = /^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to);
+  /* an absolute window is sliced too (0.17.42): it read whole before, which
+     on a custom range was the full ≈300 GiB the budget exists to prevent */
+  const relative = /^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to) || isAbsolute(to);
   const runAll = async (t: Timeframe, share: number) => {
     let bytes = 0;
     const rows = await Promise.all(queries.map((q) => runDql<Record<string, unknown>>(
@@ -805,8 +838,8 @@ export async function runSized(
     return { ...r, tf, share: 1, gibPerMin: r.bytes / 2 ** 30 / Math.max(1, tf.minutes) };
   };
   if (!relative || !(tf.minutes > PROBE * 2)) return whole();
-  const end = live ? `now()-${EVENT_LAG_MIN}m` : to.replace(/^now(?!\()/i, "now()");
-  const at = (min: number): Timeframe => ({ ...tf, from: `${end}-${min}m`, to: end, minutes: min });
+  const end = live ? `now()-${EVENT_LAG_MIN}m` : isAbsolute(to) ? to : to.replace(/^now(?!\()/i, "now()");
+  const at = (min: number): Timeframe => ({ ...tf, from: shiftBack(end, min), to: end, minutes: min });
   const probe = await runAll(at(PROBE), PROBE / tf.minutes);
   const perMin = probe.bytes / 2 ** 30 / PROBE;
   if (!(perMin > 0) || perMin * tf.minutes <= budgetGiB) return whole();
@@ -839,6 +872,21 @@ export async function runRefined(
   const best = [1, 10, 100, 1000, 10000].find((r) => fullGiB / r <= budgetGiB) ?? ratio;
   if (best >= ratio) return { rows, ratio };
   return { rows: await runDql<Record<string, unknown>>(build(best), max), ratio: best };
+}
+
+/* A SIZED READ, REMEMBERED (0.17.42). The poster, the no-telemetry popup and
+   Business Control's route cohort each paid the probe and the slice again on
+   every reopen (≈23 GiB on a large application). Five minutes: long enough
+   that reopening is free, short enough that a remembered cohort cannot drift
+   from a freshly mined diagram. A failure is never remembered. */
+const SIZED_TTL = 5 * 60_000;
+const sizedMemo = new Map<string, { at: number; p: ReturnType<typeof runSized> }>();
+export function memoSized(key: string, run: () => ReturnType<typeof runSized>): ReturnType<typeof runSized> {
+  const hit = sizedMemo.get(key);
+  if (hit && Date.now() - hit.at < SIZED_TTL) return hit.p;
+  const p = run().catch((e) => { sizedMemo.delete(key); throw e; });
+  sizedMemo.set(key, { at: Date.now(), p });
+  return p;
 }
 
 /** The Journeys tab's four mining scans together, per session of the window
@@ -1389,8 +1437,8 @@ export const qBizCube = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | 
 /** The window before it, totals only — the board compares, it does not
  *  segment the past. */
 export const qBizPrev = (tf: Timeframe, defs?: OutcomeDefs, rumAppId?: string | null) => {
-  const span = `${Math.max(1, Math.round(tf.minutes))}m`;
-  return `${bizSessionLeg(tf, `${tf.from}-${span}`, tf.from, defs, rumAppId)}
+  const span = Math.max(1, Math.round(tf.minutes));
+  return `${bizSessionLeg(tf, shiftBack(tf.from, span), tf.from, defs, rumAppId)}
 | summarize${bizSums},
   by: { appId }
 | limit 50`;
@@ -2330,8 +2378,14 @@ fetch spans, from: now()-2h
  *   there reads as "this application reaches no backend", which is a different
  *   claim entirely. So the caller escalates rather than concluding.
  */
+/* ONLY THE EVENTS THAT CARRY A TRACE (0.17.42). trace.id lives on request
+   events (W3C trace context) and on navigations (Server-Timing); filtering
+   the classifier first is what cuts the bytes Grail reads — the id filter
+   only cut rows, and on a large application this probe read ≈25–37 GiB on
+   every page open. */
 export const qAppTraceIds = (rumAppId: string, since = "now()-10m") => `
 fetch user.events, from: ${since}
+| filter characteristics.classifier == "request" or characteristics.classifier == "navigation"
 | filter dt.rum.application.id == "${rumAppId.replace(/["\\]/g, "")}" and isNotNull(trace.id)
 | summarize n = count(), by: { trace.id }
 | sort n desc

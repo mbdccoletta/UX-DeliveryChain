@@ -28,7 +28,9 @@ import { useCloudScope, type CloudPlacement } from "../hooks/useCloudScope";
 import { useDataStores, type DataStore } from "../hooks/useDataStores";
 import { useDbEntity } from "../hooks/useDbEntity";
 import { useGen2Closure, type Gen2Service } from "../hooks/useGen2Closure";
-import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone, failTone} from "../utils/verdict";
+import { davisCategory, HIT_BAD, HIT_WARN, verdictOf, worseOf, type Tone, failTone,
+  SCORE_BAD, SCORE_WARN, STATUS_LABEL } from "../utils/verdict";
+import { fmtApdex as fmtApx } from "../utils/apdex";
 import { useNodeMetrics, type MetricTarget } from "../hooks/useNodeMetrics";
 import { useDomainTraces } from "../hooks/useDomainTraces";
 import { aheadOf, riseIsReal, type Forecast } from "../utils/forecast";
@@ -660,14 +662,12 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
           // breakage but never wears the colour reserved for user harm, so a
           // chain fed only by robots cannot render Critical while the estate
           // table calls the same application "No users".
-          const machine = o === "Robots" || o === "Synthetic";
-          const vd = verdictOf({
-            sessions: hit === null ? null : n, hit,
-            realSessions: hit === null ? null : (machine ? 0 : n),
-            realHit: machine ? 0 : (hit ?? 0),
-          });
+          /* NOT JUDGED (0.17.42). Status is the Apdex, and an origin has
+             none of its own here: the old error-share rule painted these
+             cards Healthy or Critical by a line the rest of the app dropped.
+             The card counts; the application's Apdex judges. */
           return {
-          nm: o, mt: ORIGIN_META[o], v: fmtK(n), tone: vd.tone, vol: n,
+          nm: o, mt: ORIGIN_META[o], v: fmtK(n), tone: "info" as Tone, vol: n,
           det: [["Sessions", fmtN(n)],
                 ["Sessions hit by errors",
                  /* THE MARK TRAVELS TO THIS SCREEN TOO. `impacted` is the
@@ -678,7 +678,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
                     found a judgement on a partial figure without its mark.
                     Same fact, same word, on every screen. */
                  hit === null ? "…"
-                   : `${fmtN(hit)} of ${fmtN(n)} · ${vd.label}${impacted?.partial ? " · measuring" : ""}`],
+                   : `${fmtN(hit)} of ${fmtN(n)}${impacted?.partial ? " · measuring" : ""}`],
                 ["Share", devSessions ? ((n / devSessions) * 100).toFixed(1) + "%" : "—"],
                 // a session always has a screen: zero means the source (the
                 // metric store) does not say, not that there were none
@@ -1191,7 +1191,13 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     || feNames?.get(data.apps.find((a) => a.appId === appId)?.entity ?? "") || undefined;
   // started once the name lookup has answered: before that the name is ""
   // and the forecast would read a 3-hour event history instead of the metric
-  const aheadApp = fm || feNames ? appId : undefined;
+  /* the name lookup is over when the metric store answered, or when it had
+     nothing and the name scan answered (0.17.42) */
+  const feResolved = fm !== undefined && (fm !== null || feNames !== null);
+  /* …and a forecast needs the NAME: without it the projection read a 3×
+     window of raw events inside the analyzer (≈100–300 GiB, invisible to the
+     cost readout). No name, no projection. */
+  const aheadApp = aheadFe ? appId : undefined;
   const aheadCount = useAppForecast(aheadApp, data.tf, aheadFe);
   // the verdict judges the error RATE's forecast, with the real-rise rule
   const aheadRate = useAppForecast(aheadApp, data.tf, aheadFe, "errorRate");
@@ -1206,7 +1212,11 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
   /* the session-store count (what Users & Sessions lists), once the frontend
      name is known — the same headline the Overview shows */
   const chainFe = aheadFe;
-  const impacted = useImpacted(appId, data.tf, !!chainFe || !withinSessionLag(data.tf), chainFe);
+  /* not before the name lookup is over: on a direct reload of this tab the
+     impact scan started with no name, read the window's raw events
+     (150–300 GiB), then ran again on the session store once the name came */
+  const impacted = useImpacted(appId, data.tf,
+    feResolved && (!!chainFe || !withinSessionLag(data.tf)), chainFe);
   /* WHO WAS HURT, judged exactly as the Overview judges it: sessions an
      error AFFECTED (utils/dql USER_HIT), from the same per-session scan —
      memoised, so arriving from the Overview costs nothing. The session
@@ -1944,7 +1954,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
       `Window: ${data.tf.label}`,
       /* the status the chain is explaining (0.17.20): the Apdex, the rule,
          and the client-side figures from the metric store */
-      `Application status: Apdex ${apx === null ? "not rated" : apx.toFixed(2)} — the status rule is the Apdex alone (Critical under 0.50, Warning under 0.85)`
+      `Application status: Apdex ${apx === null ? "not rated" : fmtApx(apx)} — the status rule is the Apdex alone (Critical under ${SCORE_BAD.toFixed(2)}, Warning under ${SCORE_WARN.toFixed(2)})`
         + (fm && !(fm.satisfied + fm.tolerating + fm.frustrated > 0) && classic
           ? `; rated by RUM classic${classic.actions != null ? ` on ${fmtN(classic.actions)} user actions` : ""}` : ""),
       fm ? `Client side (metric store): ${fmtN(fm.sessions)} sessions, ${fmtN(fm.errors)} errors (${fmtN(fm.errorsThird)} third-party), `
@@ -1956,11 +1966,11 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     tiers.forEach((ly, i) => {
       const nm = TIERS[i]?.[2] ?? TIERS[i]?.[0] ?? `layer ${i}`;
       const shown = ly.items.filter((x) => !x.miss);
-      L.push(`  ${nm}: ${ly.kpi} ${ly.kpiLabel} · verdict ${ly.tone}`
+      L.push(`  ${nm}: ${ly.kpi} ${ly.kpiLabel} · ${STATUS_LABEL[ly.tone]}`
         + ` · ${fmtN(ly.total)} element(s)`
         + (shown.length < ly.total ? `, ${shown.length} drawn` : ""));
       for (const it of shown.slice(0, 6)) {
-        L.push(`      ${it.nm} — ${it.mt}${it.tone !== "info" ? ` (${it.tone})` : ""}`);
+        L.push(`      ${it.nm} — ${it.mt}${it.tone !== "info" ? ` (${STATUS_LABEL[it.tone]})` : ""}`);
       }
       for (const it of ly.items.filter((x) => x.miss)) {
         L.push(`      NOT MEASURED: ${it.nm} — ${it.mt}`);

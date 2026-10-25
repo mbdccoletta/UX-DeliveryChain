@@ -85,8 +85,12 @@ export const EVENT_BYTES_PER_SESSION = 30e3;
 export const CLICK_SCAN_BUDGET_GIB = 3;
 /** The smallest Grail sampling ratio (1, 10, 100…) that keeps a raw-event
  *  read of a window with `sessions` inside the budget; 1 means exact. */
+/* UNKNOWN IS NOT SMALL (0.17.42): with the census still loading the count
+   is 0, which read as "exact" — a click in the first seconds read the whole
+   window unsampled. An unknown size samples 1:100; runRefined narrows it
+   once the read reports its real cost. */
 export const scanRatio = (sessions: number, budgetGiB = CLICK_SCAN_BUDGET_GIB): number =>
-  [1, 10, 100, 1000, 10000].find((r) =>
+  !(sessions > 0) ? 100 : [1, 10, 100, 1000, 10000].find((r) =>
     (sessions * EVENT_BYTES_PER_SESSION) / 2 ** 30 / r <= budgetGiB) ?? 10000;
 let windowStartedAt = Date.now();
 /** Milliseconds of the page budget still left, or null once the first-load

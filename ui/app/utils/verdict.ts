@@ -35,7 +35,7 @@ export const scoreTone = (s: number | null | undefined): "good" | "warn" | "bad"
  * written against them, but nothing user-facing says "bad".
  */
 export const STATUS_LABEL: Record<Tone, string> = {
-  good: "Healthy", warn: "Warning", bad: "Critical", info: "Not measured",
+  good: "Healthy", warn: "Warning", bad: "Critical", info: "Not rated",
 };
 
 /** Davis problem categories, in the platform's own vocabulary. */

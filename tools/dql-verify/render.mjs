@@ -49,6 +49,10 @@ const EXTRA = Object.fromEntries(["total", "user type", "country", "bin"].map((b
 const sliceTf = { from: "now()-3m-5m", to: "now()-3m", minutes: 5, label: "last 1h" };
 EXTRA.qBizCube_slice = () => m.qBizCube(sliceTf, {}, app);
 EXTRA.qBizPrev_slice = () => m.qBizPrev(sliceTf, {}, app);
+// a custom (absolute) window: the previous window is computed, not "ISO"-60m
+const absTf = { from: '"2026-10-25T10:00:00.000Z"', to: '"2026-10-25T11:00:00.000Z"', minutes: 60, label: "custom" };
+EXTRA.qBizPrev_absolute = () => m.qBizPrev(absTf, {}, app);
+EXTRA.qBizCube_absolute_slice = () => m.qBizCube({ ...absTf, from: m.shiftBack(absTf.to, 5), minutes: 5 }, {}, app);
 const GENERIC = [[tf, app], [tf, null, app], [tf], [], [app, tf], [tf, app, {}], [tf, {}, app], [60], [tf, [app]]];
 // a query may open with comment lines before its first command
 const looksDql = (s) => typeof s === "string"

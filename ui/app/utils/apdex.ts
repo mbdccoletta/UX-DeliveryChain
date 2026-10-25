@@ -1,3 +1,4 @@
+import { scoreTone } from "./verdict";
 // The user-experience score — GEN3 ONLY, the platform's own rating.
 //
 // Every user action in user.events carries `experience.level` (satisfied ·
@@ -119,8 +120,11 @@ export const apdexBand = (v: number): ApdexBand =>
  * 0.969 while every session it served hit an error. So this tone colours the
  * performance cell only; it is deliberately not an input to verdictOf().
  */
+/* Delegates to the verdict module (0.17.42): this had its own Critical line at
+   0.70 while the status used 0.50, so an Apdex of 0.62 read Warning in the
+   header and red on its own figure. One set of thresholds, one file. */
 export const apdexTone = (v: number | null): "good" | "warn" | "bad" | "info" =>
-  v === null ? "info" : v >= 0.85 ? "good" : v >= 0.7 ? "warn" : "bad";
+  scoreTone(v) ?? "info";
 
 /**
  * Two decimals, the convention the score is always quoted in — except that

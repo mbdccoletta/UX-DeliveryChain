@@ -387,6 +387,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const regionActs = useRegionActions(data.tf, appId, geoMetric ? geoSel : null,
     geoMetric && geoSel && regionSel?.startsWith(`${geoSel}-`) ? regionSel.slice(geoSel.length + 1) : null,
     scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0));
+  /* …and with a country open and no state picked, the COUNTRY's own
+     (0.17.42): its colour is an Apdex too, and a reader shown "Warning ·
+     Apdex 0.62" with nothing under it cannot see what put it there. */
+  const countryActs = useRegionActions(data.tf, appId, geoMetric ? geoSel : null,
+    geoMetric && geoSel && !regionSel ? "" : null,
+    scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0));
   const regionScore = (r: { id?: string; name?: string }): number | null => {
     if (!regionApdex) return null;
     const code = r.id?.split("-").slice(1).join("-");
@@ -1145,6 +1151,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
             + `, ${pc(r.hit / Math.max(1, r.sessions))} with errors`);
         }
       }
+      if (geoSel && !regionSel && countryActs && countryActs.length) {
+        const lostAll = countryActs.reduce((a, x) => a + x.fru + x.tol / 2, 0) || 1;
+        L.push(`Opened country: ${geoName(geoSel)} — the user actions that cost its Apdex most${countryActs.ratio ? ` (1-in-${countryActs.ratio} sample, runs scaled)` : ""}:`);
+        for (const x of countryActs) {
+          const ap = apdexOf({ satisfied: x.sat, tolerating: x.tol, frustrated: x.fru });
+          L.push(`  ${x.name}: ${fmtN(x.n)} runs, Apdex ${fmtApdex(ap)}, p50 ${sec(x.p50)}, p90 ${sec(x.p90)}, `
+            + `${Math.round(((x.fru + x.tol / 2) / lostAll) * 100)}% of the country's loss`);
+        }
+      }
       const opened = regionSel && regions ? regions.find((x) => x.id === regionSel) : null;
       if (opened && regionActs && regionActs.length) {
         const lostAll = regionActs.reduce((a, x) => a + x.fru + x.tol / 2, 0) || 1;
@@ -1290,6 +1305,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           .map((pr) => davisCategory(pr.category)))]}
         requests={pulse?.requests ?? vitals?.requests ?? 0} reqFail={pulse?.reqFail ?? 0}
         hitSessions={harm?.hit ?? 0}
+        hitBase={harm?.base}
         loadP50={fm ? fm.p50LoadMs * 1e6 : app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? scoreOf(uxRow) : null}
         apdexPartial={!!ux?.scorePartial}
@@ -1517,6 +1533,57 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           ? placeScore(g) === null && !classicCountry(g.country)
           : geoArms(asArm(g), base).apx === null);
         const shown = (g: GeoRow): GeoTone | "wait" => (geoFinal && !unjudged(g) ? judge(g) : "wait");
+        /* THE ACTIONS BEHIND A PLACE'S APDEX — a state's, or with region ""
+           the opened country's: ranked by what each costs the score
+           (frustrated + half the tolerating), each a hand-off to Assist. */
+        const actsTable = (acts: typeof regionActs, region: string, regionName: string) => {
+          if (acts === null) return <div className="geo__card-why">measuring the actions behind it…</div>;
+          if (!acts.length) return null;
+          const lostAll = acts.reduce((a, x) => a + x.fru + x.tol / 2, 0) || 1;
+          return (
+            <div className="geo__acts">
+              <div className="geo__act geo__act--hd">
+                <span>{acts.ratio
+                  ? `user action · sample 1:${acts.ratio}, ${fmtN(Math.round(acts.reduce((a, x) => a + x.n, 0) / acts.ratio))} read`
+                  : "user action"}</span><span>{acts.ratio ? "runs ≈" : "runs"}</span><span>Apdex</span>
+                <span>p50</span><span>of the loss</span>
+              </div>
+              {acts.map((x) => {
+                const ap = apdexOf({ satisfied: x.sat, tolerating: x.tol, frustrated: x.fru });
+                return (
+                  <div className={`geo__act${assist.available ? " geo__act--go" : ""}`} key={x.name}
+                    role={assist.available ? "button" : undefined}
+                    tabIndex={assist.available ? 0 : undefined}
+                    onClick={assist.available && feName ? () => askAssistAboutAction({
+                      appName: app.name, rumAppId: appId, frontendName: feName,
+                      window: data.tf.label, windowFrom: data.tf.from, windowTo: data.tf.to,
+                      country: geoSel!, countryName: enName(geoSel!),
+                      region, regionName,
+                      action: x.name, runs: x.n, ratio: acts.ratio,
+                      apdex: ap, p50: x.p50, p90: x.p90, facts: `${PAGE_ABOUT.overview}\n\n${overviewFacts()}`,
+                    }) : undefined}
+                    // a role="button" answers the keyboard too
+                    onKeyDown={assist.available ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault(); (e.currentTarget as HTMLElement).click();
+                      }
+                    } : undefined}
+                    title={(assist.available ? "Investigate in Dynatrace Assist — " : "") + `${x.name} — `
+                    + `${fmtN(Math.round(x.sat))} satisfied, ${fmtN(Math.round(x.tol))} tolerating, `
+                    + `${fmtN(Math.round(x.fru))} frustrated`
+                    + (x.p90 ? ` · p90 ${fmtMs(x.p90)}` : "")
+                    + (acts.ratio ? ` · from a 1-in-${acts.ratio} sample` : "")}>
+                    <span className="geo__act-nm">{x.name}</span>
+                    <b className="num">{fmtK(x.n)}</b>
+                    <b className="num" style={{ color: TOK[scoreTone(ap) ?? "good"] }}>{fmtApdex(ap)}</b>
+                    <span className="num">{x.p50 ? fmtMs(x.p50) : "—"}</span>
+                    <span className="num">{Math.round(((x.fru + x.tol / 2) / lostAll) * 100)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        };
         const WORD = { ...GEO_WORD, wait: geoFinal ? "not rated" : "measuring" } as const;
         const because = (g: GeoRow) => {
           if (g.source !== "metric") return geoBecause(asArm(g), base);
@@ -1941,7 +2008,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     the numbers just above the next one. */}
                 <div className="geo__r geo__hd" aria-hidden="true" style={{ order: -1 }}>
                   <i /><span>code</span><span>country</span><span />
-                  <span>sessions</span><span>{geoMetric ? "errors/action" : "affected"}</span><span>ttfb p75</span>
+                  <span>sessions</span><span>{geoMetric ? "apdex" : "affected"}</span><span>ttfb p75</span>
                 </div>
                 {shownGeo.map((g, gi) => {
                   const a = arms(g);
@@ -1984,18 +2051,34 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                           rides beside it as a figure, with the same substance
                           gate as before — one errored session in hundreds
                           never gets to claim "2.8×" */}
-                      <em className={`geo__h geo__h--${tone}`}>
-                        {g.source === "metric" && !viaActions(g) && storeOf(g)
-                          ? <>{geoTagStore(storeOf(g)!)}</>
-                          : g.source === "metric"
-                          ? <>{(g.actions ?? 0) > 0 ? `${rate.toFixed(rate >= 10 ? 0 : 2)} err/act` : "—"}
-                            {(g.actions ?? 0) > 0 && geoRateBase > 0 && Math.abs(lift - 1) >= 0.15
-                              ? <span className="geo__x"> · {lift.toFixed(2)}×</span> : null}</>
-                          : <>{geoTag(asArm(g), base)}
-                            {(g.hit ?? 0) >= 5 && rate >= 0.02 && base > 0 && Math.abs(lift - 1) >= 0.15
-                              ? <span className="geo__x"> · {lift.toFixed(2)}×</span> : null}</>}
-                      </em>
-                      <em className={`geo__lat${latTone(g) ? ` geo__lat--${latTone(g)}` : ""}`}
+                      {/* THE COLOURED NUMBER IS THE ONE THAT JUDGED (0.17.42).
+                          The status is the Apdex, and this column printed the
+                          errors per action in the status colour — so a country
+                          at 87 err/act read amber beside one at 120 in green.
+                          The Apdex is printed and coloured; the error rate
+                          stays in the tooltip, where because() explains it. */}
+                      {(() => {
+                        // the Apdex this row was judged on, from either source
+                        const apx = g.source === "metric"
+                          ? placeScore(g) ?? classicCountry(g.country)?.apdex ?? null
+                          : geoArms(asArm(g), base).apx;
+                        if (apx !== null) {
+                          return <em className={`geo__h geo__h--${tone}`}>{fmtApdex(apx)}</em>;
+                        }
+                        // no Apdex: the share is printed, in neutral ink
+                        return (
+                          <em className="geo__h geo__h--wait">
+                            {g.source === "metric" && storeOf(g)
+                              ? geoTagStore(storeOf(g)!)
+                              : g.source === "metric"
+                              ? ((g.actions ?? 0) > 0 ? `${rate.toFixed(rate >= 10 ? 0 : 2)} err/act` : "—")
+                              : geoTag(asArm(g), base)}
+                          </em>
+                        );
+                      })()}
+                      {/* printed, never coloured: a multiple of the median is
+                          this app's line, not Dynatrace's (0.17.42) */}
+                      <em className="geo__lat"
                         title={g.ttfbMs ? `first byte p75 for ${nameOf(g.country)} — the network route's own cost; median country here: ${fmtLat(latBase)}` : "no timed views from here"}>
                         {g.ttfbMs ? fmtLat(g.ttfbMs) : "—"}
                       </em>
@@ -2042,7 +2125,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       </span>
                       <span className="num geo__n">{fmtN(r.sessions)}</span>
                       <em className={`geo__h geo__h--${t}`}>
-                        {rTag(r, base)}
+                        {(() => {
+                          const own = r.source === "store"
+                            ? regionScore(r as { id?: string; name?: string })
+                              ?? classicRegion((r as { name?: string }).name)?.apdex ?? null
+                            : null;
+                          return own !== null ? fmtApdex(own) : rTag(r, base);
+                        })()}
                       </em>
                     </button>
                   );
@@ -2102,6 +2191,26 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                     is a gap in what the platform resolved, not a missing
                     place — and without the line they would read it as a bug in
                     the numbers beside it. */}
+                {/* THE OPENED COUNTRY, EXPLAINED: its colour, the Apdex
+                    behind it and the actions that cost it most — until a
+                    state is picked, which takes the card's place. */}
+                {geoMetric && !regionSel && (() => {
+                  const g = geo?.find((x) => x.country === geoSel);
+                  if (!g) return null;
+                  const t = shown(g);
+                  return (
+                    <div className="geo__card">
+                      <div className="geo__card-h">
+                        <i className="geo__dot" style={{ background: TOK[t] }} />
+                        <b>{nameOf(g.country)}</b>
+                        <span>{WORD[t]}</span>
+                        <em className="num">{fmtN(g.sessions)} sessions</em>
+                      </div>
+                      <div className="geo__card-why">{because(g)}</div>
+                      {actsTable(countryActs, "", "")}
+                    </div>
+                  );
+                })()}
                 {regions !== null && (() => {
                   // the states' own base: on the metric map the store's closed
                   // sessions for the country, never the metric's estimate of
@@ -2143,48 +2252,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             <div className="geo__card-why">{rBecause(r, base)}</div>
                             {/* what put it there: the actions that cost its
                                 Apdex most, by the score's own arithmetic */}
-                            {regionActs === null ? (
-                              <div className="geo__card-why">measuring the actions behind it…</div>
-                            ) : regionActs.length > 0 && (() => {
-                              const lostAll = regionActs.reduce((a, x) => a + x.fru + x.tol / 2, 0) || 1;
-                              return (
-                                <div className="geo__acts">
-                                  <div className="geo__act geo__act--hd">
-                                    <span>{regionActs.ratio
-                                      ? `user action · sample 1:${regionActs.ratio}, ${fmtN(Math.round(regionActs.reduce((a, x) => a + x.n, 0) / regionActs.ratio))} read`
-                                      : "user action"}</span><span>{regionActs.ratio ? "runs ≈" : "runs"}</span><span>Apdex</span>
-                                    <span>p50</span><span>of the loss</span>
-                                  </div>
-                                  {regionActs.map((x) => {
-                                    const ap = apdexOf({ satisfied: x.sat, tolerating: x.tol, frustrated: x.fru });
-                                    return (
-                                      <div className={`geo__act${assist.available ? " geo__act--go" : ""}`} key={x.name}
-                                        role={assist.available ? "button" : undefined}
-                                        tabIndex={assist.available ? 0 : undefined}
-                                        onClick={assist.available && feName ? () => askAssistAboutAction({
-                                          appName: app.name, rumAppId: appId, frontendName: feName,
-                                          window: data.tf.label, windowFrom: data.tf.from, windowTo: data.tf.to,
-                                          country: geoSel!, countryName: enName(geoSel!),
-                                          region: (regionSel ?? "").slice(geoSel!.length + 1), regionName: r.name,
-                                          action: x.name, runs: x.n, ratio: regionActs.ratio,
-                                          apdex: ap, p50: x.p50, p90: x.p90, facts: `${PAGE_ABOUT.overview}\n\n${overviewFacts()}`,
-                                        }) : undefined}
-                                        title={(assist.available ? "Investigate in Dynatrace Assist — " : "") + `${x.name} — `
-                                        + `${fmtN(Math.round(x.sat))} satisfied, ${fmtN(Math.round(x.tol))} tolerating, `
-                                        + `${fmtN(Math.round(x.fru))} frustrated`
-                                        + (x.p90 ? ` · p90 ${fmtMs(x.p90)}` : "")
-                                        + (regionActs.ratio ? ` · from a 1-in-${regionActs.ratio} sample` : "")}>
-                                        <span className="geo__act-nm">{x.name}</span>
-                                        <b className="num">{fmtK(x.n)}</b>
-                                        <b className="num" style={{ color: TOK[scoreTone(ap) ?? "good"] }}>{fmtApdex(ap)}</b>
-                                        <span className="num">{x.p50 ? fmtMs(x.p50) : "—"}</span>
-                                        <span className="num">{Math.round(((x.fru + x.tol / 2) / lostAll) * 100)}%</span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })()}
+                            {actsTable(regionActs, (regionSel ?? "").slice(geoSel!.length + 1), r.name)}
 
                           </div>
                         );
@@ -2238,11 +2306,14 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                      the application. Three rules on one map — see
                      geoJudgeSub. Now every place, at every depth, answers
                      the same question: worse than this application? */
-                  const toneOf = (d: ScreenRow) => geoJudgeSub(d, base);
+                  // a screen with no rated action is Not rated, never Healthy (0.17.42)
+                  const toneOf = (d: ScreenRow): GeoTone | "wait" =>
+                    d.sat + d.tol + d.fru > 0 ? geoJudgeSub(d, base) : "wait";
+                  const SW = { ...GEO_WORD, wait: "Not rated" } as const;
                   /* bars are MARKS: the saturated half of the family, like
                      every other mark in the product */
                   const BAR = { good: "var(--good-fill)", warn: "var(--warn-fill)",
-                    bad: "var(--bad-fill)" } as const;
+                    bad: "var(--bad-fill)", wait: "var(--ink-3)" } as const;
                   return (
                     <div className="geo__drill-rows">
                       <span className="geo__sub-l">
@@ -2274,12 +2345,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 background: `color-mix(in srgb, ${BAR[t]} 55%, transparent)` }} /></span>
                             <b className="num">{fmtN(d.sessions)}</b>
                             <em className={`geo__h geo__h--${t}`}
-                              title={`${GEO_WORD[t]}: ${geoBecauseSub(d, base)}`}>
+                              title={`${SW[t]}: ${geoBecauseSub(d, base)}`}>
                               {(() => {
                                 const tag = geoTagSub(d, base);
                                 const lead = tag.startsWith("score") ? tag
                                   : d.hit > 0 ? `${fmtN(d.hit)} hit` : "";
-                                return lead ? `${lead} · ${GEO_WORD[t]}` : GEO_WORD[t];
+                                return lead ? `${lead} · ${SW[t]}` : SW[t];
                               })()}</em>
                           </button>
                         );
@@ -2328,10 +2399,9 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         })}
                       </div>
                     ) : geoWho.regionRate > 0 && (
-                      <span className="geo__who-none">
-                        <b>Nothing local stands out.</b> Errors in {geoSel} spread evenly across
-                        devices, browsers and carriers — which points at the route to the region,
-                        not at who is in it.
+                      <span className="geo__who-none"
+                        title={`Errors in ${geoSel} spread evenly across devices, browsers and carriers — which points at the route to the region, not at who is in it.`}>
+                        <b>Nothing local stands out</b>
                       </span>
                     )}
                     {geoWho.over.length > 0 && (
@@ -2449,6 +2519,8 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
 
 interface CardProps {
   sessions: number; clean: number | null; tone: Tone; name: string; isMobile: boolean;
+  /** Which store the hit share was counted on (session store vs events). */
+  hitBase?: "sessions" | "events";
   /** The per-bin series; `t` is what the hover read-out puts on screen. */
   series: Array<{ t: string; sessions: number; errors: number; requests: number }>;
   /** Sessions per minute, read off the same series the bars draw. */
@@ -2801,11 +2873,17 @@ function CleanCard(p: CardProps) {
             {/* UNAFFECTED, not "error-free": the share of sessions no error
                 AFFECTED — none during the person's own actions, no crash or
                 freeze. Background errors are counted on the errors card. */}
-            <Stat v={pct} l="unaffected" tone={p.tone === "info" ? undefined : p.tone}
-              title={"Sessions no error affected: no error during the person's own actions, "
-                + "and no crash or freeze. Errors in the background — a request with no "
-                + "action around it, an analytics beacon — are counted on the errors card "
-                + "but do not hurt anyone, so they do not count here."} />
+            {/* NEUTRAL INK (0.17.42): the status is the Apdex; this share did
+                not decide it and must not wear its colour. The tooltip names
+                the population it was actually counted on. */}
+            <Stat v={pct} l="unaffected"
+              title={p.hitBase === "sessions"
+                ? "Closed sessions with no error recorded, counted on the session store as Users & Sessions "
+                  + "lists them — any error in the session counts, background requests included."
+                : "Sessions no error affected: no error during the person's own actions, "
+                  + "and no crash or freeze. Errors in the background — a request with no "
+                  + "action around it, an analytics beacon — are counted on the errors card "
+                  + "but do not hurt anyone, so they do not count here."} />
             {/* Apdex judges SPEED. It sits beside error-free on purpose: the
                 two disagree often, and an application that is fast and broken
                 should have to say both out loud. */}
@@ -2864,7 +2942,6 @@ function CleanCard(p: CardProps) {
                 + `store and will list fewer until they are written. Widen the window `
                 + `past an hour and the two agree again.`}>
               active in this window
-              <em className="tk-note__k"> the list fills in as sessions are written</em>
             </div>
           )}
           {p.realSessions != null && p.realSessions !== p.sessions && (
@@ -3564,14 +3641,14 @@ function DetailPanel({ metric, rows, tf, appEntity, appName, tracedDomains,
           </>);
         })}
       </div>
-      <div className="svcf__note">
-        {metric === "errors"
-          ? "one row per KIND of failure — ids in the url are collapsed, so a broken "
-            + "endpoint counts once with its true weight"
+      {/* the method lives in the tooltip; the note keeps its label (0.17.42) */}
+      <div className="svcf__note" title={metric === "errors"
+          ? "One row per kind of failure — ids in the url are collapsed, so a broken endpoint counts once with its true weight."
           : metric === "requests"
-            ? "failures come from the error records: request events on a live estate "
-              + "carry only 2xx, so counting 4xx off them would always read zero"
-            : `experience rated by the platform per action · the bar is share of user actions`}
+            ? "Failures come from the error records: request events on a live estate carry only 2xx, so counting 4xx off them would always read zero."
+            : "Experience rated by the platform per action; the bar is the share of user actions."}>
+        {metric === "errors" ? "by kind of failure" : metric === "requests" ? "failures from error records"
+          : "share of user actions"}
       </div>
     </div>
   );
@@ -3679,9 +3756,9 @@ function ServiceForecasts({ rows, vitals, total, tf, onClose }: {
           );
         })}
       </div>
-      <div className="svcf__note">
-        volume is capacity, not trouble — only rising failures are coloured ·
-        projections from dt.service.request.count and its failure counterpart
+      <div className="svcf__note"
+        title="Volume is capacity, not trouble — only rising failures are colored. Projections from dt.service.request.count and its failure counterpart.">
+        projections · dt.service.request.count
       </div>
     </div>
   );

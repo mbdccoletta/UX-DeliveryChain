@@ -255,11 +255,16 @@ const armOf = (g: PlaceRow): GeoArm => ({ sessions: g.sessions, hit: g.hit ?? 0,
   sat: g.sat ?? 0, tol: g.tol ?? 0, fru: g.fru ?? 0 });
 /** ONE JUDGE FOR A SET OF PLACES, whichever source they came from — the
  *  Overview map and the board both call this, so they cannot disagree. */
-export function placeJudge(rows: PlaceRow[]): (g: PlaceRow) => { tone: GeoTone; because: string } {
+/** A place with no Apdex is "wait" — Not rated, as the Overview map says it —
+ *  never Healthy by default (0.17.42). */
+export type PlaceTone = GeoTone | "wait";
+export const PLACE_WORD = { ...GEO_WORD, wait: "Not rated" } as const;
+export function placeJudge(rows: PlaceRow[]): (g: PlaceRow) => { tone: PlaceTone; because: string } {
   if (rows.length && rows[0].source === "metric") {
     const base = rows.reduce((a, g) => a + (g.errors ?? 0), 0)
       / (rows.reduce((a, g) => a + (g.actions ?? 0), 0) || 1);
-    return (g) => ({ tone: geoJudgeMetric(g, base), because: geoBecauseMetric(g, base) });
+    return (g) => ({ tone: placeScore(g) === null ? "wait" : geoJudgeMetric(g, base),
+      because: geoBecauseMetric(g, base) });
   }
   const n = rows.reduce((a, g) => a + geoPop(armOf(g)).n, 0) || 1;
   const base = rows.reduce((a, g) => a + geoPop(armOf(g)).h, 0) / n;
@@ -303,6 +308,6 @@ export const geoBecauseStore = (r: StoreRegion, base: number) => {
   const { n, share } = storeShare(r);
   return `${(share * 100).toFixed(1)}% of its ${n} closed real-user session${n === 1 ? "" : "s"} had errors, `
     + `${base > 0 ? (share / base).toFixed(2) : "—"}× its country's share`
-    + ` — Warning from ${Math.round(GEO_ABS_WARN * 100)}% or ${GEO_RATE_WARN}×, Critical from ${Math.round(GEO_ABS_BAD * 100)}% or ${GEO_RATE_BAD}×,`
-    + ` the application's own lines (session store, as Users & Sessions lists them)`;
+    // the share is printed, never judged: the status is the Apdex (0.17.42)
+    + ` · not rated — no Apdex here (session store, as Users & Sessions lists them)`;
 };

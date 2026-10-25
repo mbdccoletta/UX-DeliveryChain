@@ -1973,19 +1973,22 @@ export function askAssistAboutAction(a: {
 }): void {
   const q = (s: string) => s.replace(/["\\]/g, "");
   const sec = (ns?: number) => (ns ? `${(ns / 1e9).toFixed(1)} s` : "unknown");
-  const prompt = `Investigate why the user action "${a.action}" in ${a.regionName}, ${a.countryName} `
+  // an opened COUNTRY passes no region: the place is the country alone
+  const place = a.region ? `${a.regionName}, ${a.countryName}` : a.countryName;
+  const prompt = `Investigate why the user action "${a.action}" in ${place} `
     + `pulls the Apdex of ${a.appName} down (${a.window}). It ran about ${a.runs.toLocaleString("en-US")} times`
     + (a.ratio ? ` (estimated from a 1-in-${a.ratio} sample)` : "")
     + `, Apdex ${a.apdex === null ? "unknown" : a.apdex.toFixed(2)}, p50 ${sec(a.p50)}, p90 ${sec(a.p90)}. `
     + "Find its frustrated and tolerating executions by real users there, list the affected sessions "
     + "(session ids), and determine what made them slow or frustrated: the requests they waited on, "
     + "errors raised during them, device, OS, app version and network. Say whether the same action "
-    + "behaves the same in other states. Finish with the cause, who owns it and the fix.";
+    + `behaves the same in other ${a.region ? "states" : "countries"}. Finish with the cause, who owns it and the fix.`;
   const filter = `fetch user.events, from: ${a.windowFrom}, to: ${a.windowTo}\n`
     + `| filter dt.rum.application.id == "${q(a.rumAppId)}"\n`
     + `    and characteristics.classifier == "user_action"\n`
     + `    and dt.rum.user_type == "real_user"\n`
-    + `    and geo.country.iso_code == "${q(a.country)}" and geo.region.iso_code == "${q(a.region)}"\n`
+    + `    and geo.country.iso_code == "${q(a.country)}"`
+    + (a.region ? ` and geo.region.iso_code == "${q(a.region)}"` : "") + "\n"
     + `    and coalesce(user_action.name, view.name, view.detected_name, page.name, "unnamed action") == "${q(a.action)}"\n`
     + `    and in(experience.level, {"frustrated", "tolerating"})`;
   sendIntent({

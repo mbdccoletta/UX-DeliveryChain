@@ -110,7 +110,11 @@ export function useNodeMetrics(
         ? await runDql<Record<string, unknown>>(qServiceVitals(tf, [target.id]), 1)
             .then((rows) => {
               const r = rows[0];
-              return r && Number(r.calls) > 0
+              /* a service the store knows, idle in the window, is an answer
+                 (0 calls) — not a reason to read every span of the window
+                 (≈380 GiB over 2 h on a large estate). Only an unknown
+                 service or a failed read falls back. */
+              return r
                 ? { ready: true, p50: Number(r.p50) || 0, p90: Number(r.p90) || 0,
                     p95: Number(r.p95) || 0, thr: Number(r.calls) || 0,
                     fails: Number(r.fails) || 0 } as NodeMetrics

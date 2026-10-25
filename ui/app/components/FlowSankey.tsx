@@ -4,28 +4,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { sliceFor, COHORT_BYTES_PER_SESSION, DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
   OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql, cohortPlan,
-  type OutcomeDefs, type Timeframe, runSized, sampleRate, fmtK} from "../utils/dql";
+  type OutcomeDefs, type Timeframe, runSized, memoSized, sampleRate, fmtK} from "../utils/dql";
 
-/** The poster's scans, shared and remembered: keyed by the query text itself
- *  (which already carries window, app and definitions), so a re-open costs
- *  nothing and two callers in flight share one request. A failure forgets
- *  its key — the next click retries instead of caching the error. */
-/* Memoised per query TEXT — and the text carries a RELATIVE timeframe
- * ("now()-2h"), so the key never changes as the clock walks. Without an
- * expiry, a poster reopened hours later served the first open's sessions
- * against a freshly-mined diagram: disjoint session ids, "0 sessions on
- * this route" beside a flow bar full of them. Five minutes keeps the
- * reopen-free win and lets the data stay the window it claims to be. */
-const DQL_MEMO_TTL = 5 * 60_000;
-const dqlMemo = new Map<string, { at: number; p: Promise<Array<Record<string, unknown>>> }>();
-function memoDql(q: string, limit: number): Promise<Array<Record<string, unknown>>> {
-  const hit = dqlMemo.get(q);
-  if (hit && Date.now() - hit.at < DQL_MEMO_TTL) return hit.p;
-  const p = runDql<Record<string, unknown>>(q, limit)
-    .catch((e) => { dqlMemo.delete(q); throw e; });
-  dqlMemo.set(q, { at: Date.now(), p });
-  return p;
-}
+// The poster's sized reads are remembered in utils/dql (memoSized).
 
 /**
  * The ACTIVE outcome test. One FlowSankey shows one application; the
@@ -1300,7 +1281,8 @@ export function FlowSankey({
          settled slice of it, and every count is scaled back (0.17.27) */
       const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
       // sized by a measured probe (runSized, 0.17.33)
-      const sized = await runSized(tf, [{ build: (t) => qNoTelemetry(t, appId), max: 20 }]);
+      const sized = await memoSized(`ntel|${tf.from}|${tf.to}|${appId}`,
+        () => runSized(tf, [{ build: (t) => qNoTelemetry(t, appId), max: 20 }]));
       const slice = sized.share < 1 ? { tf: sized.tf, share: sized.share } : null;
       const k = 1 / sized.share;
       const rows = sized.rows[0];
@@ -1343,11 +1325,13 @@ export function FlowSankey({
       /* read inside the budget, sized by a measured probe (runSized), then
          the hash inside the read — `rate` is the fraction the counts stand for */
       const wantPaths = !(mode === "unconverted" || noNav);
-      const sized = await runSized(tf, [
+      // the same key as Business Control's route cohort: one read serves both
+      const sized = await memoSized(`cohort|${tf.from}|${tf.to}|${appId}|${defsKey}|${wantPaths}`,
+        () => runSized(tf, [
         { build: (t, share) => qCohortSessions(t, appId, outcomeDefs, sampleRate(appSessions * share)), max: 10000 },
         ...(wantPaths ? [{ build: (t: Timeframe, share: number) =>
           qPathSessions(t, appId, sampleRate(appSessions * share)), max: 10000 }] : []),
-      ]);
+      ]));
       const rate = sized.share * sampleRate(appSessions * sized.share);
       const rows = sized.rows[0];
       const pr = wantPaths ? sized.rows[1] : null;
@@ -1817,13 +1801,13 @@ export function FlowSankey({
                 the SHARE and the superlative wait for a population. */}
             {sum.measured < SAMPLE_MIN ? (
               <>
-                <b>{fmtN(sum.measured)}</b> journeyed session{sum.measured === 1 ? "" : "s"}
-                {" — too few to put a share or a worst-screen on"}
+                <b title={`Fewer than ${SAMPLE_MIN} journeyed sessions: too few to put a share or a worst screen on.`}>
+                  {fmtN(sum.measured)}</b> journeyed session{sum.measured === 1 ? "" : "s"}
               </>
             ) : sum.outcomes ? (
               <>
                 <b>{fmtN(sum.done)}</b> of {fmtN(sum.measured)} sessions finished
-                {" "}(<b className={sum.pct >= 50 ? "ok" : "no"}>{pct100(sum.pct)}</b>)
+                {" "}(<b>{pct100(sum.pct)}</b>)
               </>
             ) : (
               <><b>{fmtN(sum.measured)}</b> sessions with a recorded view</>
@@ -2042,17 +2026,24 @@ export function FlowSankey({
                       sentence said most were "on a real page, outside the
                       window" while 2.3M of 3.1M were API traffic: the
                       dominant kind now decides what is said. */}
-                  <footer className="rinfo__ft">
-                    {(() => {
-                      const pc = (n: number) => `${Math.round((n / Math.max(1, d.sessions)) * 100)}%`;
-                      const lead = d.named / Math.max(1, d.sessions) >= 0.5
-                        ? `${pc(d.named)} name their screen on other events — the agent knows where these people were and records no view there: enable view (screen) tracking for this app and they become journeys`
-                        : d.reqOnly >= d.oneEvent
-                        ? `${pc(d.reqOnly)} are API traffic with no user action — background calls, push or refresh, not a journey`
-                        : `${pc(d.oneEvent)} are one stray event — their navigation happened outside this window`;
-                      return `${lead}${d.sliceMin ? ` · read from the last ${d.sliceMin} min of the window, counts scaled` : ""} · left out of the flow and its percentages`;
-                    })()}
-                  </footer>
+                  {(() => {
+                    /* labels on screen, the explanation in the tooltip (0.17.42) */
+                    const pc = (n: number) => `${Math.round((n / Math.max(1, d.sessions)) * 100)}%`;
+                    const [lead, why] = d.named / Math.max(1, d.sessions) >= 0.5
+                      ? [`${pc(d.named)} screen known, no view recorded`,
+                        "The agent knows where these people were and records no view there: enable view (screen) tracking for this app and they become journeys."]
+                      : d.reqOnly >= d.oneEvent
+                      ? [`${pc(d.reqOnly)} API traffic, no user action`,
+                        "Background calls, push or refresh — not a journey."]
+                      : [`${pc(d.oneEvent)} one stray event`,
+                        "Their navigation happened outside this window."];
+                    return (
+                      <footer className="rinfo__ft" title={`${why}${d.sliceMin
+                        ? ` Read from the last ${d.sliceMin} min of the window, counts scaled.` : ""} Left out of the flow and its percentages.`}>
+                        {lead}{d.sliceMin ? ` · sample · last ${d.sliceMin} min` : ""}
+                      </footer>
+                    );
+                  })()}
                 </>
               )}
             </div>

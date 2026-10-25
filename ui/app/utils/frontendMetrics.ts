@@ -33,6 +33,9 @@ export interface FrontendNode {
   /** APPLICATION-… / MOBILE_APPLICATION-… */
   entity: string;
   rumId: string;
+  /** The id as the platform writes it — what user.events' dt.rum.application.id
+   *  carries and what the picker holds. rumId is lower-cased for matching only. */
+  rawId: string;
   kind?: string;
 }
 
@@ -42,10 +45,11 @@ export function frontendNodes(): Promise<FrontendNode[]> {
   if (!nodesP) {
     nodesP = runDql<Record<string, unknown>>(`
 smartscapeNodes "FRONTEND"
-| fields id, entity = id_classic, rumId = lower(dt.rum.instrumentation.id), kind = frontend.type
+| fields id, entity = id_classic, rumId = lower(dt.rum.instrumentation.id),
+    rawId = dt.rum.instrumentation.id, kind = frontend.type
 | filter isNotNull(rumId)`, 5000)
       .then((rows) => rows.map((r) => ({ id: String(r.id), entity: String(r.entity ?? ""),
-        rumId: String(r.rumId ?? ""), kind: r.kind ? String(r.kind) : undefined })))
+        rumId: String(r.rumId ?? ""), rawId: String(r.rawId ?? r.rumId ?? ""), kind: r.kind ? String(r.kind) : undefined })))
       .catch(() => { nodesP = null; return [] as FrontendNode[]; });
   }
   return nodesP;
@@ -77,7 +81,14 @@ const REAL = `dt.rum.user_type == "real_user"`;
 
 type Row = Record<string, unknown>;
 const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const read = (query: string, max = 1000) => runDql<Row>(query, max);
+/* A METRIC READ THAT FAILS IS ASKED ONCE MORE (0.17.42). A failure here
+   used to read as "the store has nothing", and the page fell back to the
+   event scans the metrics replaced (hundreds of GiB on a large estate) for
+   what was usually a transient throttle or timeout. */
+const read = (query: string, max = 1000) => runDql<Row>(query, max)
+  .catch(() => new Promise<Row[]>((ok, ko) => {
+    setTimeout(() => { runDql<Row>(query, max).then(ok, ko); }, 1500);
+  }));
 
 /**
  * THE CENSUS, from the metric store: one row per application in the shape
@@ -108,7 +119,8 @@ export async function metricCensus(tf: Timeframe, rumAppId?: string | null): Pro
   for (const r of sess) {
     const fe = byNode.get(String(r[BY] ?? ""));
     if (!fe) continue;
-    rows.set(fe.id, { appId: fe.rumId, entity: fe.entity, sessions: n(r.v),
+    // the platform's own casing: the picker and every event filter compare with it
+    rows.set(fe.id, { appId: fe.rawId || fe.rumId, entity: fe.entity, sessions: n(r.v),
       realSessions: 0, views: 0, errors: 0, crashes: 0, anrs: 0,
       p50View: 0, p90View: 0, p95View: 0, p50Load: 0, p50Xhr: 0, resPerAct: 0 });
   }
@@ -160,7 +172,9 @@ export function frontendMetrics(tf: Timeframe, rumAppId: string, gen = 0): Promi
   const key = `${tf.from}|${tf.to}|${rumAppId}|${gen}`;
   let p = memo.get(key);
   if (!p) {
-    p = loadFrontendMetrics(tf, rumAppId).catch(() => null);
+    // a failure is not memoised: the next ask reads again instead of
+    // inheriting "nothing here" for the rest of the window
+    p = loadFrontendMetrics(tf, rumAppId).catch(() => { memo.delete(key); return null; });
     memo.set(key, p);
   }
   return p;

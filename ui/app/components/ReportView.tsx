@@ -24,7 +24,7 @@ import { useRouteCohort, type CohortFacts } from "../hooks/useRouteCohort";
 import { deepestOf, routeCtxOf } from "./FlowSankey";
 import { fmtMs, fmtN, fmtPct, type OutcomeDefs } from "../utils/dql";
 import { useGeo } from "../hooks/useGeo";
-import { GEO_WORD, geoName, placeJudge, placeRate } from "../utils/geoVerdict";
+import { geoName, PLACE_WORD, placeJudge, placeRate } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
 import { useFrontendNames } from "../hooks/useFrontendNames";
 import { SESSION_CHIP, chips, intentsAvailable, open as openIntent,
@@ -136,8 +136,10 @@ const PLAT_WORD: Record<string, string> = {
 const platWord = (p: string) => PLAT_WORD[p] ?? p;
 
 export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
-  routePicks, onClearRoutes, onGo }: {
+  routePicks, onClearRoutes, onGo, journeySliceMin }: {
   data: ChainData;
+  /** Minutes the journeys (funnel, conversion) were mined from, when sliced. */
+  journeySliceMin?: number;
   /** The application this board reads — the header's own selector drives it,
    *  the same element every page uses. */
   scopeApp: string;
@@ -585,9 +587,6 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
   /* While the figures are a preview, every card says so — the mark travels
      with the number it qualifies, the same way it does on the Overview and
      the Delivery Chain. */
-  const sliceMark = kpis?.sliceMin
-    ? <em className="dim" title={`To stay inside the app's scan budget, these figures were read from the last ${kpis.sliceMin} settled minutes of the window, compared with the ${kpis.sliceMin} minutes before them; counts are scaled to the whole window, rates are the sample's own.`}> · sample · last {kpis.sliceMin} min</em>
-    : null;
   const measuringMark = kpis?.partial
     ? <em className="dim" title="Preview figures — real, measured, still firming up as Grail finishes. The final replaces them."> · measuring</em>
     : kpis?.cachedAt
@@ -595,13 +594,20 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       : null;
   const Hero = ({ front }: { front: "brand" | "journeys" }) => {
     if (!kpis) return <div className="bc__hero bc__hero--load" />;
+    if (kpis.failed) return (
+      <div className="bc__hero" style={{ ["--ht" as string]: "var(--ink-2)" }}>
+        <span className="bc__hero-l">{front === "brand" ? "customers at risk" : "conversion"}</span>
+        <b className="bc__hero-v num" title="The query behind this board failed — refresh to read it again.">•••</b>
+        <span className="bc__hero-s">query failed</span>
+      </div>
+    );
     const isBrand = front === "brand";
     /* Money is back, on a base that holds: a completed journey is a business
      * event the reader can point at in the diagram, so pricing it is honest
      * where pricing a keyword guess was not. */
     if (isBrand && noPeople) return (
       <div className="bc__hero" style={{ ["--ht" as string]: "var(--ink-2)" }}>
-        <span className="bc__hero-l">customers at risk{sliceMark}{measuringMark}</span>
+        <span className="bc__hero-l">customers at risk{measuringMark}</span>
         <b className="bc__hero-v num" title={NO_PEOPLE}>•••</b>
         <span className="bc__hero-s">{NO_PEOPLE}</span>
       </div>
@@ -628,7 +634,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
         + (scoped ? " · whole application, not the picked routes" : "");
     return (
       <div className="bc__hero" style={{ ["--ht" as string]: TONE[t.dir] }}>
-        <span className="bc__hero-l">{label}{isBrand ? sliceMark : null}</span>
+        <span className="bc__hero-l">{label}</span>
         <b className="bc__hero-v num">{fmt(heroVal)}</b>
         <span className="bc__hero-t" style={{ color: TONE[t.dir] }}>
           {isBrand ? <>
@@ -660,14 +666,14 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     const { platform, otherPlats } = completeness;
     if (!platform || !otherPlats.length) return null;
     return (
-      <div className="bc__fun-scope">
-        this funnel is <b>{platWord(platform)}</b> only — this application also
-        reports {otherPlats.map((o, i) => (
+      <div className="bc__fun-scope"
+        title="This application reports from more than one platform; their screens differ, so they cannot share one completion depth.">
+        <b>{platWord(platform)}</b> only · also{otherPlats.map((o, i) => (
           <React.Fragment key={o.plat}>
             {i > 0 ? " and " : " "}
             <b className="num">{fmtCount(o.n)}</b> {platWord(o.plat)} journeys
           </React.Fragment>
-        ))}, whose screens differ, so they cannot share one completion depth
+        ))}
       </div>
     );
   };
@@ -676,12 +682,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     /* Not a funnel: a statement that there is nothing to draw one from. */
     <div className="bc__fun bc__fun--thin">
       <FunnelScope />
-      <div className="bc__fun-none">
-        <b className="num">{fmtCount(ladder.total)}</b> journeys in this window —
-        a funnel needs at least <b className="num">{SAMPLE_MIN}</b>.
-        Percentages and a “biggest loss” over this many sessions would be noise
-        with the confidence of a measurement, so they are not drawn. Widen the
-        window, or pick an application with more traffic.
+      <div className="bc__fun-none"
+        title={`A funnel is drawn from ${SAMPLE_MIN} journeys; percentages and a biggest loss over fewer would be noise. Widen the window, or pick an application with more traffic.`}>
+        <b className="num">{fmtCount(ladder.total)}</b> journeys · no funnel
       </div>
     </div>
   ) : (
@@ -787,10 +790,8 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
         + "completion is not a named screen at all."}>
       <span className="bc__rule-k">counts as converted</span>
       <span className="bc__rule-v">
-        a journey that reaches <b>{completeness.deepest} screens</b> — the depth a tenth
-        of this application&apos;s own traffic still gets to
+        reaches <b>{completeness.deepest} screens</b>
       </span>
-      <span className="bc__rule-src">derived from the traffic · works for any application</span>
     </div>
   );
 
@@ -824,6 +825,11 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
     go?: { label: string; hint: string; run: () => void };
   }) => {
     if (!kpis) return <div className="bc__stat bc__stat--load" />;
+    if (kpis.failed) return (
+      <div className="bc__stat"><span className="bc__stat-l">{label}</span>
+        <div className="bc__stat-row"><b className="bc__stat-v num"
+          title="The query behind this board failed — refresh to read it again.">•••</b></div></div>
+    );
     if (unmeasured) return (
       // no caption here — captions carry percentages of the very base that
       // could not be measured, and "0.0% of the customer base" under "•••"
@@ -1018,7 +1024,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               ...(geoRows ?? []).slice(0, 6).map((g) => {
                 const j = judgePlace(g);
                 return `  ${geoName(g.country)}: ${fmtN(g.sessions)} sessions,`
-                  + ` ${GEO_WORD[j.tone]} — ${j.because}`;
+                  + ` ${PLACE_WORD[j.tone]} — ${j.because}`;
               }),
             ];
             return lines.filter(Boolean).join("\n");
@@ -1026,16 +1032,27 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
 
   return (
     <div className="stack bc" ref={bcRef}>
+      {/* ONE MARK FOR THE WHOLE BOARD (0.17.42): every figure on it — the
+          hero, the stats, the segments, the funnel — is read from a slice
+          when the window does not fit the budget, so the mark sits above
+          them all instead of on the hero alone. */}
+      {(kpis?.sliceMin || journeySliceMin) ? (
+        <div className="j-slice" title={"To stay inside the app's scan budget, this board was read from the "
+          + "last settled minutes of the window"
+          + (kpis?.sliceMin ? ` (figures: ${kpis.sliceMin} min, compared with the ${kpis.sliceMin} min before them` : "")
+          + (journeySliceMin ? `${kpis?.sliceMin ? "; " : " ("}journeys and conversion: ${journeySliceMin} min` : "")
+          + "); counts are scaled to the whole window, rates are the sample's own."}>
+          {`sample · last ${kpis?.sliceMin ?? journeySliceMin} min`}
+        </div>) : null}
       {/* INTELLIGENCE — the board's own questions, asked against the board's
           own numbers. boardFacts builds them at ask time from the figures the
           tiles are rendering, including the ones that could NOT be measured,
           stated as such, so nothing fills a gap with a plausible number. */}
       {breakdownPartial && (
-        <div className="banner">
-          <b>Segments are partial:</b> this application has more distinct segments
-          (country × OS × browser × device × user type) in this window than the board reads
-          ({fmtN(BREAKDOWN_CAP)} groups), so the smallest ones are missing and the figures
-          below the funnel are floors, not totals. Narrow the window to make them whole.
+        <div className="banner" title={`This application has more distinct segments (country × OS × browser × device × user type) `
+          + `in this window than the board reads (${fmtN(BREAKDOWN_CAP)} groups), so the smallest ones are missing and the `
+          + `figures below the funnel are floors, not totals. Narrow the window to make them whole.`}>
+          <b>Segments are partial</b>
         </div>
       )}
 
@@ -1101,11 +1118,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       {cohortFailed && (
         <div className="bc__scoped">
           <span className="bc__scoped-l">showing the whole application</span>
-          <span className="bc__scoped-none">
-            the query for {routePicks && routePicks.length > 1 ? "those journeys" : "that journey"}
-            {" "}did not answer — a missing scope, or Grail timing out — so the board is showing
-            {" "}everything instead. This is not a measurement of them: it says nothing about
-            {" "}whether anyone walked them.
+          <span className="bc__scoped-none"
+            title="The query for the picked journeys did not answer — a missing scope, or Grail timing out — so the board shows everything instead. This is not a measurement of them.">
+            query failed
           </span>
           <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
             clear the selection
@@ -1116,13 +1131,12 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
       {emptyPick && (
         <div className="bc__scoped">
           <span className="bc__scoped-l">showing the whole application</span>
-          <span className="bc__scoped-none">
-            nobody walked {routePicks && routePicks.length > 1 ? "those journeys" : "that journey"}
-            {" "}in this window, so the board fell back to everything rather than printing a
-            {" "}page of zeros. Widen the timeframe to see them.
+          <span className="bc__scoped-none"
+            title="Nobody walked the picked journeys in this window, so the board shows everything rather than a page of zeros. Widen the timeframe to see them.">
+            no sessions on the picked {routePicks && routePicks.length > 1 ? "journeys" : "journey"}
           </span>
           <button className="bc__scoped-x" onClick={() => onClearRoutes?.()}>
-            forget the selection ✕
+            clear the selection
           </button>
         </div>
       )}
@@ -1417,10 +1431,9 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               </div>
             ))}
           </div>
-          <span className="bc__out-ft">
-            ranked by how far each screen sits from this application&apos;s median of{" "}
-            {fmtMs(outliers.median)} — times the people who meet it. A screen twice as slow that
-            nobody opens is arithmetic, not a finding; every list that ranks by traffic hides these.
+          <span className="bc__out-ft"
+            title="Ranked by how far each screen sits from this application's median, times the people who meet it — a screen twice as slow that nobody opens is not a finding.">
+            median {fmtMs(outliers.median)}
           </span>
         </section>
       )}
@@ -1574,7 +1587,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
           region stands out" is also an answer the owner needs stated. */}
       {geoRows && geoRows.length > 0 && (() => {
         const judged = geoRows.map((g) => ({ g, tone: judgePlace(g).tone }));
-        const hurt = judged.filter((x) => x.tone !== "good")
+        const hurt = judged.filter((x) => x.tone === "warn" || x.tone === "bad")
           .sort((a, b) => (a.tone === b.tone ? b.g.sessions - a.g.sessions
             : a.tone === "bad" ? -1 : 1));
         const lead = hurt[0];
@@ -1586,16 +1599,16 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   tolerating country red contradicted its row two lines down */}
               <h3 className={`bc__seg-h bc__seg-h--${lead ? lead.tone : "good"}`}>
                 {lead
-                  ? `${geoName(lead.g.country)} is ${GEO_WORD[lead.tone]} — ${judgePlace(lead.g).because}`
-                  : "no location stands out — every country reads satisfied under the map's own rule"}
+                  ? `${geoName(lead.g.country)} is ${PLACE_WORD[lead.tone]} — ${judgePlace(lead.g).because}`
+                  : "No country below Healthy"}
               </h3>
               {judged.slice(0, 6).map(({ g, tone }) => (
                 <div className="bc__seg-r" key={g.country}
-                  title={`${fmtN(g.sessions)} sessions from ${geoName(g.country)} — ${GEO_WORD[tone]}: ${judgePlace(g).because}`}>
+                  title={`${fmtN(g.sessions)} sessions from ${geoName(g.country)} — ${PLACE_WORD[tone]}: ${judgePlace(g).because}`}>
                   <span className="bc__seg-b">{geoName(g.country)}<em>{pct(g.sessions / (geoRows.reduce((a, x) => a + x.sessions, 0) || 1))} of sessions</em></span>
                   <b className="num">{fmtN(g.sessions)}</b>
-                  <span className="bc__seg-lift" style={{ color: `var(--${tone})` }}>
-                    {GEO_WORD[tone]}
+                  <span className="bc__seg-lift" style={{ color: tone === "wait" ? "var(--ink-2)" : `var(--${tone})` }}>
+                    {PLACE_WORD[tone]}
                   </span>
                   <em className="bc__seg-n">
                     {g.source === "metric"

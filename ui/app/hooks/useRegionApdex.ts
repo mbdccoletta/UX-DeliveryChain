@@ -80,8 +80,8 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio:
 | filter dt.rum.application.id == "${q(rumAppId)}"
     and characteristics.classifier == "user_action"
     and dt.rum.user_type == "real_user"
-    and geo.country.iso_code == "${q(iso)}"
-    and geo.region.iso_code == "${q(region)}"
+    and geo.country.iso_code == "${q(iso)}"${region
+      ? `\n    and geo.region.iso_code == "${q(region)}"` : ""}
     and isNotNull(experience.level)
 | fieldsAdd _w = coalesce(experience.weight, 1),
     act = coalesce(user_action.name, view.name, view.detected_name, page.name, "unnamed action")
@@ -97,11 +97,12 @@ fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio:
 
 const actMemo = new Map<string, RegionActions>();
 
-/** The state's costliest actions; null while asked or when none is open. */
+/** The state's costliest actions — or, with region "", the whole opened
+ *  country's (0.17.42); null while asked or when nothing is open. */
 export function useRegionActions(tf: Timeframe, rumAppId: string | null | undefined,
   iso: string | null, region: string | null, ratio: number): RegionActions | null {
   const gen = useMemoGen();
-  const key = rumAppId && iso && region ? `${tf.from}|${tf.to}|${rumAppId}|${iso}|${region}|${ratio}|${gen}` : "";
+  const key = rumAppId && iso && region !== null ? `${tf.from}|${tf.to}|${rumAppId}|${iso}|${region}|${ratio}|${gen}` : "";
   const [out, setOut] = useState<RegionActions | null>(key ? actMemo.get(key) ?? null : null);
   useEffect(() => {
     if (!key) { setOut(null); return; }

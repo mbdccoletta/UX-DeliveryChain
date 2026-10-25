@@ -20,6 +20,8 @@ export interface JourneysData {
   /** Minutes of the window actually read when it was sliced to the scan
    *  budget (counts are then scaled to the whole window); absent = all. */
   sliceMin?: number;
+  /** The mining failed — not "no paths". Never memoised. */
+  failed?: boolean;
 }
 
 const memo = new Map<string, JourneysData>();
@@ -100,7 +102,7 @@ export function useJourneys(
         memo.set(key, res);
         if (live) setOut(res);
       } catch {
-        if (live) setOut({ views: [], sequences: [], transitions: [], friction: [] });
+        if (live) setOut({ views: [], sequences: [], transitions: [], friction: [], failed: true });
       }
     })();
     return () => { live = false; };

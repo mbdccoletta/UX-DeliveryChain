@@ -3597,3 +3597,12 @@ div:has(> header):has(main) > div {
 .ntel .rinfo__kpi b { font-size: clamp(20px, 3.2vw, 30px); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .ntel .rinfo__bar-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 0.17.42 audit: the highlighted block's pulse dies under reduced motion too */
+@media (prefers-reduced-motion: reduce) {
+  .graph--hl .bsum--spot .bsum__c { animation: none; }
+}
+/* 0.17.42 audit: poster tiles and "only on this route" rows never push past their card */
+.rinfo__kpi { min-width: 0; }
+.rinfo__so-r { grid-template-columns: auto auto auto minmax(0, 1fr); }
+.rinfo__so-r i, .rinfo__so-r em { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

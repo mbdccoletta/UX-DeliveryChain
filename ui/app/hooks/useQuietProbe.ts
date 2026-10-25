@@ -7,7 +7,8 @@
 // as broken monitoring. Memoised per application entity.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qQuietProbe, runDql } from "../utils/dql";
+import { runDql } from "../utils/dql";
+import { frontendNodes } from "../utils/frontendMetrics";
 
 export interface QuietProbe { sessions: number; last: string | null }
 
@@ -31,16 +32,30 @@ export function useQuietProbe(entityId?: string, active = true): QuietProbe | nu
     let live = true;
     (async () => {
       try {
-        const rows = await runDql<{ sessions?: string; last?: string }>(
-          /* THE ENTITY, NOT THE CACHE KEY. The key carries a refresh
-             generation suffix, and this query compares its argument with
-             dt.rum.application.entities — so it matched nothing and the chain
-             reported "no sessions in 24 hours" for an application that had
-             traffic. A cache key is an implementation detail; it has no
-             business reaching a query. */
-          qQuietProbe(entityId!), 1);
-        const res = { sessions: Number(rows[0]?.sessions) || 0,
-          last: rows[0]?.last ? String(rows[0].last) : null };
+        /* FROM THE METRIC STORE (0.17.42). This read 24 hours of the
+           estate's user.sessions — ≈125 GB on a bank's production — to
+           answer "anything today, and when last?". The frontend's own
+           session metric, hourly over the day, answers the same for ≈0 GiB.
+           The ENTITY, not the cache key, picks the frontend. */
+        const node = (await frontendNodes()).find((n) => n.entity === entityId);
+        if (!node) return;
+        const fe = `filter: { dt.smartscape.frontend == toSmartscapeId("${node.id.replace(/["\\]/g, "")}") }`;
+        const [rows, tot] = await Promise.all([
+          runDql<{ s?: unknown[]; timeframe?: { start?: string } }>(
+            `timeseries s = countDistinct(dt.frontend.session.active.estimated_count),
+  from: now()-24h, to: now(), interval: 1h, ${fe}`, 1),
+          // the day's total is one distinct count, not a sum of hours
+          runDql<{ v?: unknown }>(
+            `timeseries v = countDistinct(dt.frontend.session.active.estimated_count, scalar: true),
+  from: now()-24h, to: now(), ${fe}`, 1),
+        ]);
+        const bins = (rows[0]?.s ?? []).map((v) => Number(v) || 0);
+        const start = Date.parse(String(rows[0]?.timeframe?.start ?? ""));
+        let lastIdx = -1;
+        bins.forEach((v, i) => { if (v > 0) lastIdx = i; });
+        const res = { sessions: Math.round(Number(tot[0]?.v) || 0),
+          last: lastIdx >= 0 && Number.isFinite(start)
+            ? new Date(start + (lastIdx + 1) * 3600e3).toISOString() : null };
         memo.set(key, res);
         if (live) setOut(res);
       } catch { /* no probe: the card keeps the plain empty wording */ }

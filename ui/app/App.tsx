@@ -297,7 +297,10 @@ export function App() {
   const known = (id: string | null | undefined) => !!id
     && (d.apps.some((a) => a.appId === id)
       || d.inventory.some((a) => a.appId.toLowerCase() === id.toLowerCase()));
-  const current = known(appId)
+  /* …and while the pass is still partial, an explicit pick is trusted: a
+     classic-only application joins d.apps only on the second landing, and
+     correcting the url before then bounced the reader to the busiest app. */
+  const current = known(appId) || (!!appId && !!d.partial)
     ? appId!
     : d.apps[0]?.appId ?? (d.loading ? (appId ?? "") : "");
   /* THE AUTO-PICK HAS TO REACH THE SCANS.
@@ -468,10 +471,12 @@ export function App() {
       <PageLayout>
       <PageLayout.Header>
         <TitleBar>
-          <TitleBar.Title>{view?.[1] ?? "Delivery Chain"}</TitleBar.Title>
-          {(d.loading || view?.[2]) && (
+          <TitleBar.Title><span title={view?.[2] || undefined}>{view?.[1] ?? "Delivery Chain"}</span></TitleBar.Title>
+          {/* labels only on screen (0.17.42): the page's one-line description
+              is the title's tooltip; the subtitle carries state words only */}
+          {d.loading && (
             <TitleBar.Subtitle>
-              {d.loading ? "querying Grail and Smartscape…" : view?.[2]}
+              querying Grail and Smartscape…
             </TitleBar.Subtitle>
           )}
           <TitleBar.Suffix>
@@ -569,21 +574,19 @@ export function App() {
 
       {state.session && (
         <div className="banner banner--info">
-          <b>One session only:</b> <span className="num">{state.session}</span> — every figure on
-          this screen describes that single session, so the mined path can be read against the raw
-          events. <button className="flow-sel__b" onClick={() => set({ session: null })}>
+          <b title="Every figure on this screen describes that single session, so the mined path can be read against the raw events.">
+            One session only:</b> <span className="num">{state.session}</span>{" "}
+          <button className="flow-sel__b" onClick={() => set({ session: null })}>
             show everything
           </button>
         </div>
       )}
 
       {truncatedScan && (
-        <div className="banner">
-          <b>Partial data:</b> at least one query on this screen reached Grail's 500 GB scan
-          limit and answered from part of the window. Grail reports that as a success with a
-          warning, so the figures below are real but <em>incomplete</em> — they can only be
-          lower than the truth. Narrow the window, or pick a single application, and they
-          become whole again.
+        <div className="banner" title={"At least one query on this screen reached the scan limit and "
+          + "answered from part of the window. The figures are real but incomplete — they can only be "
+          + "lower than the truth. Narrow the window to make them whole."}>
+          <b>Partial data</b>
         </div>
       )}
 
@@ -603,10 +606,7 @@ export function App() {
             {retired.length > 0 && (
               <>
                 <b>Not available on this environment ({retired.length}):</b>{" "}
-                {retired.map(label).slice(0, 4).join(" · ")} — these read the classic
-                entity model, which a live estate has retired. Everything Smartscape
-                and Grail can answer is on screen; only the classic fallbacks are
-                missing.{other.length > 0 ? " " : ""}
+                {retired.map(label).slice(0, 4).join(" · ")}{other.length > 0 ? " · " : ""}
               </>
             )}
             {other.length > 0 && (() => {
@@ -692,7 +692,10 @@ export function App() {
           {tab === "flow" && !jd && !idleApp && (
             <div className="loading"><i />mining the journeys…</div>
           )}
-          {tab === "flow" && jd && (
+          {tab === "flow" && jd?.failed && (
+            <div className="loading" title="The journey mining query failed — refresh to read it again.">query failed</div>
+          )}
+          {tab === "flow" && jd && !jd.failed && (
             <div className="stack">
               {jd.sliceMin ? (
                 <div className="j-slice" title={`To stay inside the app's scan budget, the journeys were mined from `
@@ -732,6 +735,7 @@ export function App() {
             <Boundary label="Report">
               <ReportView data={{ ...d, views: jd?.views ?? [], sequences: jd?.sequences ?? [],
                   transitions: jd?.transitions ?? [], friction: jd?.friction ?? [] }} scopeApp={current}
+                journeySliceMin={jd?.sliceMin}
                 routePicks={state.rt ? state.rt.split("\t").filter(Boolean) : null}
                 onClearRoutes={() => set({ rt: null }, false)}
                 cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}

@@ -11,7 +11,7 @@
 // lift; where nothing differs it says "same as everyone", which is a finding.
 import { Button } from "@dynatrace/strato-components/buttons";
 import React, { useEffect } from "react";
-import { fmtMs, fmtN, fmtPct } from "../utils/dql";
+import { fmtK, fmtMs, fmtN, fmtPct } from "../utils/dql";
 import { vitalTitle } from "../utils/vitals";
 import { geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
@@ -393,12 +393,12 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                         + (convDef.items.length > 6 ? ", …" : "")
                         + (convDef.unreadable ? " (your saved rule could not be read — keyword fallback)" : "")
                       : undefined}>
-                    <b className="num">{fmtN(biz.customers)}</b>
+                    <b className="num" title={fmtN(biz.customers)}>{fmtK(biz.customers)}</b>
                     <span className="rinfo__kpi-l">customers</span>
                     <em>{fmtN(biz.converted)} reached the goal{convDef ? " ⓘ" : ""}</em>
                   </div>
                   <div className={`rinfo__kpi rinfo__kpi--worth${biz.hit > 0 ? " rinfo__kpi--bad" : ""}`}>
-                    <b className="num">{fmtN(biz.hit)}</b>
+                    <b className="num" title={fmtN(biz.hit)}>{fmtK(biz.hit)}</b>
                     <span className="rinfo__kpi-l">met an error</span>
                     <em>{biz.hit > 0 ? "customers whose session hit a failure" : "a clean route"}</em>
                   </div>
@@ -665,7 +665,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                       );
                     })}
                   <div className="rinfo__kpi rinfo__kpi--worth">
-                    <b className="num">{fmtN(vitals.n)}</b>
+                    <b className="num" title={fmtN(vitals.n)}>{fmtK(vitals.n)}</b>
                     <span className="rinfo__kpi-l">timed sessions</span>
                     <em>{vitals.rest > 0 ? `${fmtN(vitals.rest)} elsewhere` : "the only ones timed"}</em>
                   </div>
