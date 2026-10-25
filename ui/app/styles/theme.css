@@ -3606,3 +3606,15 @@ div:has(> header):has(main) > div {
 .rinfo__kpi { min-width: 0; }
 .rinfo__so-r { grid-template-columns: auto auto auto minmax(0, 1fr); }
 .rinfo__so-r i, .rinfo__so-r em { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* 0.17.43 audit — THE ROUTE POSTER COMPARES, IT DOES NOT JUDGE. Its "1.6×
+   more than everyone else" lines rest on this app's own multiples (1.15×,
+   1.5×, 2×), not on a Dynatrace rule, so they keep their words and their
+   weight but not the status colours. Status colour stays with the Apdex. */
+.rinfo__kpi--bad, .rinfo__kpi--good { border-color: var(--border); }
+.rinfo__kpi--bad .num, .rinfo__kpi--bad em, .rinfo__kpi--good .num { color: var(--ink); }
+.rinfo__bar-fill--up { background: var(--ink-3); box-shadow: none; }
+.rinfo__stop-e--bad, .rinfo__geo-e--bad, .rinfo__geo-v--bad, .rinfo__geo-v--bad b,
+.rinfo__so-e--bad { color: var(--ink); font-weight: 700; }
+
+.bc__seg-h--wait { color: var(--ink-2); }

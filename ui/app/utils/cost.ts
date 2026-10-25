@@ -89,8 +89,10 @@ export const CLICK_SCAN_BUDGET_GIB = 3;
    is 0, which read as "exact" — a click in the first seconds read the whole
    window unsampled. An unknown size samples 1:100; runRefined narrows it
    once the read reports its real cost. */
-export const scanRatio = (sessions: number, budgetGiB = CLICK_SCAN_BUDGET_GIB): number =>
-  !(sessions > 0) ? 100 : [1, 10, 100, 1000, 10000].find((r) =>
+export const scanRatio = (sessions: number | null | undefined, budgetGiB = CLICK_SCAN_BUDGET_GIB): number =>
+  sessions === null || sessions === undefined || !Number.isFinite(sessions) ? 100
+  // a KNOWN zero is a tiny application, read exactly
+  : !(sessions > 0) ? 1 : [1, 10, 100, 1000, 10000].find((r) =>
     (sessions * EVENT_BYTES_PER_SESSION) / 2 ** 30 / r <= budgetGiB) ?? 10000;
 let windowStartedAt = Date.now();
 /** Milliseconds of the page budget still left, or null once the first-load

@@ -201,10 +201,9 @@ export function Intelligence({ subject, about, starters, facts, scope, className
       <div hidden={!open}>
 
       {state === "failed" && (
-        <p className="intel__failed">
-          Dynatrace Intelligence could not answer that one. The facts behind it
-          are still on the page, and “continue in Assist” carries the same
-          question across.
+        <p className="intel__failed"
+          title="The facts behind it are still on the page, and “continue in Assist” carries the same question across.">
+          Could not answer
         </p>
       )}
 

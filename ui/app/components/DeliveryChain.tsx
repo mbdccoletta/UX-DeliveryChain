@@ -259,6 +259,15 @@ function gen2CardKept(g: Gen2Service, stores: DataStore[] | null): boolean {
   });
 }
 
+/** Who owns each piece of the chain's evidence — for the Intelligence facts. */
+interface DomainFact { domain: string; reqs: number; err: number; p50: number; p90: number }
+interface ChainOwnership {
+  firstParty: (DomainFact & { byTraces: boolean }) | null;
+  thirdParties: Array<DomainFact & { provider: string | null }>;
+  thirdPartyCount: number;
+  unattribErr: number;
+}
+
 function buildTiers(d: ChainData, appId: string, scope: AppScope,
   ahead: (Forecast & { rising?: boolean }) | null,
   impacted: Impacted | null, cloud: CloudPlacement[] | null,
@@ -275,7 +284,7 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
    *  RUM tags it third_party). Promoted, it feeds the Route layer instead
    *  of leaving it "No coverage". */
   promotedFp: string | null = null,
-): { layers: Layer[]; edges: Edge[] } {
+): { layers: Layer[]; edges: Edge[]; own: ChainOwnership } {
   const app = d.apps.find((a) => a.appId === appId);
   // Layers 1, 2 and 4 come from RUM, which now carries the application id —
   // "exactly what refers to this application" starts with not showing another
@@ -1148,7 +1157,20 @@ function buildTiers(d: ChainData, appId: string, scope: AppScope,
   }
   // captions re-judge after decoration — they summarise the elements' state
   for (const layer of layers) layer.tone = worstOf(layer.items);
-  return { layers, edges };
+  /* WHO OWNS WHAT (0.17.44) — the Intelligence layer's first question on this
+     page is "is it inside the customer's domains or outside?", and that needs
+     the ownership the cards already know, stated: the application's own
+     domain against the third parties it calls, and the failures no domain
+     could be blamed for. */
+  const own = {
+    firstParty: firstParty ? { domain: firstParty.domain, reqs: firstParty.reqs, err: firstParty.err,
+      p50: firstParty.p50, p90: firstParty.p90, byTraces: firstParty.provider !== "first_party" } : null,
+    thirdParties: others.slice(0, 10).map((x) => ({ domain: x.domain, provider: x.provider,
+      reqs: x.reqs, err: x.err, p50: x.p50, p90: x.p90 })),
+    thirdPartyCount: others.length,
+    unattribErr,
+  };
+  return { layers, edges, own };
 }
 
 export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightClear }: {
@@ -1696,7 +1718,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
     return null;
   }, [selElo, selTier, appId]);
   const met = useNodeMetrics(metTarget, data.tf,
-    scanRatio(fm?.sessions ?? data.apps.find((a) => a.appId === appId)?.sessions ?? 0));
+    scanRatio(fm?.sessions ?? data.apps.find((a) => a.appId === appId)?.sessions));
   /* The Databases app's entity behind the selected store, resolved only
    * while its drawer is open. The namespace rides along because the measured
    * exact match was on it (TradeManagement), not on the address. */
@@ -1921,24 +1943,22 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
       const chainCalls = data.calls.filter((c) =>
         mine.has(str(c.src).split(" - ")[0]) || mine.has(str(c.dst).split(" - ")[0]));
       return (
-        <p className="dd__note">
-          {fmtN(chainCalls.length)} of the environment&apos;s {fmtN(data.calls.length)} call
-          relations touch this chain. The relation map itself is Smartscape&apos;s job —
-          open an element above and take &quot;See its relations&quot;.
+        <p className="dd__note"
+          title={'The relation map itself is Smartscape\'s job — open an element above and take "See its relations".'}>
+          {fmtN(chainCalls.length)} of {fmtN(data.calls.length)} call relations touch this chain
         </p>
       );
     }
     const mineNames = new Set((selTier !== null ? tiers[selTier]?.items ?? [] : []).map((n) => n.nm));
     const chainPods = data.runtime.filter((r) => mineNames.has(r.pod) || mineNames.has(r.node));
     return (
-      <p className="dd__note">
+      <p className="dd__note"
+        title={'The placement map is Smartscape\'s job — open an element above and take "See its relations".'}>
         {chainPods.length > 0
-          ? `${fmtN(chainPods.length)} of the environment's ${fmtN(data.runtime.length)} mapped pods serve this chain.`
+          ? `${fmtN(chainPods.length)} of ${fmtN(data.runtime.length)} mapped pods serve this chain`
           : data.runtime.length > 0
-            ? `None of the environment's ${fmtN(data.runtime.length)} mapped pods serve this chain — this layer runs elsewhere.`
-            : "No pods are mapped in this environment."}
-        {" "}The placement map is Smartscape&apos;s job — open an element above and take
-        &quot;See its relations&quot;.
+            ? `0 of ${fmtN(data.runtime.length)} mapped pods serve this chain`
+            : "no pods mapped"}
       </p>
     );
   };
@@ -1976,6 +1996,39 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
         L.push(`      NOT MEASURED: ${it.nm} — ${it.mt}`);
       }
     });
+    /* OWNERSHIP — where each piece of evidence sits relative to the
+       customer's own domains. The layer order alone does not say it. */
+    const own = built.own;
+    const probs = (i: number) => problemsFor([...(idsOfTier[i] ?? [])]).length;
+    const lat = (p50: number, p90: number) => p50 > 0 ? `p50 ${fmtMs(p50)}` : p90 > 0 ? `p90 ${fmtMs(p90)}` : "no timing";
+    const layerLine = (i: number) => {
+      const ly = tiers[i];
+      if (!ly) return null;
+      return `${TIERS[i]?.[2] ?? `layer ${i}`}: ${ly.kpi} ${ly.kpiLabel} · ${STATUS_LABEL[ly.tone]}`
+        + ` · Davis problems on it: ${probs(i)}`;
+    };
+    L.push("", "OWNERSHIP — inside or outside the customer's domains:",
+      "  INSIDE (built and operated by the customer):",
+      `    Application code: ${fm ? `${fmtN(Math.max(0, fm.errors - fm.errorsThird))} first-party client errors` : "client errors not available"}`,
+      own.firstParty
+        ? `    Own domain${own.firstParty.byTraces ? " (identified by the traces it serves, not by RUM's tag)" : ""}: `
+          + `${own.firstParty.domain} — ${fmtN(own.firstParty.reqs)} requests, ${fmtN(own.firstParty.err)} failed, ${lat(own.firstParty.p50, own.firstParty.p90)}`
+        : "    Own domain: not identified in this window",
+      ...[3, 4, 5, 6].map((i) => layerLine(i)).filter((x): x is string => !!x)
+        .map((x) => `    ${x}${x.startsWith(TIERS[3]?.[2] ?? "Route") ? " (the customer's ingress, or a CDN it contracts — check the element)" : ""}`),
+      "  OUTSIDE (third parties the application calls, and the users' own side):",
+      fm ? `    Third-party client errors: ${fmtN(fm.errorsThird)}` : "    Third-party client errors: not available",
+      own.thirdPartyCount
+        ? `    Third-party domains (${fmtN(own.thirdPartyCount)}): `
+          + own.thirdParties.map((x) => `${x.domain} ${fmtN(x.reqs)} req, ${fmtN(x.err)} failed, ${lat(x.p50, x.p90)}`).join("; ")
+        : "    Third-party domains: none called in this window",
+      ...[0].map((i) => layerLine(i)).filter((x): x is string => !!x)
+        .map((x) => `    ${x} (devices, networks and places of the users)`),
+      "  SHARED (the cloud provider runs the platform, the customer runs what is on it):",
+      ...[7].map((i) => layerLine(i)).filter((x): x is string => !!x).map((x) => `    ${x}`),
+      own.unattribErr > 0
+        ? `  UNATTRIBUTED: ${fmtN(own.unattribErr)} failed requests carried no domain, so they cannot be placed inside or outside`
+        : "");
     L.push("",
       scope.resolved
         ? `Backend discovery: ${scope.services.size} service(s) linked to this application`
@@ -2028,8 +2081,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                       if (sg.provider === "BASELINING") lit.add(`${sg.entityId}|${sg.name}`);
                   }
                   return lit.size;
-                })())} anomalies spotlighted —
-                each lit card wears its count · click anywhere to dismiss ✕
+                })())} anomalies spotlighted ✕
               </button>
             )}
             {tiers.slice(0, 4).map((layer, ti) => {
@@ -2378,9 +2430,8 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     <em>{fmtN(tiers[selAll].total)} total · {fmtN(tiers[selAll].items.length)} mapped
                       {impacted > 0 && <> · <b className="lrow__impn">{impacted} under an active signal</b></>}</em></div>
                   {aching.length === 0 && rows.length > 1 && (
-                    <p className="dd__calm">Nothing here needs attention. The elements shown
-                      carry the most traffic — where optimisation pays; the rest are healthy
-                      and folded.</p>
+                    <p className="dd__calm" title="The elements shown carry the most traffic — where optimization pays; the rest are folded.">
+                      Nothing here needs attention</p>
                   )}
                   {shown.map(({ n, i, probs, sigs }) => (
                     <div key={i}
@@ -2408,9 +2459,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                   ))}
                   {hidden > 0 && (
                     <button className="lrow lrow--fold" onClick={() => setDrawerAll(true)}>
-                      {aching.length > 0
-                        ? `show ${fmtN(hidden)} healthy — folded while ${fmtN(aching.length)} element${aching.length > 1 ? "s" : ""} need${aching.length > 1 ? "" : "s"} attention ▾`
-                        : `show ${fmtN(hidden)} more — nothing failing, nothing remarkable ▾`}
+                      {`show ${fmtN(hidden)} more ▾`}
                     </button>
                   )}
                   {drawerAll && orderly.length > lead.length && (
@@ -2536,7 +2585,7 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                     : reqs ? `${reqs} requests${p50 ? ` at p50 ${p50}` : ""}`
                     : "nothing from Davis on it";
                   const silence = /not reported/i.test(String(d0(/failed/i) ?? ""))
-                    ? " Failure is not reported on these spans — silence is not proof of clean."
+                    ? " · failure not reported on these spans"
                     : "";
                   return { t: "good" as const, txt: `Healthy — ${fact}.${silence}`, sub: null };
                 })();
@@ -2827,11 +2876,9 @@ export function DeliveryChain({ data, appId, sel, onSel, highlight, onHighlightC
                 const sys = (stores ?? []).find((st) => st.store === selStore)?.sys ?? "";
                 const covered = /postgres|mssql|sqlserver|hana|mysql|oracle|sap/i.test(sys);
                 return !covered && sys ? (
-                  <p className="dd__note">
-                    No Databases-app door for this store: that app covers
-                    PostgreSQL, MSSQL, HanaDB, MySQL, Oracle and SAP —
-                    {" "}{sys} is not among them. Its truth lives in the
-                    traces route below.
+                  <p className="dd__note"
+                    title={`The Databases app covers PostgreSQL, MSSQL, HanaDB, MySQL, Oracle and SAP — ${sys} is not among them. Its evidence lives in the traces route below.`}>
+                    not in the Databases app
                   </p>
                 ) : null;
               })()}

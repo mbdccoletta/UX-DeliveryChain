@@ -229,7 +229,7 @@ export function App() {
      sized on zero sessions, so the read ran unsampled (76 GiB, 13.9 s on
      production) and then ran again, sampled, when the count arrived. */
   const domains = useDomains(tf, state.app, tab === "chain" && !d.loading,
-    scanRatio(d.apps.find((a) => a.appId === state.app)?.sessions ?? 0));
+    scanRatio(d.apps.find((a) => a.appId === state.app)?.sessions));
   const chainData = React.useMemo(() => ({ ...d,
     ...(origins ? { origins } : {}), ...(domains ? { domains } : {}),
     originsLoading: tab === "chain" && !!state.app && origins === null }),
@@ -706,6 +706,7 @@ export function App() {
               {/* friction/onOpen retired with the audit: the prop was never
                   read and the hand-off callback had no consumer */}
               <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={jd.sequences} appId={current || null}
+                sliceMin={jd.sliceMin}
                 transitions={jd.transitions} views={jd.views} ux={uxMap}
                 tf={tf}
                 cohort={state.coh === "unconverted" ? "unconverted" : null}

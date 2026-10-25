@@ -41,6 +41,8 @@ async function windowFacts(
   defs?: OutcomeDefs,
   /** Sessions of the window — sizes the session hash inside the read. */
   sessions = 0,
+  /** The refresh generation — part of the remembered read's key. */
+  gen = 0,
 ): Promise<{ facts: CohortFacts; sampled: boolean }> {
   /* ONE SAMPLE FOR BOTH SCANS (sampleRate, utils/dql): the same sessions in
      the facts and the paths, so the join is exact inside the sample. The read
@@ -51,13 +53,14 @@ async function windowFacts(
      shared link landing before the mine) no longer pays the same read twice;
      the Journeys poster asks under the same key */
   const sized = await memoSized(
-    `cohort|${tf.from}|${tf.to}|${appId}|${JSON.stringify(defs?.[appId] ?? null)}|true`,
+    `cohort|${tf.from}|${tf.to}|${appId}|${JSON.stringify(defs?.[appId] ?? null)}|true|${gen}`,
     () => runSized(tf, [
       { build: (t, share) => qCohortSessions(t, appId, defs, sampleRate(sessions * share)), max: 10000 },
       { build: (t, share) => qPathSessions(t, appId, sampleRate(sessions * share)), max: 10000 },
-    ]));
+    ]).then((r) => ({ ...r, hash: sampleRate(sessions * r.share) })));
   const [rows, paths] = sized.rows;
-  const rate = sized.share * sampleRate(sessions * sized.share);
+  // scaled by the sample the read was made with (it may be a remembered one)
+  const rate = sized.share * sized.hash;
   const inCohort = new Set<string>();
   for (const r of paths) {
     const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
@@ -125,8 +128,8 @@ export function useRouteCohort(
         const prevTf: Timeframe = { ...tf, from: shiftBack(tf.from, span), to: tf.from };
         // each window read inside the budget, sized by a measured probe
         const [a, b] = await Promise.all([
-          windowFacts(tf, appId, picks, ctx, defs, appSessions),
-          windowFacts(prevTf, appId, picks, ctx, defs, appSessions),
+          windowFacts(tf, appId, picks, ctx, defs, appSessions, gen),
+          windowFacts(prevTf, appId, picks, ctx, defs, appSessions, gen),
         ]);
         const res: RouteCohort = { cur: a.facts, prev: b.facts, sampled: a.sampled || b.sampled };
         memo.set(key, res);

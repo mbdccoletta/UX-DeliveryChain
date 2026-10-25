@@ -21,10 +21,6 @@ export interface EdgeHealth {
   note: string;
 }
 
-/** Above this the move is slow enough that users notice waiting. */
-const SLOW_P90_NS = 3e9;
-/** Share of interactions with poor responsiveness before it counts. */
-const SLOW_INP_SHARE = 0.2;
 
 /** Reads the health of one move between two views. */
 export function edgeHealth(t: TransitionRow): EdgeHealth {
@@ -44,17 +40,13 @@ export function edgeHealth(t: TransitionRow): EdgeHealth {
       note: `${parts.join(" · ")} · ${fmtN(t.sessions)} sessions on this move`,
     };
   }
+  /* PRINTED, NOT JUDGED (0.17.43). "Slow" was this app's own lines — a 3 s
+     p90 and 20% poorly-responding interactions — colouring moves the platform
+     never rated. The measurements stay in the note; only what the platform
+     itself recorded (abandoned and timed-out actions, above) colours a move. */
   const inpShare = t.actions ? t.slowInp / t.actions : 0;
-  if (inpShare >= SLOW_INP_SHARE) {
-    return {
-      health: "slow",
-      note: `${Math.round(inpShare * 100)}% of interactions respond poorly`,
-    };
-  }
-  if (t.p90 > SLOW_P90_NS) {
-    return { health: "slow", note: `p90 ${fmtMs(t.p90)} to complete` };
-  }
-  return { health: "ok", note: `p50 ${fmtMs(t.p50)}` };
+  return { health: "ok", note: `p50 ${fmtMs(t.p50)} · p90 ${fmtMs(t.p90)}`
+    + (inpShare > 0 ? ` · ${Math.round(inpShare * 100)}% of interactions respond poorly` : "") };
 }
 export function frictionFor(
   friction: FrictionRow[], view: string, appId?: string | null,

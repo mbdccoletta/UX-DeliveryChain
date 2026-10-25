@@ -380,19 +380,19 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      metric is extracted from, once a country is opened, inside the click
      budget (hooks/useRegionApdex). */
   const regionApdex = useRegionApdex(data.tf, appId, geoMetric ? geoSel : null,
-    scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0), fmRated);
+    scanRatio(fm?.sessions ?? censusRow?.sessions), fmRated);
   // whether Dynatrace Assist can take an action's investigation (0.17.25)
   const assist = useAssistState();
   /* the opened state's costliest actions — read on the click (0.17.19) */
   const regionActs = useRegionActions(data.tf, appId, geoMetric ? geoSel : null,
     geoMetric && geoSel && regionSel?.startsWith(`${geoSel}-`) ? regionSel.slice(geoSel.length + 1) : null,
-    scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0));
+    scanRatio(fm?.sessions ?? censusRow?.sessions));
   /* …and with a country open and no state picked, the COUNTRY's own
      (0.17.42): its colour is an Apdex too, and a reader shown "Warning ·
      Apdex 0.62" with nothing under it cannot see what put it there. */
   const countryActs = useRegionActions(data.tf, appId, geoMetric ? geoSel : null,
     geoMetric && geoSel && !regionSel ? "" : null,
-    scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0));
+    scanRatio(fm?.sessions ?? censusRow?.sessions));
   const regionScore = (r: { id?: string; name?: string }): number | null => {
     if (!regionApdex) return null;
     const code = r.id?.split("-").slice(1).join("-");
@@ -879,7 +879,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      window (140 GiB for the views of a ~6M-session hour). The smallest Grail
      sampling ratio that keeps the read inside the budget is used; a small
      application stays exact (1). */
-  const detailRatio = scanRatio(fm?.sessions ?? censusRow?.sessions ?? 0);
+  const detailRatio = scanRatio(fm?.sessions ?? censusRow?.sessions);
   const detailRows = useCardDetail(appId, data.tf,
     picked && detail && detail !== "services" ? detail : null, detailRatio);
   // which of the listed domains are served by instrumented code — one scan,
@@ -1080,8 +1080,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           + ` every tolerating action made satisfying would add ${(uxRow.tolerating / 2 / rt).toFixed(3)} to the Apdex,`
           + ` every frustrated one ${(uxRow.frustrated / rt).toFixed(3)}.`];
       })() : []),
-      fm ? `Sessions: ${fmtN(fm.sessions)} active in the window (Dynatrace's estimate), ${fmtN(fm.realSessions)} from real people`
-        : impacted ? `Sessions: ${fmtN(impacted.sessions)}` : "Sessions: not measured",
+      /* THE CARD'S NUMBER FIRST (0.17.43): the facts quoted the metric's
+         estimate while the card showed the session store — two numbers for
+         one fact. The card's figure leads; the estimate is named as such. */
+      `Sessions (as the card shows): ${fmtN(impacted?.sessions ?? app.sessions)}`
+        + (impacted?.base === "sessions" ? " — closed sessions, the list Users & Sessions shows" : "")
+        + (fm ? `; Dynatrace's estimate of sessions active in the window: ${fmtN(fm.sessions)}, ${fmtN(fm.realSessions)} from real people` : ""),
       impacted && impacted.realSessions > 0
         ? `Closed real-user sessions with errors (Users & Sessions' definition): ${fmtN(impacted.hitReal)} of ${fmtN(impacted.realSessions)} (${pc(impacted.hitReal / impacted.realSessions)})`
           + (notListed > 0 ? `; ${fmtN(notListed)} more sessions were still running and are not in that count` : "")
@@ -2973,7 +2977,7 @@ function CleanCard(p: CardProps) {
           pulse={p.problems > 0}
           metric="errors" active={p.detail === "errors"} onPick={p.onMetric}
           spark={<><Bars vals={errs} times={times} label="errors" fc={p.fcBars?.errors}
-            tone={p.errors > 0 ? "bad" : "info"} />
+            tone="info" />
             <em className="tk-block__sparkv">{p.errorsPerMin}/min<br />error rate</em></>}>
           <div className="tk-row2">
             {/* A mobile application's card leads with its FATAL failures.
@@ -2984,14 +2988,13 @@ function CleanCard(p: CardProps) {
                 hotfix tonight. Web apps cannot crash this way, so the stat
                 exists only where the types can occur. */}
             {p.isMobile && (
-              <Stat v={fmtK(p.crashes)} l="crashes"
-                tone={p.crashes > 0 ? "bad" : "good"} />
+              <Stat v={fmtK(p.crashes)} l="crashes" />
             )}
-            <Stat v={fmtK(p.errors)} l="errors" tone={p.errors > 0 ? "bad" : undefined} />
-            {/* The count that decides whether anyone should be woken up: how
-                many of those errors a person actually met. Red only for those. */}
-            <Stat v={p.realErrors === null ? "…" : fmtK(p.realErrors)} l="in real-user sessions"
-              tone={p.realErrors ? "bad" : "good"} />
+            {/* counts in neutral ink (0.17.43): "any error is red" was this
+                app's line, not Dynatrace's — the Apdex judges, and an open
+                Davis problem (below) is the platform's own judgement */}
+            <Stat v={fmtK(p.errors)} l="errors" />
+            <Stat v={p.realErrors === null ? "…" : fmtK(p.realErrors)} l="in real-user sessions" />
             <Stat v={String(p.problems)} l={`active problem${p.problems === 1 ? "" : "s"}`}
               tone={p.problems > 0 ? "bad" : "good"} />
           </div>

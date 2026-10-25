@@ -19,6 +19,7 @@ const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic";
 import type { AppRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
+import { useMemoGen } from "../utils/memo";
 import { Button } from "@dynatrace/strato-components/buttons";
 import { Intelligence } from "./Intelligence";
 import { PAGE_ABOUT, JOURNEY_STARTERS } from "../utils/starters";
@@ -633,8 +634,10 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 export function FlowSankey({
   apps, seqs, appId, transitions = [], views = [], ux, tf,
   cohort, onCohortConsumed, openRoutes,
-  outcomeDefs, onBizScope, onPickApp,
+  outcomeDefs, onBizScope, onPickApp, sliceMin,
 }: {
+  /** Minutes the journeys were mined from, when sliced to the scan budget. */
+  sliceMin?: number;
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
   tf?: Timeframe;
@@ -755,6 +758,8 @@ export function FlowSankey({
    * so stages, matchers, summary and poster all read the same definition */
   activeDone = outcomeTestFor(appId, outcomeDefs);
   const defsKey = JSON.stringify(outcomeDefs?.[appId ?? ""] ?? null);
+  // Refresh reaches the remembered sized reads too
+  const memoGen = useMemoGen();
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
   stepModeRef.current = !!appId && mode === "steps";
@@ -1281,7 +1286,7 @@ export function FlowSankey({
          settled slice of it, and every count is scaled back (0.17.27) */
       const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
       // sized by a measured probe (runSized, 0.17.33)
-      const sized = await memoSized(`ntel|${tf.from}|${tf.to}|${appId}`,
+      const sized = await memoSized(`ntel|${tf.from}|${tf.to}|${appId}|${memoGen}`,
         () => runSized(tf, [{ build: (t) => qNoTelemetry(t, appId), max: 20 }]));
       const slice = sized.share < 1 ? { tf: sized.tf, share: sized.share } : null;
       const k = 1 / sized.share;
@@ -1326,13 +1331,15 @@ export function FlowSankey({
          the hash inside the read — `rate` is the fraction the counts stand for */
       const wantPaths = !(mode === "unconverted" || noNav);
       // the same key as Business Control's route cohort: one read serves both
-      const sized = await memoSized(`cohort|${tf.from}|${tf.to}|${appId}|${defsKey}|${wantPaths}`,
+      /* the hash the read actually used travels with it: a remembered read
+         is scaled by ITS sample, never by the sessions this caller sees now */
+      const sized = await memoSized(`cohort|${tf.from}|${tf.to}|${appId}|${defsKey}|${wantPaths}|${memoGen}`,
         () => runSized(tf, [
         { build: (t, share) => qCohortSessions(t, appId, outcomeDefs, sampleRate(appSessions * share)), max: 10000 },
         ...(wantPaths ? [{ build: (t: Timeframe, share: number) =>
           qPathSessions(t, appId, sampleRate(appSessions * share)), max: 10000 }] : []),
-      ]));
-      const rate = sized.share * sampleRate(appSessions * sized.share);
+      ]).then((r) => ({ ...r, hash: sampleRate(appSessions * r.share) })));
+      const rate = sized.share * sized.hash;
       const rows = sized.rows[0];
       const pr = wantPaths ? sized.rows[1] : null;
       // membership. "unconverted" is a predicate on the row (reached no goal);
@@ -1725,7 +1732,9 @@ export function FlowSankey({
                     const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
                     const lines = [
                       `Application: ${app?.name ?? "unknown"}`,
-                      `Window: ${tf?.label ?? "unknown"}`,
+                      `Window: ${tf?.label ?? "unknown"}`
+      // the sample travels with the facts, as it does with the screen (0.17.44)
+      + (sliceMin ? ` — paths mined from the last ${sliceMin} settled minutes; counts scaled, shares the sample's own` : ""),
                       active.length
                         ? `THE READER HAS NARROWED THE DIAGRAM. Everything below describes`
                           + ` ONLY that selection — ${fmtN(scopeN)} of the application's`

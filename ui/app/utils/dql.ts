@@ -779,6 +779,12 @@ export function shiftBack(t: string, min: number): string {
   return `${v.replace(/^now(?!\()/i, "now()")}-${min}m`;
 }
 const isAbsolute = (t: string) => /^"[^"]+"$/.test(t.trim());
+/** An absolute end inside the events' settling lag is pulled back to it:
+ *  probing unsettled minutes under-estimates, and a slice of them undercounts. */
+const settledAbs = (t: string): string => {
+  const ms = Date.parse(t.trim().replace(/^"|"$/g, ""));
+  return Number.isFinite(ms) && ms > Date.now() - EVENT_LAG_MIN * 6e4 ? `now()-${EVENT_LAG_MIN}m` : t.trim();
+};
 
 export function sliceFor(tf: Timeframe, estGiB: number): { tf: Timeframe; share: number } | null {
   const to = tf.to.trim();
@@ -788,7 +794,7 @@ export function sliceFor(tf: Timeframe, estGiB: number): { tf: Timeframe; share:
   const sliceMin = Math.max(2, Math.floor(tf.minutes * (OPTIONAL_SCAN_BUDGET_GIB / estGiB)));
   if (sliceMin >= tf.minutes) return null;
   const live = /^now\(?\)?$/i.test(to);
-  const end = live ? `now()-${EVENT_LAG_MIN}m` : relative ? to.replace(/^now(?!\()/i, "now()") : to;
+  const end = live ? `now()-${EVENT_LAG_MIN}m` : relative ? to.replace(/^now(?!\()/i, "now()") : settledAbs(to);
   return { tf: { ...tf, from: shiftBack(end, sliceMin), to: end, minutes: sliceMin },
     share: sliceMin / tf.minutes };
 }
@@ -819,35 +825,43 @@ export async function runSized(
   probeMin = 2,
 ): Promise<{ rows: Array<Record<string, unknown>[]>; tf: Timeframe; share: number;
   /** What these reads cost per minute of window, measured (0 when unknown). */
-  gibPerMin: number }> {
+  gibPerMin: number;
+  /** A read was cut by the scan ceiling: the answer is partial — callers
+   *  must not memoise or cache it as whole. */
+  truncated?: boolean }> {
   const to = tf.to.trim();
   const live = /^now\(?\)?$/i.test(to);
   /* an absolute window is sliced too (0.17.42): it read whole before, which
      on a custom range was the full ≈300 GiB the budget exists to prevent */
   const relative = /^now\(?\)?(\s*-\s*\d+\s*[smhdw])*$/i.test(to) || isAbsolute(to);
+  let truncated = false;
   const runAll = async (t: Timeframe, share: number) => {
     let bytes = 0;
+    /* a sized read gets twice the budget as its ceiling: the probe can
+       under-read a window whose earlier minutes were busier, and a read cut
+       at the budget itself would be partial for that reason alone */
     const rows = await Promise.all(queries.map((q) => runDql<Record<string, unknown>>(
-      q.build(t, share), q.max, undefined, undefined,
-      { onMeta: (m) => { bytes += m.scannedBytes; } })));
+      q.build(t, share), q.max, () => { truncated = true; }, undefined,
+      { onMeta: (m) => { bytes += m.scannedBytes; },
+        scanLimitGb: Math.ceil(budgetGiB * 2 * 1.074) })));
     return { rows, bytes };
   };
   const PROBE = Math.max(1, Math.round(probeMin));
   const whole = async () => {
     const r = await runAll(tf, 1);
-    return { ...r, tf, share: 1, gibPerMin: r.bytes / 2 ** 30 / Math.max(1, tf.minutes) };
+    return { ...r, tf, share: 1, gibPerMin: r.bytes / 2 ** 30 / Math.max(1, tf.minutes), truncated };
   };
   if (!relative || !(tf.minutes > PROBE * 2)) return whole();
-  const end = live ? `now()-${EVENT_LAG_MIN}m` : isAbsolute(to) ? to : to.replace(/^now(?!\()/i, "now()");
+  const end = live ? `now()-${EVENT_LAG_MIN}m` : isAbsolute(to) ? settledAbs(to) : to.replace(/^now(?!\()/i, "now()");
   const at = (min: number): Timeframe => ({ ...tf, from: shiftBack(end, min), to: end, minutes: min });
   const probe = await runAll(at(PROBE), PROBE / tf.minutes);
   const perMin = probe.bytes / 2 ** 30 / PROBE;
   if (!(perMin > 0) || perMin * tf.minutes <= budgetGiB) return whole();
   const mins = Math.floor(budgetGiB / perMin);
-  if (mins <= PROBE) return { rows: probe.rows, tf: at(PROBE), share: PROBE / tf.minutes, gibPerMin: perMin };
+  if (mins <= PROBE) return { rows: probe.rows, tf: at(PROBE), share: PROBE / tf.minutes, gibPerMin: perMin, truncated };
   const t = at(Math.min(mins, tf.minutes));
-  return { ...(await runAll(t, t.minutes / tf.minutes)), tf: t, share: t.minutes / tf.minutes,
-    gibPerMin: perMin };
+  const sliced = await runAll(t, t.minutes / tf.minutes);
+  return { ...sliced, tf: t, share: t.minutes / tf.minutes, gibPerMin: perMin, truncated };
 }
 
 /* A SAMPLE SIZED BY WHAT THE READ ACTUALLY COSTS (0.17.41). Click-time
@@ -880,11 +894,14 @@ export async function runRefined(
    that reopening is free, short enough that a remembered cohort cannot drift
    from a freshly mined diagram. A failure is never remembered. */
 const SIZED_TTL = 5 * 60_000;
-const sizedMemo = new Map<string, { at: number; p: ReturnType<typeof runSized> }>();
-export function memoSized(key: string, run: () => ReturnType<typeof runSized>): ReturnType<typeof runSized> {
+const sizedMemo = new Map<string, { at: number; p: Promise<unknown> }>();
+export function memoSized<T extends { truncated?: boolean }>(key: string, run: () => Promise<T>): Promise<T> {
   const hit = sizedMemo.get(key);
-  if (hit && Date.now() - hit.at < SIZED_TTL) return hit.p;
-  const p = run().catch((e) => { sizedMemo.delete(key); throw e; });
+  if (hit && Date.now() - hit.at < SIZED_TTL) return hit.p as Promise<T>;
+  const p = run()
+    // a read cut by the ceiling is answered once, never remembered as whole
+    .then((r) => { if (r.truncated) sizedMemo.delete(key); return r; })
+    .catch((e) => { sizedMemo.delete(key); throw e; });
   sizedMemo.set(key, { at: Date.now(), p });
   return p;
 }

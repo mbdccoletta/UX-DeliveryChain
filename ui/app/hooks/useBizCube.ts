@@ -38,6 +38,8 @@ export interface BizCube {
   cachedAt?: number;
   /** The read failed — not an empty window. Never memoised or cached. */
   failed?: boolean;
+  /** A read was cut by the scan ceiling. Never memoised or cached. */
+  truncated?: boolean;
   /** Set when the window was read from its last N settled minutes to stay
    *  inside the scan budget; every count is scaled to the whole window. */
   sliceMin?: number;
@@ -161,17 +163,20 @@ async function loadCube(tf: Timeframe, defs: OutcomeDefs | undefined,
     ], undefined, 1);
     const f = sized.share > 0 ? 1 / sized.share : 1;
     const cur = sized.rows[0].map((r) => scaleRow(shapeRow(r), f)).filter((r) => r.appId);
-    res = { cur, prev: prevMap(sized.rows[1], f), partial: false,
+    res = { cur, prev: prevMap(sized.rows[1], f),
       capped: sized.rows[0].length >= BIZ_CUBE_CAP,
       sliceMin: sized.share < 1 ? sized.tf.minutes : undefined,
-      gibPerMin: sized.gibPerMin || undefined };
+      gibPerMin: sized.gibPerMin || undefined,
+      // cut by the scan ceiling: shown (the page's Partial data banner says
+      // so), never memoised or cached as whole
+      partial: false, truncated: !!sized.truncated };
   } catch {
     /* A FAILED READ IS NOT AN EMPTY WINDOW. Returned as rows, it was
        memoised and the board said "no real customers in this window" until
        Refresh. It now says the read failed, and the next open tries again. */
     return { cur: [], prev: new Map(), partial: false, capped: false, failed: true };
   }
-  if (res.cur.length) {
+  if (res.cur.length && !res.truncated) {
     void cache.write(cacheKey, { cur: pack(res.cur), prev: pack([...(res.prev?.values() ?? [])]),
       sliceMin: res.sliceMin, gibPerMin: res.gibPerMin }, tf.minutes, BIZ_CACHE_TTL);
   }
@@ -199,7 +204,7 @@ export function useBizCube(tf: Timeframe, defs?: OutcomeDefs,
     let p = pending.get(key);
     if (!p) {
       p = loadCube(tf, defs, appId, gen === 0)
-        .then((res) => { if (!res.failed) memo.set(key, res); return res; })
+        .then((res) => { if (!res.failed && !res.truncated) memo.set(key, res); return res; })
         .finally(() => { pending.delete(key); });
       pending.set(key, p);
     }

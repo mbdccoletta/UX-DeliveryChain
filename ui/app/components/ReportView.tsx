@@ -982,7 +982,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                 : `  Customers (real users): ${fmtCount(c.customers)}\n`
                   + `  Customers hit by a failure: ${fmtCount(c.customersAtRisk)}`
                   + ` (was ${fmtCount(p.customersAtRisk)})\n`
-                  + `  Customers made to wait (an action over 3s): ${fmtCount(c.waited)}`
+                  + `  Customers made to wait (an action Dynatrace rated below satisfied): ${fmtCount(c.waited)}`
                   + ` (was ${fmtCount(p.waited)})\n`
                   + `  Customers who bounced: ${fmtCount(Math.max(0, c.customers - c.realEngaged))}`,
               scopeMobile ? `  Sessions lost to a crash or freeze: ${fmtCount(c.crashed)}` : "",
@@ -1019,6 +1019,27 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
                   + (lost > 0 ? ` (${fmtCount(lost)} left before this`
                     + (where.length ? `, most on ${where[0].v}` : "") + ")" : "");
               }) : []),
+              "",
+              /* 0.17.44: what the board already shows but the questions could
+                 not cite — where failure concentrates, and whether the
+                 difficulty sits inside the backend or outside it */
+              segments && segments.best.length ? "SEGMENTS WHERE FAILURE CONCENTRATES (share of real customers hit, against the application's)" : "",
+              ...(segments?.best ?? []).map((x) =>
+                `  ${x.d} ${x.bucket}: ${fmtCount(x.n)} customers, ${pct(x.rate)} hit (${x.lift.toFixed(1)}× the application)`),
+              ...(segments?.worst.length ? ["  Least affected: " + segments.worst.map((x) =>
+                `${x.d} ${x.bucket} ${pct(x.rate)}`).join("; ")] : []),
+              where ? "INSIDE OR OUTSIDE THE BACKEND" : "",
+              ...(where ? [
+                where.cur ? `  Waiting time of measured views: ${pct(where.cur.srv)} server, ${pct(where.cur.net)} network, ${pct(where.cur.rend)} rendering on the device` : "  Waiting time: not measured",
+                where.errTotal > 0
+                  ? `  Errors by origin: backend ${fmtCount(where.errN("backend"))}, frontend code ${fmtCount(where.errN("frontend"))}, third party ${fmtCount(where.errN("third_party"))}, `
+                    + `device ${fmtCount(where.errN("device"))}, connection ${fmtCount(where.errN("connection"))}, 4xx ${fmtCount(where.errN("request_4xx"))}, `
+                    + `policy ${fmtCount(where.errN("policy"))}, other ${fmtCount(where.errN("other"))}`
+                  : "  Errors by origin: none",
+                where.conc ? `  Concentration: ${where.conc.dim} ${where.conc.bucket} is hit ${where.conc.lift.toFixed(1)}× the application's rate` : "  Concentration: failure is spread across segments",
+                `  Davis problems on this application's chain: ${where.backendProblems === null ? "still resolving" : fmtN(where.backendProblems)}`,
+              ] : []),
+              kpis?.sliceMin ? `SAMPLE: the figures above were read from the last ${kpis.sliceMin} settled minutes of each window and scaled; rates are the sample's own` : "",
               "",
               geoRows && geoRows.length ? "WHERE THE CUSTOMERS ARE" : "",
               ...(geoRows ?? []).slice(0, 6).map((g) => {
@@ -1421,7 +1442,7 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
               <div className="bc__out-r" key={v.view}>
                 <span className="bc__out-n">{v.view}</span>
                 <b className="num">{fmtMs(v.p50)}</b>
-                <i className={v.times >= 2.5 ? "bc__out-x bc__out-x--bad" : "bc__out-x"}>
+                <i className="bc__out-x">
                   {v.times.toFixed(1)}× the median screen
                 </i>
                 <em>{fmtN(v.views)} views · {fmtN(v.sessions)} sessions meet it</em>
@@ -1597,10 +1618,12 @@ export function ReportView({ data, scopeApp, cov, onCov, outcomeDefs,
             <div className="bc__seg">
               {/* the heading wears the LEAD'S OWN tone — painting a merely
                   tolerating country red contradicted its row two lines down */}
-              <h3 className={`bc__seg-h bc__seg-h--${lead ? lead.tone : "good"}`}>
+              {/* none rated is not "all Healthy": the heading says which (0.17.44) */}
+              <h3 className={`bc__seg-h bc__seg-h--${lead ? lead.tone
+                : judged.some((x) => x.tone === "good") ? "good" : "wait"}`}>
                 {lead
                   ? `${geoName(lead.g.country)} is ${PLACE_WORD[lead.tone]} — ${judgePlace(lead.g).because}`
-                  : "No country below Healthy"}
+                  : judged.some((x) => x.tone === "good") ? "No country below Healthy" : "No country rated"}
               </h3>
               {judged.slice(0, 6).map(({ g, tone }) => (
                 <div className="bc__seg-r" key={g.country}

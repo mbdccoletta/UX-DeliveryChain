@@ -99,7 +99,8 @@ export function useJourneys(
           })),
           ...(slice ? { sliceMin: slice.tf.minutes } : {}),
         };
-        memo.set(key, res);
+        // a read cut by the scan ceiling is shown once, never remembered as whole
+        if (!("truncated" in sized && sized.truncated)) memo.set(key, res);
         if (live) setOut(res);
       } catch {
         if (live) setOut({ views: [], sequences: [], transitions: [], friction: [], failed: true });
