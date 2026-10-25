@@ -159,6 +159,12 @@ export function useImpacted(
            base there, and the card is told which base it got. */
         if (fe) {
           out = await ask(qImpactedSessions(tf!, fe));
+          /* the store answered with no row: it holds no closed session for
+             this application yet — a measured zero, said as one, so nothing
+             waits for a count that is not coming (0.17.48) */
+          if (!out && storeOnly) {
+            out = { sessions: 0, hit: 0, realSessions: 0, hitReal: 0, hitRobot: 0, hitSynth: 0, places: [] };
+          }
           if (out) out.base = "sessions";
           /* NOTHING SERIALIZED IS NOT NOTHING HAPPENED. The session store
              trails live traffic by the aggregation service's 30-minute

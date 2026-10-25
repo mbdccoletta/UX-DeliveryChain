@@ -3618,3 +3618,6 @@ div:has(> header):has(main) > div {
 .rinfo__so-e--bad { color: var(--ink); font-weight: 700; }
 
 .bc__seg-h--wait { color: var(--ink-2); }
+
+/* 0.17.48 — what sets the opened place apart: same grid as the action table */
+.geo__why .geo__act-nm em { font-style: normal; color: var(--ink-3); margin-right: 6px; }

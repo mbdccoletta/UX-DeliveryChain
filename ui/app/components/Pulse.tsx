@@ -51,7 +51,7 @@ import { useUxOverview, withCensus, type UxMap } from "../hooks/useUxOverview";
 import { useFrontendMetrics } from "../hooks/useFrontendMetrics";
 import { scanRatio } from "../utils/cost";
 import { useClassicApdex, useClassicGeo } from "../hooks/useClassicApdex";
-import { useRegionActions, useRegionApdex } from "../hooks/useRegionApdex";
+import { useRegionActions, useRegionApdex, useRegionWhy, whyFindings } from "../hooks/useRegionApdex";
 import { useAssistState } from "../hooks/useAssist";
 import { mergePlaces, type ClassicPlace } from "../utils/classicApdex";
 import { originOf } from "./DeliveryChain";
@@ -387,6 +387,13 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
   const regionActs = useRegionActions(data.tf, appId, geoMetric ? geoSel : null,
     geoMetric && geoSel && regionSel?.startsWith(`${geoSel}-`) ? regionSel.slice(geoSel.length + 1) : null,
     scanRatio(fm?.sessions ?? censusRow?.sessions));
+  /* WHAT SETS THE OPENED PLACE APART (0.17.48): the opened state — or, with
+     none picked, the opened country — against the rest of the application,
+     by OS, app or browser, device, network provider and how actions ended */
+  const placeWhy = useRegionWhy(data.tf, appId, geoMetric ? geoSel : null,
+    geoMetric && geoSel ? (regionSel?.startsWith(`${geoSel}-`) ? regionSel.slice(geoSel.length + 1) : "") : null,
+    scanRatio(fm?.sessions ?? censusRow?.sessions));
+  const placeWhyF = React.useMemo(() => (placeWhy ? whyFindings(placeWhy) : null), [placeWhy]);
   /* …and with a country open and no state picked, the COUNTRY's own
      (0.17.42): its colour is an Apdex too, and a reader shown "Warning ·
      Apdex 0.62" with nothing under it cannot see what put it there. */
@@ -1009,14 +1016,18 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
      the application's scope, which decides which of those problems are this
      application's — and which it did not wait for at all before. */
   const davisReady = !!data.davisFinal || data.partial === false;
-  const verdictFinal = impactFinal && davisReady && !scope.loading
+  /* THE STATUS IS THE APDEX (apdexOnly), so the verdict waits for the
+     Apdex — not for the count of sessions with errors (0.17.48). Waiting on
+     that count held a small application on "Measuring" for good when the
+     session store had no closed sessions yet to count. */
+  const verdictFinal = davisReady && !scope.loading
     && !!ux && !ux.scorePartial && !classicWait;
   /** The verdict is the forecast's: the hero's pill shows that forecast,
    *  and the map says the verdict has no place. */
   const forecastLed = verdictFinal && verdict.cause === "forecast";
   const shown = verdictFinal ? verdict : {
     tone: "info" as Tone, label: "Measuring",
-    reason: "counting this window's sessions — the verdict appears once they are all in",
+    reason: "reading this window's Apdex — the verdict appears once it is in",
     hitRate: null };
   const tone: Tone = shown.tone;
 
@@ -1162,6 +1173,15 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
           const ap = apdexOf({ satisfied: x.sat, tolerating: x.tol, frustrated: x.fru });
           L.push(`  ${x.name}: ${fmtN(x.n)} runs, Apdex ${fmtApdex(ap)}, p50 ${sec(x.p50)}, p90 ${sec(x.p90)}, `
             + `${Math.round(((x.fru + x.tol / 2) / lostAll) * 100)}% of the country's loss`);
+        }
+      }
+      if (geoSel && placeWhyF && placeWhyF.findings.length) {
+        L.push(`What sets the opened ${regionSel ? "state" : "country"} apart from the rest of the application`
+          + `${placeWhyF.apdexElse !== null ? ` (rest of the application: Apdex ${fmtApdex(placeWhyF.apdexElse)})` : ""}`
+          + `${placeWhy?.ratio ? `, 1-in-${placeWhy.ratio} sample` : ""}:`);
+        for (const x of placeWhyF.findings.slice(0, 5)) {
+          L.push(`  ${x.d} = ${x.v}: ${Math.round(x.shareOfLoss * 100)}% of the place's Apdex loss, Apdex here ${fmtApdex(x.apdexHere)}`
+            + `, same ${x.d} elsewhere ${x.apdexElse === null ? "not present" : fmtApdex(x.apdexElse)}, p50 ${sec(x.p50)}`);
         }
       }
       const opened = regionSel && regions ? regions.find((x) => x.id === regionSel) : null;
@@ -1310,6 +1330,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         requests={pulse?.requests ?? vitals?.requests ?? 0} reqFail={pulse?.reqFail ?? 0}
         hitSessions={harm?.hit ?? 0}
         hitBase={harm?.base}
+        sessionsFinal={impactFinal}
         loadP50={fm ? fm.p50LoadMs * 1e6 : app.p50Load > 0 ? app.p50Load : app.p50View}
         apdex={uxRow ? scoreOf(uxRow) : null}
         apdexPartial={!!ux?.scorePartial}
@@ -1540,6 +1561,33 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
         /* THE ACTIONS BEHIND A PLACE'S APDEX — a state's, or with region ""
            the opened country's: ranked by what each costs the score
            (frustrated + half the tolerating), each a hand-off to Assist. */
+        /* what sets the opened place apart — labels and numbers; the method
+           is in the tooltip */
+        const whyBlock = () => {
+          if (placeWhy === null) return <div className="geo__card-why">comparing with the rest of the application…</div>;
+          if (!placeWhyF || !placeWhyF.findings.length) return null;
+          return (
+            <div className="geo__acts geo__why"
+              title={"Each row: the value that loses this place the most Apdex beyond what the same value loses "
+                + "elsewhere in the application — share of this place's loss, Apdex here, Apdex of the same value elsewhere"
+                + (placeWhy.ratio ? ` · from a 1-in-${placeWhy.ratio} sample` : "")}>
+              <div className="geo__act geo__act--hd">
+                <span>what sets it apart{placeWhyF.apdexElse !== null ? ` · rest of the app ${fmtApdex(placeWhyF.apdexElse)}` : ""}</span>
+                <span>of the loss</span><span>here</span><span>elsewhere</span><span>p50</span>
+              </div>
+              {placeWhyF.findings.slice(0, 5).map((x) => (
+                <div className="geo__act" key={x.d}
+                  title={`${x.d}: ${x.v} — ${fmtN(Math.round(x.n))} rated actions here`}>
+                  <span className="geo__act-nm"><em>{x.d}</em> {x.v}</span>
+                  <span className="num">{Math.round(x.shareOfLoss * 100)}%</span>
+                  <b className="num" style={{ color: TOK[scoreTone(x.apdexHere) ?? "good"] }}>{fmtApdex(x.apdexHere)}</b>
+                  <span className="num">{x.apdexElse === null ? "—" : fmtApdex(x.apdexElse)}</span>
+                  <span className="num">{x.p50 ? fmtMs(x.p50) : "—"}</span>
+                </div>
+              ))}
+            </div>
+          );
+        };
         const actsTable = (acts: typeof regionActs, region: string, regionName: string) => {
           if (acts === null) return <div className="geo__card-why">measuring the actions behind it…</div>;
           if (!acts.length) return null;
@@ -2212,6 +2260,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                       </div>
                       <div className="geo__card-why">{because(g)}</div>
                       {actsTable(countryActs, "", "")}
+                      {whyBlock()}
                     </div>
                   );
                 })()}
@@ -2257,6 +2306,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                             {/* what put it there: the actions that cost its
                                 Apdex most, by the score's own arithmetic */}
                             {actsTable(regionActs, (regionSel ?? "").slice(geoSel!.length + 1), r.name)}
+                            {whyBlock()}
 
                           </div>
                         );
@@ -2525,6 +2575,8 @@ interface CardProps {
   sessions: number; clean: number | null; tone: Tone; name: string; isMobile: boolean;
   /** Which store the hit share was counted on (session store vs events). */
   hitBase?: "sessions" | "events";
+  /** The session-store count is final (possibly zero closed sessions). */
+  sessionsFinal?: boolean;
   /** The per-bin series; `t` is what the hover read-out puts on screen. */
   series: Array<{ t: string; sessions: number; errors: number; requests: number }>;
   /** Sessions per minute, read off the same series the bars draw. */
@@ -2813,7 +2865,8 @@ function CleanCard(p: CardProps) {
   // 100% must mean NOT ONE session was hit. Plain rounding promoted 99.8% to
   // perfect, which the session stream then contradicted with a red particle —
   // the stream was right and the number was wrong.
-  const pct = p.clean === null ? "…"
+  // a final count of zero closed sessions has no share to print — not "…"
+  const pct = p.clean === null ? (p.hitBase === "sessions" && p.hitSessions === 0 && p.sessionsFinal ? "—" : "…")
     : `${p.hitSessions > 0 ? Math.min(99, Math.round(p.clean * 100))
         : Math.round(p.clean * 100)}%`;
   const wrapRef = useRef<HTMLDivElement>(null);

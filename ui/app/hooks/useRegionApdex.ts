@@ -128,3 +128,99 @@ export function useRegionActions(tf: Timeframe, rumAppId: string | null | undefi
   }, [key]);
   return out;
 }
+
+/* ── WHAT SETS THIS STATE APART (0.17.48) ───────────────────────────────────
+   Marcelo, 2026-10-25: "ainda vejo poucos detalhes de estados com score mais
+   baixo… não sei o que causou". The costliest actions say WHAT hurt; this says
+   what is DIFFERENT here. The application's rated actions, split by inside and
+   outside the state, across the dimensions a cause lives in — operating
+   system, app version or browser, device, network provider, and how the
+   action ended (timeout, page hidden…) — so a low score reads as "Android 14
+   on carrier X, ending in timeouts, only here" rather than as a colour.
+   One read, on the click, inside the click budget (runRefined). */
+export interface RegionWhyRow { here: boolean; d: string; v: string; w: number; lost: number; n: number; p50?: number }
+export type RegionWhy = RegionWhyRow[] & { ratio?: number };
+
+export const qRegionWhy = (tf: Timeframe, rumAppId: string, iso: string, region: string, ratio = 1) => `
+fetch user.events, from: ${tf.from}, to: ${tf.to}${ratio > 1 ? `, samplingRatio: ${ratio}` : ""}
+| filter dt.rum.application.id == "${q(rumAppId)}"
+    and characteristics.classifier == "user_action"
+    and dt.rum.user_type == "real_user"
+    and isNotNull(experience.level)
+| fieldsAdd _here = geo.country.iso_code == "${q(iso)}"${region ? ` and geo.region.iso_code == "${q(region)}"` : ""}
+| fieldsAdd _w = toDouble(coalesce(experience.weight, 1))
+| fieldsAdd _lost = if(experience.level == "frustrated", _w, else: if(experience.level == "tolerating", _w / 2, else: 0.0))
+| fieldsAdd _dims = array(
+    record(d = "operating system", v = coalesce(os.name, "unknown")),
+    record(d = "app or browser", v = coalesce(app.short_version, browser.name, "unknown")),
+    record(d = "device", v = coalesce(device.model.identifier, device.type, "unknown")),
+    record(d = "network provider", v = coalesce(client.isp, "unknown")),
+    record(d = "action ended by", v = coalesce(user_action.complete_reason, "unknown")))
+| expand _dims
+| summarize w = sum(_w), lost = sum(_lost), n = count(),
+    p50 = percentile(toLong(duration), 50),
+  by: { here = _here, d = _dims[d], v = _dims[v] }
+| limit 3000`;
+
+const whyMemo = new Map<string, RegionWhy>();
+
+/** The opened state against the rest of the application; null while asked. */
+export function useRegionWhy(tf: Timeframe, rumAppId: string | null | undefined,
+  iso: string | null, region: string | null, ratio: number): RegionWhy | null {
+  const gen = useMemoGen();
+  const key = rumAppId && iso && region !== null ? `${tf.from}|${tf.to}|${rumAppId}|${iso}|${region}|${ratio}|${gen}` : "";
+  const [out, setOut] = useState<RegionWhy | null>(key ? whyMemo.get(key) ?? null : null);
+  useEffect(() => {
+    if (!key) { setOut(null); return; }
+    const hit = whyMemo.get(key);
+    if (hit) { setOut(hit); return; }
+    setOut(null);
+    let live = true;
+    runRefined((r) => qRegionWhy(tf, rumAppId!, iso!, region!, r), 3000, ratio)
+      .then(({ rows, ratio }) => {
+        const res: RegionWhy = rows.map((r) => ({
+          here: r.here === true || r.here === "true", d: String(r.d ?? ""), v: String(r.v ?? ""),
+          w: Number(r.w) || 0, lost: Number(r.lost) || 0, n: (Number(r.n) || 0) * ratio,
+          p50: r.p50 == null ? undefined : Number(r.p50),
+        }));
+        if (ratio > 1) res.ratio = ratio;
+        whyMemo.set(key, res);
+        if (live) setOut(res);
+      })
+      .catch(() => { if (live) setOut([]); });
+    return () => { live = false; };
+  }, [key]);
+  return out;
+}
+
+/** Per dimension, the value that adds most loss HERE beyond what the same
+ *  value loses elsewhere — the "what is different about this place". */
+export interface WhyFinding { d: string; v: string; shareOfLoss: number;
+  apdexHere: number; apdexElse: number | null; n: number; p50?: number }
+export function whyFindings(rows: RegionWhyRow[]): { findings: WhyFinding[]; apdexElse: number | null } {
+  const dims = [...new Set(rows.map((r) => r.d))];
+  // the rest of the application's Apdex, from one dimension's sum (each sums to the whole)
+  const first = rows.filter((r) => r.d === dims[0] && !r.here);
+  const wElse = first.reduce((a, r) => a + r.w, 0), lElse = first.reduce((a, r) => a + r.lost, 0);
+  const apdexElse = wElse > 0 ? 1 - lElse / wElse : null;
+  const findings: WhyFinding[] = [];
+  for (const d of dims) {
+    const here = rows.filter((r) => r.d === d && r.here);
+    const lostHere = here.reduce((a, r) => a + r.lost, 0);
+    if (!(lostHere > 0)) continue;
+    let best: (WhyFinding & { excess: number }) | null = null;
+    for (const h of here) {
+      if (!(h.w > 0) || !(h.lost > 0)) continue;
+      const e = rows.find((r) => r.d === d && !r.here && r.v === h.v);
+      const rateElse = e && e.w > 0 ? e.lost / e.w : (wElse > 0 ? lElse / wElse : 0);
+      const excess = h.lost - h.w * rateElse;
+      if (!best || excess > best.excess) {
+        best = { d, v: h.v, shareOfLoss: h.lost / lostHere, apdexHere: 1 - h.lost / h.w,
+          apdexElse: e && e.w > 0 ? 1 - e.lost / e.w : null, n: h.n, p50: h.p50, excess };
+      }
+    }
+    if (best && best.excess > 0) findings.push(best);
+  }
+  findings.sort((a, b) => (b as WhyFinding & { excess: number }).excess - (a as WhyFinding & { excess: number }).excess);
+  return { findings, apdexElse };
+}
