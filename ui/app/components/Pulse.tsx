@@ -1618,10 +1618,12 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                are still drawn and listed, and visible whenever they fall
                inside it. One country alone is shown in its neighbourhood
                (min span), never at street level. */
-            const totalS = located.reduce((a, g) => a + g.sessions, 0) || 1;
-            const busiest = [...located].sort((a, b) => b.sessions - a.sessions)[0];
-            const inFrame = located.filter((g) => g === busiest || g.sessions / totalS >= 0.02);
-            return framed(inFrame.map(dot), 40, 60, 8, 12);
+            /* …and since 0.17.29 EVERY place with data (Marcelo, 2026-10-25:
+               "o carregamento do mapa inicialmente precisa mostrar todas as
+               áreas que contêm dados"). The first view is the whole footprint —
+               no country with sessions starts off-screen — and a click on a
+               country zooms to it as before. */
+            return framed(located.map(dot), 40, 60, 8, 12);
           }
           const rs = (regions ?? [])
             .filter((r) => REGION_CENTROID[r.id])
