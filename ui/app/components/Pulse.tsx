@@ -73,6 +73,11 @@ import { useDomains } from "../hooks/useDomains";
 
 /** "BR-SP" → "SP". The map pin is already standing on the country. */
 const uf = (id: string) => (id.includes("-") ? id.split("-").pop() ?? id : id);
+/** A state's short label: its two-letter code where that is how people name
+ *  it (SP, RJ, CA…), its name where the ISO code is a letter or a number
+ *  nobody reads (Argentina's "X", Japan's "27") — 0.17.52. */
+const shortName = (r: { id: string; name: string }) =>
+  /^[A-Z]{2}$/.test(uf(r.id)) ? uf(r.id) : r.name;
 
 const TVAR: Record<Tone, string> = {
   good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", info: "var(--info)",
@@ -1923,7 +1928,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                         const c = REGION_CENTROID[r.id];
                         if (!c) return;
                         const sz = r.sessions >= 100 ? 20 : r.sessions >= 10 ? 15 : 11;
-                        const txt = (sz >= 20 ? `${r.name} ${fmtK(r.sessions)}` : uf(r.id));
+                        const txt = (sz >= 20 ? `${r.name} ${fmtK(r.sessions)}` : shortName(r));
                         if (claim(mx(c[1]) - cx, my(c[0]) - cy, txt, sz)) rLabelled.add(r.id);
                       });
                   }
@@ -2025,7 +2030,7 @@ export function Pulse({ data, appId, onOpenChain, onAnalyze }: {
                                 right there holding all of them. */}
                             <span data-w={r.sessions} className={`gpin__lbl${
                               rLabelled.has(r.id) ? "" : " gpin__lbl--off"}`}>
-                              <b>{sz >= 20 ? r.name : uf(r.id)}</b>
+                              <b>{sz >= 20 ? r.name : shortName(r)}</b>
                               {sz >= 20 && <em>{fmtK(r.sessions)}</em>}
                             </span>
                           </button>
