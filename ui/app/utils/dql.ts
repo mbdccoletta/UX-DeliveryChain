@@ -191,11 +191,26 @@ export function runDql<T = Record<string, unknown>>(
   if (onPartial) subs.push(onPartial as (rows: unknown[]) => void);
   const metas: Array<NonNullable<DqlOptions["onMeta"]>> = opts.onMeta ? [opts.onMeta] : [];
   const truncs: Array<() => void> = onTruncated ? [onTruncated] : [];
-  const p = runDqlOnce<T>(query, maxResultRecords, () => {
+  const once = () => runDqlOnce<T>(query, maxResultRecords, () => {
     for (const f of truncs) { try { f(); } catch { /* never break a fetch */ } }
   }, (rows) => {
     for (const f of subs) { try { f(rows as unknown[]); } catch { /* a draw must never break a fetch */ } }
-  }, { ...opts, onMeta: (m) => { for (const f of metas) { try { f(m); } catch { /* never break a fetch */ } } } })
+  }, { ...opts, onMeta: (m) => { for (const f of metas) { try { f(m); } catch { /* never break a fetch */ } } } });
+  /* A TRANSIENT FAILURE IS ASKED ONCE MORE (0.17.47). Measured on production:
+     the topology and Davis reads failed together with the SDK's generic
+     "Unexpected error" — a server-side or connection fault, not a bad query
+     (the same statements had answered minutes before). They are cheap reads
+     (Smartscape, dt.davis.*, metrics), so one retry costs little and spares
+     the reader a banner for a hiccup. Raw-event reads are not retried. */
+  const cheap = /^\s*(smartscape(Nodes|Edges)|timeseries)\b/i.test(query)
+    || /fetch\s+dt\.davis\./i.test(query);
+  const transient = (e: unknown) => /unexpected error|5\d\d|timed? ?out|network|fetch failed|ECONN|aborted/i
+    .test(e instanceof Error ? e.message : String(e));
+  const p = once()
+    .catch((e) => {
+      if (!cheap || !transient(e)) throw e;
+      return new Promise<T[]>((ok, ko) => { setTimeout(() => { once().then(ok, ko); }, 1200); });
+    })
     .finally(() => { inFlightDql.delete(key); });
   inFlightDql.set(key, { p: p as Promise<unknown[]>, subs, metas, truncs });
   return p;
