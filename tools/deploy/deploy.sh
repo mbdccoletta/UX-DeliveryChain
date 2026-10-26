@@ -33,10 +33,12 @@ for t in "$@"; do
   if [ -s "$root/.dt-app/deploy-refuse.txt" ] && grep -qx "$t" "$root/.dt-app/deploy-refuse.txt"; then
     echo "== $t: refused (listed in .dt-app/deploy-refuse.txt)"; continue
   fi
+  # a tenant outside apps.dynatrace.com is mapped in .dt-app/tenant-urls
+  # ("<id> <url>" per line, git-ignored) — no environment is named here
+  map="$(grep -s "^$t " "$root/.dt-app/tenant-urls" | awk '{print $2}' | head -1)"
   case "$t" in
     *.*) url="https://$t" ;;
-    lab-tenant) url="https://lab.example.com" ;;
-    *) url="https://$t.apps.dynatrace.com" ;;
+    *) url="${map:-https://$t.apps.dynatrace.com}" ;;
   esac
   f="$root/.dt-app/${t}-token.txt"
   [ -s "$f" ] || f="$root/.dt-app/${t:0:3}-token.txt"   # short alias, e.g. fxz-token.txt
