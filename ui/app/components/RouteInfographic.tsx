@@ -11,7 +11,7 @@
 // lift; where nothing differs it says "same as everyone", which is a finding.
 import { Button } from "@dynatrace/strato-components/buttons";
 import React, { useEffect } from "react";
-import { fmtMs, fmtN, fmtPct } from "../utils/dql";
+import { fmtK, fmtMs, fmtN, fmtPct } from "../utils/dql";
 import { vitalTitle } from "../utils/vitals";
 import { geoName } from "../utils/geoVerdict";
 import { exportImage } from "../utils/exportImage";
@@ -229,8 +229,10 @@ function typicalOf(rows: InfoRow[], k: "p50dur" | "p50views", inCohort: boolean)
 
 
 export function RouteInfographic({ rows, path, appName, cohort, total, biz, vitals,
-  convDef, stops, approx, onClose }: {
+  convDef, stops, approx, onClose, mobile = false }: {
   rows: InfoRow[] | "loading";
+  /** A mobile application — only then does the crash / ANR line exist. */
+  mobile?: boolean;
   /** The picked waypoints, in order, in words. */
   path: string[];
   appName: string;
@@ -345,7 +347,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
           <div className="rinfo__cohort">
             <b className="num">{approx ? "≈ " : ""}{fmtN(cohort)}</b>
             <span>{rows !== "loading" && cohort === 0
-              ? "sessions matched this pick in the current window — the diagram may be older than the data; close and re-query"
+              ? "sessions matched this pick in the current window"
               : cohort >= total ? "sessions — the whole flow"
               : `sessions on this route · ${total ? fmtPct(cohort / total) : "—"} of ${fmtN(total)}`}</span>
           </div>
@@ -391,12 +393,12 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                         + (convDef.items.length > 6 ? ", …" : "")
                         + (convDef.unreadable ? " (your saved rule could not be read — keyword fallback)" : "")
                       : undefined}>
-                    <b className="num">{fmtN(biz.customers)}</b>
+                    <b className="num" title={fmtN(biz.customers)}>{fmtK(biz.customers)}</b>
                     <span className="rinfo__kpi-l">customers</span>
                     <em>{fmtN(biz.converted)} reached the goal{convDef ? " ⓘ" : ""}</em>
                   </div>
                   <div className={`rinfo__kpi rinfo__kpi--worth${biz.hit > 0 ? " rinfo__kpi--bad" : ""}`}>
-                    <b className="num">{fmtN(biz.hit)}</b>
+                    <b className="num" title={fmtN(biz.hit)}>{fmtK(biz.hit)}</b>
                     <span className="rinfo__kpi-l">met an error</span>
                     <em>{biz.hit > 0 ? "customers whose session hit a failure" : "a clean route"}</em>
                   </div>
@@ -408,7 +410,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
             <section className="rinfo__strip">
               {([
                 ["hit by errors", rate(rows, "hit", true), rate(rows, "hit", false), fmtPct, true],
-                ["crash / ANR", rate(rows, "fatal", true), rate(rows, "fatal", false), fmtPct, true],
+                ...(mobile ? [["crash / ANR", rate(rows, "fatal", true), rate(rows, "fatal", false), fmtPct, true] as const] : []),
                 ["typical session", typicalOf(rows, "p50dur", true), typicalOf(rows, "p50dur", false), fmtMs, false],
                 ["typical views", typicalOf(rows, "p50views", true), typicalOf(rows, "p50views", false),
                   (v: number) => v.toFixed(1), false],
@@ -455,12 +457,11 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                   <span className="rinfo__geo-l">Where they are</span>
                   <p className={`rinfo__geo-v${carrier ? " rinfo__geo-v--bad" : ""}`}>
                     {carrier ? (<>
-                      the route&apos;s failures concentrate in <b>{geoName(carrier.bucket)}</b> —{" "}
-                      {fmtPct(carrier.hit / carrier.sessions)} of its sessions met an error,
-                      against {fmtPct(baseErr)} for the route as a whole
+                      <b>{geoName(carrier.bucket)}</b>: {fmtPct(carrier.hit / carrier.sessions)} of sessions
+                      met an error · route {fmtPct(baseErr)}
                     </>) : baseErr > 0
-                      ? <>failures spread evenly across countries — the route carries them, not a region</>
-                      : <>a clean route in every country it is walked from</>}
+                      ? <>errors spread evenly across countries</>
+                      : <>no errors in any country</>}
                   </p>
                   <div className="rinfo__geo-rows">
                     {top.map((r) => {
@@ -548,28 +549,24 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                   const slowShare = slow.reduce((a, x) => a + x.share, 0);
                   const errShare = stops.filter((x) => x.errShare >= 0.02)
                     .reduce((a, x) => a + x.share, 0);
-                  const technical = slowShare >= 0.25 || errShare >= 0.25;
+                  /* MEASURED SHARES, NOT A VERDICT (0.17.43): "this looks
+                     technical" rested on this app's own 25% line. The two
+                     shares are printed; the reading is in the tooltip. */
                   return (
-                    <div className={`rinfo__stopv${technical ? " rinfo__stopv--tech" : ""}`}>
-                      <b>{technical
-                        ? "This looks technical."
-                        : "This is not a speed problem."}</b>{" "}
-                      {technical
-                        ? `${fmtPct(Math.max(slowShare, errShare))} of the sessions end on screens that are `
-                          + `${slowShare >= errShare ? "slower than the rest of the application"
-                            : "carrying errors"} — fix the screen and the ending may go with it.`
-                        : `The screens people stop on run ${fmtMs(worst.p50)} at worst, against `
-                          + `${fmtMs(worst.appP50)} for the median screen here. They leave because of what `
-                          + "the page ASKS of them, not how fast it arrives — look at the content and the "
-                          + "next step, not at performance."}
+                    <div className="rinfo__stopv"
+                      title={`Screens people stop on run ${fmtMs(worst.p50)} at worst, against ${fmtMs(worst.appP50)} `
+                        + "for the median screen here. A high share on slower or erroring screens points at the screen; "
+                        + "a low one points at what the page asks of people — its content and next step."}>
+                      <b className="num">{fmtPct(slowShare)}</b> end on slower screens · {" "}
+                      <b className="num">{fmtPct(errShare)}</b> end on screens with errors
                     </div>
                   );
                 })()}
-                <span className="rinfo__stop-ft">
+                <span className="rinfo__stop-ft"
+                  title={stops.some((x) => x.rest > 0)
+                    ? "A screen that is both over-represented here and carrying errors is where to look first."
+                    : "Narrow the flow to a route to see which of these endings are peculiar to it."}>
                   the last screen of each session
-                  {stops.some((x) => x.rest > 0)
-                    ? " · a screen that is both over-represented here AND carrying errors is where to look first"
-                    : " · narrow the flow to a route to see which of these endings are peculiar to it"}
                 </span>
               </section>
             )}
@@ -619,11 +616,9 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                       })}
                     </div>
                   ) : (
-                    <div className="rinfo__so-none">
-                      <b>Nobody stands out.</b> Across {so.dims} characteristics and{" "}
-                      {so.buckets} groups, these users look like everyone else — so what
-                      happens on this route is the ROUTE, not who walks it. Fix the path,
-                      not the audience.
+                    <div className="rinfo__so-none"
+                      title={`Across ${so.dims} characteristics and ${so.buckets} groups these users look like everyone else — what happens on this route is the route, not who walks it.`}>
+                      <b>Nobody stands out</b>
                     </div>
                   )}
                 </section>
@@ -663,7 +658,7 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                       );
                     })}
                   <div className="rinfo__kpi rinfo__kpi--worth">
-                    <b className="num">{fmtN(vitals.n)}</b>
+                    <b className="num" title={fmtN(vitals.n)}>{fmtK(vitals.n)}</b>
                     <span className="rinfo__kpi-l">timed sessions</span>
                     <em>{vitals.rest > 0 ? `${fmtN(vitals.rest)} elsewhere` : "the only ones timed"}</em>
                   </div>
@@ -734,11 +729,11 @@ export function RouteInfographic({ rows, path, appName, cohort, total, biz, vita
                 </>);
               })()}
             </section>
-            <footer className="rinfo__ft">
-              solid bar = share of the route&apos;s sessions · ghost bar = share of everyone else
-              · lift compares the two
-              {approx && <> · counts scaled from a capped sample (rates are the sample&apos;s own)</>}
-              {" "}· click outside or press Esc to close
+            <footer className="rinfo__ft"
+              title={"Solid bar = share of the route's sessions · ghost bar = share of everyone else · lift compares the two"
+                + (approx ? " · counts scaled from a capped sample (rates are the sample's own)" : "")
+                + " · click outside or press Esc to close"}>
+              route vs everyone else{approx ? " · sample" : ""}
             </footer>
           </>
         )}

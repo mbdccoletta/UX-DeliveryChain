@@ -27,10 +27,25 @@ export interface Impacted {
   ex?: { sid: string; start: string; inst?: string; errs: number };
   /** True while these came from a PREVIEW: real, measured, not yet whole. */
   partial?: boolean;
+  /** The experience score, when the caller has it final — carried here so a
+   *  builder that judges from impact judges with the score too. */
+  score?: number | null;
   /** Which store counted: "sessions" is what Users & Sessions lists;
    *  "events" is every session active in the window, which the list will
    *  not match. The card says which one it is showing. */
   base?: "sessions" | "events";
+  /** The same session-store read, per country and per state (key "c|"/"r|"
+   *  rows of qImpactedSessions) — what Users & Sessions lists for each. */
+  places?: StorePlace[];
+}
+
+export interface StorePlace {
+  kind: "country" | "region";
+  country: string;
+  /** state code as the store gives it ("SP") and its name ("São Paulo") */
+  region?: string; name?: string;
+  sessions: number; withErrors: number;
+  realSessions: number; realWithErrors: number;
 }
 
 const memo = new Map<string, Impacted | null>();
@@ -47,6 +62,12 @@ const memo = new Map<string, Impacted | null>();
  */
 export function useImpacted(
   rumAppId?: string, tf?: Timeframe, active = false, frontendName?: string,
+  /** The metric store answered for this application: the per-session event
+   *  scan is then never the fallback (0.17.46). An application filter does not
+   *  cut the bytes Grail reads, so that scan read the estate's hour — measured
+   *  25 GiB, cut at the ceiling — to count an application the store had
+   *  already said little or nothing about. */
+  storeOnly = false,
 ): Impacted | null {
   const gen = useMemoGen();
   /* THE KEY NAMES ONLY WHAT CHANGES THE QUERY. Inside the session store's
@@ -55,7 +76,12 @@ export function useImpacted(
      so the scan ran once with the name empty and once again when it landed:
      the one duplicate left in a production load, and a full per-session
      scan paid twice for the same answer. */
-  const fe = frontendName && !withinSessionLag(tf!) ? frontendName : "";
+  /* THE HEADLINE IS WHAT THE PLATFORM LISTS — at every window length
+     (Marcelo, twice). Inside the store's lag that is the sessions already
+     written, a smaller number than the ones active; the card says how many
+     are still running beside it, rather than swapping the headline to a base
+     the sessions button cannot open. */
+  const fe = frontendName || "";
   const key = rumAppId && tf ? `${rumAppId}|${tf.from}|${tf.to}|${fe}|${gen}` : "";
   const [imp, setImp] = useState<Impacted | null>(key ? memo.get(key) ?? null : null);
 
@@ -97,11 +123,33 @@ export function useImpacted(
          the first thing a reader looks at. The preview lands in a few
          seconds; `partial` marks it so the card can say it is still
          measuring, and the final answer replaces it. */
-      const ask = async (q: string) =>
-        shape((await runDql<Record<string, unknown>>(q, 1, undefined, (rows) => {
-          const early = shape(rows[0]);
-          if (early && live) setImp({ ...early, partial: true });
-        }))[0]);
+      /* The session query answers one row per key: "t" is the headline,
+         "c|…" and "r|…" are the places (see qImpactedSessions). The event
+         query answers its one row with no key, and is read as before. */
+      const placesOf = (rows: Record<string, unknown>[]): StorePlace[] => rows
+        .filter((r) => typeof r._k === "string" && r._k !== "t")
+        .map((r) => {
+          const parts = String(r._k).split("|");
+          return {
+            kind: parts[0] === "r" ? "region" as const : "country" as const,
+            country: parts[1] ?? "",
+            region: parts[0] === "r" ? parts[2] || undefined : undefined,
+            name: parts[0] === "r" ? parts.slice(3).join("|") || undefined : undefined,
+            sessions: Number(r.sessions) || 0, withErrors: Number(r.hit) || 0,
+            realSessions: Number(r.realSessions) || 0, realWithErrors: Number(r.hitReal) || 0,
+          };
+        });
+      const headline = (rows: Record<string, unknown>[]) =>
+        rows.find((r) => r._k === "t") ?? (rows.some((r) => "_k" in r) ? undefined : rows[0]);
+      const ask = async (q: string) => {
+        const rows = await runDql<Record<string, unknown>>(q, 500, undefined, (early) => {
+          const e = shape(headline(early));
+          if (e && live) setImp({ ...e, places: placesOf(early), partial: true });
+        });
+        const o = shape(headline(rows));
+        if (o) o.places = placesOf(rows);
+        return o;
+      };
       try {
         /* INSIDE THE STORE'S LAG, THE STORE IS NOT THE ANSWER. On a window
            shorter than the ~60 minutes the aggregator takes to write a
@@ -109,28 +157,26 @@ export function useImpacted(
            which the guard below would catch, but a small true number that
            would read as the application's traffic. The event scan is the
            base there, and the card is told which base it got. */
-        if (fe && !withinSessionLag(tf!)) {
+        /* THE SESSION STORE IS THE ONLY BASE (0.17.50). The per-session
+           event scan (qImpacted) stood in when the store was empty, when the
+           application had no frontend name, or when the store failed — and
+           an application filter does not cut the bytes Grail reads, so each
+           of those read the estate's whole window: measured on production,
+           25 GiB at the ceiling, for an 18-session application. The status
+           is the Apdex and does not need this count; without the store the
+           count is simply not measured ("—"). */
+        if (fe) {
           out = await ask(qImpactedSessions(tf!, fe));
-          if (out) out.base = "sessions";
-          /* NOTHING SERIALIZED IS NOT NOTHING HAPPENED. The session store
-             trails live traffic by the aggregation service's 30-minute
-             inactivity timeout, so a short or very recent window can hold
-             real activity and no session records at all. Reading that as
-             "0 sessions" would blank the verdict, the ring and the error
-             share over an application that is plainly busy, so the event
-             scan answers instead — fewer promises about the hand-off, but a
-             page that still describes what is happening. */
-          if (!out || out.sessions === 0) {
-            out = await ask(qImpacted(tf!, rumAppId!));
-            if (out) out.base = "events";
+          /* the store answered with no row: it holds no closed session for
+             this application yet — a measured zero, said as one */
+          if (!out) {
+            out = { sessions: 0, hit: 0, realSessions: 0, hitReal: 0, hitRobot: 0, hitSynth: 0, places: [] };
           }
-        } else {
-          out = await ask(qImpacted(tf!, rumAppId!));
-          if (out) out.base = "events";
+          out.base = "sessions";
         }
       } catch {
-        // no scope or the query failed — the row and the steps are not offered
-        try { out = await ask(qImpacted(tf!, rumAppId!)); } catch { out = null; }
+        // the store failed: not measured, and never replaced by an estate scan
+        out = null;
       }
       memo.set(key, out);
       if (live) setImp(out);

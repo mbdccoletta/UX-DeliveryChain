@@ -12,7 +12,7 @@ import { stateClient } from "@dynatrace-sdk/client-state";
 
 /** Bump when the cached shape changes, so old entries are ignored, not misread. */
 // v2: device and domain rows gained appId — v1 entries would filter to nothing
-const VERSION = "15"; // v15: failures rows know whether they are truly named
+const VERSION = "18"; // v18: Business Control stores its cube in columns (0.17.40)
 
 /**
  * How long a window's data stays usable. A 7-day window barely moves minute to
@@ -62,14 +62,28 @@ export async function read<T>(tf: string): Promise<Cached<T> | null> {
   }
 }
 
+/** Half the per-user 1 MiB app-state allowance, so other keys still fit. */
+const CACHE_MAX_CHARS = 512 * 1024;
+
 /** Stores a payload. Failure is silent: a cache miss is never worth an error. */
-export async function write<T>(tf: string, value: T, minutes?: number): Promise<void> {
+export async function write<T>(tf: string, value: T, minutes?: number,
+  /** An explicit expiry ("now+10m") for a payload whose re-read is costly
+   *  enough that the reader agreed to see it older — the screen says how old. */
+  validUntil?: string): Promise<void> {
   try {
+    const text = JSON.stringify({ version: VERSION, at: Date.now(), value });
+    /* NOT A BYTE OVER WHAT THE STORE WILL TAKE. The platform allows 1 MiB of
+       app state per user, in total. Measured on staging, the chain payload was
+       17 MB: the PUT uploaded for 20 s, competing with the map's geometry
+       and every query for the same connection, and was then refused with
+       UserAppStateSizeLimitPerUserExceeded. A payload that cannot be stored
+       is not sent. */
+    if (text.length > CACHE_MAX_CHARS) return;
     await stateClient.setUserAppState({
       key: keyFor(tf),
       body: {
-        value: JSON.stringify({ version: VERSION, at: Date.now(), value }),
-        validUntilTime: ttlFor(minutes),
+        value: text,
+        validUntilTime: validUntil ?? ttlFor(minutes),
       },
     });
   } catch {

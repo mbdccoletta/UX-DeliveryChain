@@ -2,6 +2,8 @@
 // Each query fails in isolation: a missing scope never takes the screen down.
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Q from "../utils/dql";
+import { metricCensus } from "../utils/frontendMetrics";
+import { markOverExactLimit, overExactLimit } from "../utils/prefs";
 import { bumpMemoGen } from "../utils/memo";
 import { noteCachedTruncation } from "../utils/cost";
 import { normalizeView, num, runDql, type Timeframe } from "../utils/dql";
@@ -16,6 +18,9 @@ export interface AppRow {
    *  frontend.type). Undefined when the app has no FRONTEND node. */
   kind?: string;
   sessions: number;
+  /** Sessions of real people (robots and monitors excluded) — exact when the
+   *  census is scoped to this application: the verdict's denominator. */
+  realSessions?: number;
   views: number;
   errors: number;
   /**
@@ -153,6 +158,22 @@ export interface ChainData {
   problems: ProblemRow[];
   /** True while the screen is drawn from PREVIEW rows — see runDql. */
   partial?: boolean;
+  /** True once Davis problems, the Davis rollup and the entity signals are
+   *  final — everything the verdict reads from this payload. The verdict
+   *  waits on this, not on `partial`, which also waits for the estate's
+   *  pod→node topology (measured on staging: +7 s) that no verdict reads. */
+  davisFinal?: boolean;
+  /** True once the scoped census is FINAL (not a preview) — the verdict's
+   *  denominator reads it, so the verdict waits on this, not on `partial`. */
+  censusFinal?: boolean;
+  /** The census's session totals are the precision-16 estimate, because the
+   *  exact count exceeded the platform's element limit. */
+  censusApprox?: boolean;
+  /** The Delivery Chain's origin split is on its way (useOrigins). */
+  originsLoading?: boolean;
+  /** True when the census is scoped to ONE session (a session id in the url):
+   *  its totals then describe that session, not the window. */
+  sessionScoped?: boolean;
   /** Every application the inventory knows — the picker's list, free to read. */
   inventory: Array<{ appId: string; name: string; kind?: string; entity?: string }>;
   providers: ProviderRow[];
@@ -199,8 +220,15 @@ async function safe<T>(
   settle = false,
 ): Promise<T[]> {
   try {
-    return await runDql<T>(q, limit, cut ? () => { cut.hit = true; } : undefined,
+    const rows = await runDql<T>(q, limit, cut ? () => { cut.hit = true; } : undefined,
       onPartial, { settle });
+    /* A ROW CEILING REACHED IS A PARTIAL ANSWER. Grail cuts at the limit
+       without a word; rows past it are simply absent, and a chain or a count
+       built from them is short. Measured: topology hit 200, then 5,000, on
+       production-size estates. Raised, and when even the raised ceiling is
+       reached the page says the data is partial instead of looking whole. */
+    if (cut && limit > 1 && rows.length >= limit) cut.hit = true;
+    return rows;
   } catch (e: unknown) {
     bag.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
     return [];
@@ -300,10 +328,15 @@ export function useChainData(
       /** The two slow legs, in flight from the start and awaited at the end. */
       const slow = discovery
         ? Promise.resolve([[], []] as [Record<string, unknown>[], Record<string, unknown>[]])
+        /* ORIGINS ARE NOT LOADED HERE ANY MORE: only the Delivery Chain draws
+           them, and it fetches them itself (useOrigins). Every Overview paid
+           a full per-session scan for a figure it never showed. */
         : Promise.all([
-            safe<Record<string, unknown>>("origins",
-              Q.qOrigins(tf, session, appId), bag, 200, cut),
-            safe<Record<string, unknown>>("domains", Q.qDomains(tf, appId), bag, 200, cut),
+            Promise.resolve([] as Record<string, unknown>[]),
+            /* NOR DOMAINS: the Delivery Chain and the requests card fetch
+               them when they open (useDomains) — 96 GB and 11 s measured on
+               a production application, for a card that starts closed. */
+            Promise.resolve([] as Record<string, unknown>[]),
           ]);
       const censusTf: Timeframe = discovery
         ? { ...tf, from: `now()-${Math.max(15, Math.min(tf.minutes, 30))}m`, to: "now()" }
@@ -325,11 +358,48 @@ export function useChainData(
       let settleEarly: (rows: Record<string, unknown>[]) => void = () => {};
       const censusEarly = new Promise<Record<string, unknown>[]>(
         (r) => { settleEarly = r; });
-      const censusFinal = safe<Record<string, unknown>>("applications",
-        Q.qApps(censusTf, session, appId), bag, 200, cut,
-        (rows) => { if (rows.length) settleEarly(rows); },
-        false);
-      void censusFinal.then((rows) => settleEarly(rows)).catch(() => settleEarly([]));
+      /* EXACT, AND IF THE PLATFORM REFUSES, ESTIMATED — SAID SO.
+         countDistinctExact has an element limit; a production application
+         with ~5M sessions an hour hit it, the census failed, and the verdict
+         waited on a denominator that never came. Over the limit the census is
+         re-asked with the precision-16 estimate (~0.4%) and carries
+         censusApprox, so the screen can say the total is estimated. Any
+         other failure still lands in the partial-data banner. */
+      let censusApprox = false;
+      let censusOk = false;
+      const onCensusPreview = (rows: Record<string, unknown>[]) => { if (rows.length) settleEarly(rows); };
+      const censusFinal = (async () => {
+        /* 0.17.0: THE METRIC STORE FIRST (utils/frontendMetrics). Sessions,
+           real people's sessions, errors, crashes and ANRs per frontend —
+           the platform's own counters, ≈0 GiB, where the event census read
+           145 GiB scoped and 328 GiB for the estate on a bank's production.
+           The sessions are the platform's estimate, so the census is marked
+           approximate. A one-session url, or a frontend the store has
+           nothing for, keeps the event census below. */
+        if (!session) {
+          const m = await metricCensus(censusTf, appId).catch(() => null);
+          if (m) { censusApprox = true; onCensusPreview(m); return m; }
+        }
+        if (appId && overExactLimit(appId)) {
+          censusApprox = true;
+          return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId, false), 200,
+            () => { cut.hit = true; }, onCensusPreview);
+        }
+        try {
+          return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId), 200,
+            () => { cut.hit = true; }, onCensusPreview);
+        } catch (e) {
+          if (!appId || !Q.isExactLimit(e)) throw e;
+          markOverExactLimit(appId);
+          censusApprox = true;
+          return await runDql<Record<string, unknown>>(Q.qApps(censusTf, session, appId, false), 200,
+            () => { cut.hit = true; }, onCensusPreview);
+        }
+      })().then((rows) => { censusOk = true; return rows; }, (e: unknown) => {
+        bag.push(`applications: ${e instanceof Error ? e.message : String(e)}`);
+        return [] as Record<string, unknown>[];
+      });
+      void censusFinal.then((rows) => settleEarly(rows));
 
       /* ONLY THE CENSUS AND THE NAMES HOLD THE FIRST PAINT.
        *
@@ -345,6 +415,18 @@ export function useChainData(
          them, so they are the one other thing the first paint waits for */
       const namesP = safe<{ id: string; name: string; rumId?: string; kind?: string }>(
         "names", Q.qAppNames(), bag, 2000, cut);
+      /* WHAT THE VERDICT READS lands on its own (see davisFinal below). */
+      const problemsP = discovery ? Promise.resolve([] as ProblemRow[])
+        // the client cap must not re-cap what the query is allowed to return:
+        // see qProblems — problems this application has must never fall off
+        // the end of a list sized for a demo
+        : safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 500, cut);
+      const davisP = discovery ? none
+        : safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
+            Q.DAVIS_ROLLUP_CAP, cut);
+      const signalsP = discovery ? none
+        : safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf),
+            bag, Q.SIGNALS_CAP, cut);
       const rest = Promise.all([
         discovery ? none
           : safe<Record<string, unknown>>("classic applications", Q.qAppsGen2(), bag, 200, cut),
@@ -366,19 +448,12 @@ export function useChainData(
            full round trips where there had been one expensive one.
            Smartscape stays, because it is free and it names the picker. */
         discovery ? Promise.resolve([] as CallRow[])
-          : safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, 200, cut),
+          : safe<CallRow>("smartscape calls", Q.qServiceCalls(), bag, Q.TOPOLOGY_CAP, cut),
         discovery ? Promise.resolve([] as RuntimeRow[])
-          : safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, 200, cut),
+          : safe<RuntimeRow>("smartscape runtime", Q.qRuntime(), bag, Q.TOPOLOGY_CAP, cut),
         discovery ? none
           : safe<Record<string, unknown>>("topology", Q.qTopologyCounts(), bag, 200, cut),
-        discovery ? Promise.resolve([] as ProblemRow[])
-          : safe<ProblemRow>("davis problems", Q.qProblems(tf), bag, 200, cut),
-        discovery ? none
-          : safe<Record<string, unknown>>("davis rollup", Q.qDavisRollup(tf), bag,
-              Q.DAVIS_ROLLUP_CAP, cut),
-        discovery ? none
-          : safe<Record<string, unknown>>("entity signals", Q.qSignalsByEntity(tf),
-              bag, 300, cut),
+        problemsP, davisP, signalsP,
       ]);
 
       // the first paint waits for these two only
@@ -400,9 +475,16 @@ export function useChainData(
          page rendered an estate with no applications in it while the picker
          sat on a placeholder. When the scope finds nothing, the estate
          answers once, the way it did before any of this. */
+      /* …from the METRIC STORE (0.17.33). The estate answered with the
+         event census — every event of every application in the window,
+         ≈221 GiB on a bank's production — each time an idle application was
+         picked. The same list per frontend is free from dt.frontend.*; the
+         event census stays only for an environment that publishes none. */
       const rawApps = scopedApps.length || !appId
         ? scopedApps
-        : await safe<Record<string, unknown>>(
+        : session ? [] as Record<string, unknown>[]
+        : (await metricCensus(tf).catch(() => null))
+          ?? await safe<Record<string, unknown>>(
             "applications", Q.qApps(tf, session), bag, 200, cut);
 
       /* Names are keyed three ways. A web app's RUM id is the entity id's hex
@@ -467,6 +549,20 @@ export function useChainData(
         if (id) seen.add(id);
         if (a.entity) seen.add(String(a.entity).toLowerCase());
       }
+      /* THE INVENTORY COUNTS AS SEEN. This set was built from the measured
+         census alone, which was the whole estate — until the census was
+         scoped to one application. From then on `seen` held one app, every
+         classic-model entry passed as "classic only" and was appended beside
+         the same application the inventory had already listed, under the
+         other model's name: "BSPI - PIX-BGS - Web - External" and
+         "BSPI | PIX-BGS | Web | External", twice in the picker. The inventory
+         carries both ids for every frontend, so it decides what is new. */
+      for (const n of appNames) {
+        const rum = String(n.rumId ?? "").toLowerCase();
+        const cid = String(n.id ?? "").toLowerCase();
+        if (rum) seen.add(rum);
+        if (cid) { seen.add(cid); seen.add(cid.replace(/^[a-z_]*application-/, "")); }
+      }
       /* The dedupe now has the EXACT rum id to compare (Smartscape's
        * FRONTEND carries it), so the "shares a hex prefix" guess is only the
        * last resort it always should have been. */
@@ -489,6 +585,7 @@ export function useChainData(
            found no application has nothing to hand the next pass, so staying
            in loading would be a spinner with no end behind it. */
         loading: discovery && rawApps.length > 0,
+        sessionScoped: !!session,
         /* These figures came from previews and are still firming up. Real,
            measured, not yet whole — and said so rather than shown as final. */
         partial: true,
@@ -527,7 +624,7 @@ export function useChainData(
             entity: r.entity ? String(r.entity) : entityOf.get(appId.toLowerCase()),
             name: nameFor(appId, r.entity) ?? `Application ${appId.slice(0, 8)}`,
             kind: kindFor(appId, r.entity),
-            sessions: num(r.sessions), views: num(r.views),
+            sessions: num(r.sessions), realSessions: num(r.realSessions), views: num(r.views),
             errors: num(r.errors), crashes: num(r.crashes), anrs: num(r.anrs),
             p50View: num(r.p50View),
             p90View: num(r.p90View), p95View: num(r.p95View),
@@ -542,7 +639,7 @@ export function useChainData(
           // these carry the platform's classification too — they came from
           // the same FRONTEND nodes
           kind: g.kind ? String(g.kind) : undefined,
-          sessions: 0, views: 0, errors: 0, crashes: 0, anrs: 0,
+          sessions: 0, realSessions: 0, views: 0, errors: 0, crashes: 0, anrs: 0,
           p50View: 0, p90View: 0, p95View: 0,
           p50Load: 0, p50Xhr: 0, resPerAct: 0,
         }))),
@@ -619,6 +716,43 @@ export function useChainData(
       const fresh = build();
       setState(fresh);
 
+      /* THE VERDICT'S INPUTS PATCH IN AS SOON AS THEY ARE FINAL. Problems,
+         the rollup and the signals answer in about a second; the estate's
+         pod→node topology beside them took seven more on staging, and the
+         verdict sat on "Measuring" for all of it. Only these keys are
+         patched, from the same builder, so the two landings cannot disagree;
+         a payload that is already whole is left alone. */
+      /* AND THE CENSUS'S FINAL, the verdict's denominator, the same way:
+         patched in when it lands rather than when the topology does. */
+      if (!discovery) {
+        void censusFinal.then((rows) => {
+          if (cancelled) return;
+          if (!censusOk) return;
+          setState((cur) => (cur.partial === false ? cur : {
+            ...cur, censusFinal: true, censusApprox,
+            apps: cur.apps.map((a) => {
+              const f = rows.find((r) => String(r.appId ?? "") === a.appId);
+              return f ? { ...a, sessions: num(f.sessions), realSessions: num(f.realSessions),
+                views: num(f.views), errors: num(f.errors), crashes: num(f.crashes),
+                anrs: num(f.anrs), p50View: num(f.p50View), p90View: num(f.p90View),
+                p95View: num(f.p95View), p50Load: num(f.p50Load), p50Xhr: num(f.p50Xhr),
+                resPerAct: num(f.resPerAct) } : a;
+            }),
+          }));
+        }).catch(() => { /* the verdict keeps waiting; the page says measuring */ });
+      }
+      if (!discovery) {
+        void Promise.all([problemsP, davisP, signalsP]).then(([pr, dv, sg]) => {
+          if (cancelled) return;
+          problems = pr; davis = dv; signals = sg;
+          const b = build();
+          setState((cur) => (cur.partial === false ? cur : {
+            ...cur, problems: b.problems, providers: b.providers,
+            alerts: b.alerts, signals: b.signals, davisFinal: true,
+          }));
+        }).catch(() => { /* the whole landing below still carries them */ });
+      }
+
       /* THE SECOND LANDING. The page is already on screen; these only add
          the origin split, the contacted domains and the census's final
          figures, so they arrive as a patch rather than as a reason to have
@@ -629,6 +763,16 @@ export function useChainData(
       if (cancelled) return;
       [gen2Apps, origins, domains, calls, runtime, topology, problems, davis, signals]
         = restParts;
+      /* NO NULL NAME REACHES A SCREEN. The query already falls back to the
+         id; this is the guard for a payload from before that change (the
+         cache) — a null pod name threw inside the chain's workload grouping
+         and took the whole Delivery Chain down. */
+      runtime = runtime.map((r) => ({
+        ...r,
+        podId: String(r.podId ?? ""), nodeId: String(r.nodeId ?? ""),
+        pod: String(r.pod ?? r.podClassic ?? r.podId ?? ""),
+        node: String(r.node ?? r.nodeClassic ?? r.nodeId ?? ""),
+      }));
       // the same builder, now over the complete parts
       const whole = build();
       /* mapped exactly as the eager batch maps them — one shape, one place
@@ -637,13 +781,16 @@ export function useChainData(
         ...whole,
         loading: false,
         partial: false,
+        davisFinal: true,
+        censusFinal: censusOk,
+        censusApprox,
         // the census's final figures replace the preview's, row for row
         apps: finalApps.length
           ? whole.apps.map((a) => {
               const f = finalApps.find((r) => String(r.appId ?? "") === a.appId);
               return f ? {
                 ...a,
-                sessions: num(f.sessions), views: num(f.views),
+                sessions: num(f.sessions), realSessions: num(f.realSessions), views: num(f.views),
                 errors: num(f.errors), crashes: num(f.crashes), anrs: num(f.anrs),
                 p50View: num(f.p50View), p90View: num(f.p90View),
                 p95View: num(f.p95View), p50Load: num(f.p50Load),

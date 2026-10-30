@@ -2,30 +2,11 @@
 // Ribbon width is the measured session count; the flow conserves volume, so
 // wherever a ribbon narrows is literally where the business loses users.
 import React, { useEffect, useRef, useState } from "react";
-import { DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
-  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql,
-  type OutcomeDefs, type Timeframe } from "../utils/dql";
+import { sliceFor, COHORT_BYTES_PER_SESSION, DONE, INFO_DIMS, INTENT, fmtMs, fmtN, normalizeView, outcomeTestFor,
+  OUTCOME_WORDS, qNoTelemetry, qPathSessions, qCohortSessions, runDql, cohortPlan,
+  type OutcomeDefs, type Timeframe, runSized, memoSized, sampleRate, fmtK} from "../utils/dql";
 
-/** The poster's scans, shared and remembered: keyed by the query text itself
- *  (which already carries window, app and definitions), so a re-open costs
- *  nothing and two callers in flight share one request. A failure forgets
- *  its key — the next click retries instead of caching the error. */
-/* Memoised per query TEXT — and the text carries a RELATIVE timeframe
- * ("now()-2h"), so the key never changes as the clock walks. Without an
- * expiry, a poster reopened hours later served the first open's sessions
- * against a freshly-mined diagram: disjoint session ids, "0 sessions on
- * this route" beside a flow bar full of them. Five minutes keeps the
- * reopen-free win and lets the data stay the window it claims to be. */
-const DQL_MEMO_TTL = 5 * 60_000;
-const dqlMemo = new Map<string, { at: number; p: Promise<Array<Record<string, unknown>>> }>();
-function memoDql(q: string, limit: number): Promise<Array<Record<string, unknown>>> {
-  const hit = dqlMemo.get(q);
-  if (hit && Date.now() - hit.at < DQL_MEMO_TTL) return hit.p;
-  const p = runDql<Record<string, unknown>>(q, limit)
-    .catch((e) => { dqlMemo.delete(q); throw e; });
-  dqlMemo.set(q, { at: Date.now(), p });
-  return p;
-}
+// The poster's sized reads are remembered in utils/dql (memoSized).
 
 /**
  * The ACTIVE outcome test. One FlowSankey shows one application; the
@@ -38,10 +19,11 @@ const doneOf = (journey: string[]) => journey.some((v) => activeDone(v));
 import { RouteInfographic, type InfoRow, type StopRow } from "./RouteInfographic";
 import type { AppRow, SeqRow, TransitionRow, ViewRow } from "../hooks/useChainData";
 import { edgeHealth, frictionFor } from "../utils/friction";
+import { useMemoGen } from "../utils/memo";
 import { Button } from "@dynatrace/strato-components/buttons";
 import { Intelligence } from "./Intelligence";
-import { JOURNEY_STARTERS } from "../utils/starters";
-import { HIT_BAD, HIT_WARN, SAMPLE_MIN} from "../utils/verdict";
+import { PAGE_ABOUT, JOURNEY_STARTERS } from "../utils/starters";
+import { isMobileApp, SAMPLE_MIN } from "../utils/verdict";
 import { XmarkIcon } from "@dynatrace/strato-icons";
 
 type Tone = "good" | "warn" | "bad" | "info";
@@ -307,10 +289,11 @@ const routeId = (journey: string[]) => "jp-" + journey.join("\u0001");
  * ratio drew GREEN an app where every session met one error across three
  * views, while the Overview called the same app Critical. Without a ux row
  * the health is unknown — info, never a guessed green. */
-const appTone = (u: { sessions: number; hit: number } | undefined | null): Tone =>
-  !u || u.sessions === 0 ? "info"
-  : u.hit / u.sessions >= HIT_BAD ? "bad"
-  : u.hit / u.sessions >= HIT_WARN ? "warn" : "good";
+/* …and since 0.17.24 that rule is the Apdex alone (utils/verdict). This
+   page has no Apdex of its own, so the application's node is neutral rather
+   than coloured by a share of sessions with errors that no longer judges
+   anywhere else — one rule, or no colour. */
+const appTone = (_u: { sessions: number; hit: number } | undefined | null): Tone => "info";
 
 export function buildModel(apps: AppRow[], seqs: SeqRow[],
   ux?: Map<string, { sessions: number; hit: number }> | null) {
@@ -384,6 +367,7 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
   vocab?: { outcomes: boolean; deepest: number },
   uxRow?: { sessions: number; hit: number } | null) {
   const nodes: Node[] = [];
+  let orphanOut = 0;
   const links: Link[] = [];
   // Window fragments — sessions whose only in-window content is one stray
   // metadata event — are NOT journeys: their activity happened outside the
@@ -468,20 +452,21 @@ export function buildAppModel(app: AppRow, seqs: SeqRow[], fragments = 0,
     }
   }
   const orphan = Math.max(0, journeyable - covered);
-  if (orphan) {
-    // what remains after the fragments left: real sessions with no page
-    // telemetry — request-only monitors, probes, sessions cut mid-load
-    nodes.push({ id: "j-none", c: 1, nm: "No page telemetry", v: orphan, tone: "warn",
-      sub: `${pct100((orphan / total) * 100)} of sessions` });
-    links.push({ s: "a-" + app.appId, t: "j-none", v: orphan, tone: "bad" });
-    addStage([], orphan, "j-none");
-  }
+  /* NOT A ROUTE, SO NOT DRAWN AS ONE (0.17.27). Sessions with no recorded
+     screen were a band of their own, and on a mobile application that
+     reports few views it was 84% of the canvas — the real journeys squeezed
+     into a sliver beside a block that says nothing about where people went.
+     They leave the flow; the count stays one click away, above the diagram,
+     where it opens what those sessions are made of. The application's own
+     column shrinks with them, so every drawn width is a drawn path. */
+  orphanOut = orphan;
+  if (orphan) nodes[0] = { ...nodes[0], v: Math.max(0, journeyable - orphan) };
 
   for (const [id, s] of stageTot) {
     nodes.push({ id, c: 2, nm: s.nm, v: s.v, tone: s.tone,
       sub: `${pct100((s.v / total) * 100)} of sessions` });
   }
-  return { nodes, links };
+  return { nodes, links, orphan: orphanOut };
 }
 
 const ORD = ["1st view", "2nd view", "3rd view", "4th view", "5th view", "6th view", "7th view"];
@@ -649,8 +634,10 @@ function flowSummary(apps: AppRow[], seqs: SeqRow[], appId?: string | null) {
 export function FlowSankey({
   apps, seqs, appId, transitions = [], views = [], ux, tf,
   cohort, onCohortConsumed, openRoutes,
-  outcomeDefs, onBizScope, onPickApp,
+  outcomeDefs, onBizScope, onPickApp, sliceMin,
 }: {
+  /** Minutes the journeys were mined from, when sliced to the scan budget. */
+  sliceMin?: number;
   apps: AppRow[]; seqs: SeqRow[]; appId?: string | null;
   /** The window on screen — the matching-sessions fetch scans exactly it. */
   tf?: Timeframe;
@@ -758,6 +745,10 @@ export function FlowSankey({
   const [ntel, setNtel] = useState<null | "loading" | {
     sessions: number; real: number; robots: number; oneEvent: number;
     reqOnly: number; p50dur: number; pages: Array<{ pg: string; n: number }>;
+    /** with a user action or interaction; with a screen named on some event */
+    withActs: number; named: number;
+    /** minutes read when the window was sliced to the budget */
+    sliceMin?: number;
   }>(null);
   // "paths" (Which routes they take) is the default view by request — the
   // step drop-off is one click away; a custom path or a cohort intent still
@@ -767,6 +758,8 @@ export function FlowSankey({
    * so stages, matchers, summary and poster all read the same definition */
   activeDone = outcomeTestFor(appId, outcomeDefs);
   const defsKey = JSON.stringify(outcomeDefs?.[appId ?? ""] ?? null);
+  // Refresh reaches the remembered sized reads too
+  const memoGen = useMemoGen();
   const hitRef = useRef<Array<Node & { x: number; y: number; h: number }>>([]);
   const stepModeRef = useRef(false);
   stepModeRef.current = !!appId && mode === "steps";
@@ -1289,14 +1282,25 @@ export function FlowSankey({
     if (!appId || !tf) return;
     setNtel("loading");
     try {
-      const rows = await runDql<Record<string, unknown>>(qNoTelemetry(tf, appId), 20);
+      /* a per-session read of the whole window: inside the budget it reads a
+         settled slice of it, and every count is scaled back (0.17.27) */
+      const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
+      // sized by a measured probe (runSized, 0.17.33)
+      const sized = await memoSized(`ntel|${tf.from}|${tf.to}|${appId}|${memoGen}`,
+        () => runSized(tf, [{ build: (t) => qNoTelemetry(t, appId), max: 20 }]));
+      const slice = sized.share < 1 ? { tf: sized.tf, share: sized.share } : null;
+      const k = 1 / sized.share;
+      const rows = sized.rows[0];
       const mix = rows.find((r) => r.kind === "mix");
+      const x = (v: unknown) => Math.round((Number(v) || 0) * k);
       setNtel({
-        sessions: Number(mix?.sessions) || 0, real: Number(mix?.real) || 0,
-        robots: Number(mix?.robots) || 0, oneEvent: Number(mix?.oneEvent) || 0,
-        reqOnly: Number(mix?.reqOnly) || 0, p50dur: Number(mix?.p50dur) || 0,
+        sessions: x(mix?.sessions), real: x(mix?.real),
+        robots: x(mix?.robots), oneEvent: x(mix?.oneEvent),
+        reqOnly: x(mix?.reqOnly), p50dur: Number(mix?.p50dur) || 0,
+        withActs: x(mix?.withActs), named: x(mix?.named),
+        sliceMin: slice ? slice.tf.minutes : undefined,
         pages: rows.filter((r) => r.kind === "page")
-          .map((r) => ({ pg: String(r.bucket), n: Number(r.sessions) || 0 })),
+          .map((r) => ({ pg: String(r.bucket), n: x(r.sessions) })),
       });
     } catch { setNtel(null); }
   };
@@ -1311,12 +1315,33 @@ export function FlowSankey({
        * "drawing the route's portrait…". Parallel now, and memoised per
        * window+app: the first open costs the slower scan alone, reopening
        * costs nothing. */
-      const [rows, pr] = await Promise.all([
-        memoDql(qCohortSessions(tf, appId, outcomeDefs), 10000),
-        mode === "unconverted"
-          ? Promise.resolve(null)
-          : memoDql(qPathSessions(tf, appId), 10000),
-      ]);
+      /* ONE SAMPLE FOR BOTH SCANS — see sampleRate in utils/dql. On a large
+       * application both scans keep the same deterministic share of sessions,
+       * so the join below is exact inside the sample and every count is the
+       * sample's scaled by 1/rate. On a small one the rate is 1: everything. */
+      const appSessions = apps.find((a) => a.appId === appId)?.sessions ?? 0;
+      /* "NO NAVIGATION" IS A COHORT TOO. Its sessions have no mined path by
+       * definition, so matching them through the path scan found nobody and
+       * the poster said "0 of 197,171" for the biggest band on the diagram.
+       * They are the sessions with no named screen, which the facts scan
+       * counts directly — the same test the mining applies. */
+      const noNav = mode !== "unconverted"
+        && picks.some((id) => id === "j-none" || id === "st-none");
+      /* read inside the budget, sized by a measured probe (runSized), then
+         the hash inside the read — `rate` is the fraction the counts stand for */
+      const wantPaths = !(mode === "unconverted" || noNav);
+      // the same key as Business Control's route cohort: one read serves both
+      /* the hash the read actually used travels with it: a remembered read
+         is scaled by ITS sample, never by the sessions this caller sees now */
+      const sized = await memoSized(`cohort|${tf.from}|${tf.to}|${appId}|${defsKey}|${wantPaths}|${memoGen}`,
+        () => runSized(tf, [
+        { build: (t, share) => qCohortSessions(t, appId, outcomeDefs, sampleRate(appSessions * share)), max: 10000 },
+        ...(wantPaths ? [{ build: (t: Timeframe, share: number) =>
+          qPathSessions(t, appId, sampleRate(appSessions * share)), max: 10000 }] : []),
+      ]).then((r) => ({ ...r, hash: sampleRate(appSessions * r.share) })));
+      const rate = sized.share * sized.hash;
+      const rows = sized.rows[0];
+      const pr = wantPaths ? sized.rows[1] : null;
       // membership. "unconverted" is a predicate on the row (reached no goal);
       // otherwise the picked path, matched through the same mining the diagram
       // used, so the cohort is provably the ribbon's.
@@ -1340,6 +1365,7 @@ export function FlowSankey({
       })();
       const inCohortOf = (r: Record<string, unknown>) =>
         mode === "unconverted" ? Number(r.reached) === 0
+        : noNav ? Number(r.views) === 0
         : pickIds ? pickIds.has(String(r.sid)) : true;
       /* HONEST SAMPLING. Both scans are capped (10k sessions, 2k paths);
        * printing a sample's absolute count against the band's full total once
@@ -1350,17 +1376,21 @@ export function FlowSankey({
         .reduce((a, q) => a + q.sessions, 0);
       const appTotal = apps.find((a) => a.appId === appId)?.sessions ?? rows.length;
       let cohortN: number;
-      let sampled: boolean;
-      if (mode === "unconverted") {
-        sampled = rows.length >= 10000;
+      /* sampled when the rate cut the sessions, or when even the sample hit
+         the row cap (then the scale is approximate twice over, and says so) */
+      const sampled = rate < 1 || rows.length >= 10000 || prTotal >= 10000;
+      if (mode === "unconverted" || noNav) {
         const matched = rows.filter(inCohortOf).length;
-        cohortN = sampled && rows.length > 0
-          ? Math.round((matched / rows.length) * appTotal) : matched;
+        cohortN = rate < 1 ? Math.round(matched / rate)
+          : rows.length >= 10000 && rows.length > 0
+            ? Math.round((matched / rows.length) * appTotal) : matched;
+      } else if (rate < 1) {
+        // the same sessions in both scans: the matched paths, scaled
+        cohortN = Math.round(prMatched / rate);
       } else {
-        sampled = prTotal >= 10000 || rows.length >= 10000;
         // the match RATE comes from the path sample itself — the one place
         // that knows which journeys satisfy the picks — scaled to the full
-        // mined volume the band displays
+        // mined volume the band displays when a cap was hit
         cohortN = sampled && prTotal > 0
           ? Math.round((prMatched / prTotal) * (journeyedTotal || prTotal))
           : rows.filter(inCohortOf).length;
@@ -1702,7 +1732,9 @@ export function FlowSankey({
                     const worst = [...byLast].sort((a, b) => b[1] - a[1])[0];
                     const lines = [
                       `Application: ${app?.name ?? "unknown"}`,
-                      `Window: ${tf?.label ?? "unknown"}`,
+                      `Window: ${tf?.label ?? "unknown"}`
+      // the sample travels with the facts, as it does with the screen (0.17.44)
+      + (sliceMin ? ` — paths mined from the last ${sliceMin} settled minutes; counts scaled, shares the sample's own` : ""),
                       active.length
                         ? `THE READER HAS NARROWED THE DIAGRAM. Everything below describes`
                           + ` ONLY that selection — ${fmtN(scopeN)} of the application's`
@@ -1747,7 +1779,7 @@ export function FlowSankey({
           the width the flow needed. journeyFacts resolves the narrowing on
           its own, so the section still asks about the cohort on screen from
           down here. */}
-      <Intelligence subject="the Journeys flow diagram"
+      <Intelligence subject="the Journeys flow diagram" about={PAGE_ABOUT.journeys}
         scope={`${appId}|${tf?.from ?? ""}|${tf?.to ?? ""}|${picks.join(",")}`}
         starters={JOURNEY_STARTERS} facts={journeyFacts} />
 
@@ -1778,13 +1810,13 @@ export function FlowSankey({
                 the SHARE and the superlative wait for a population. */}
             {sum.measured < SAMPLE_MIN ? (
               <>
-                <b>{fmtN(sum.measured)}</b> journeyed session{sum.measured === 1 ? "" : "s"}
-                {" — too few to put a share or a worst-screen on"}
+                <b title={`Fewer than ${SAMPLE_MIN} journeyed sessions: too few to put a share or a worst screen on.`}>
+                  {fmtN(sum.measured)}</b> journeyed session{sum.measured === 1 ? "" : "s"}
               </>
             ) : sum.outcomes ? (
               <>
                 <b>{fmtN(sum.done)}</b> of {fmtN(sum.measured)} sessions finished
-                {" "}(<b className={sum.pct >= 50 ? "ok" : "no"}>{pct100(sum.pct)}</b>)
+                {" "}(<b>{pct100(sum.pct)}</b>)
               </>
             ) : (
               <><b>{fmtN(sum.measured)}</b> sessions with a recorded view</>
@@ -1866,13 +1898,16 @@ export function FlowSankey({
               {/* the poster portrays WHAT IS ON SCREEN — the whole flow, or the
                   narrowed one; the reader's rule: characteristics refer to
                   everything the screen currently shows */}
-              {sel === "j-none" && (
+              {/* the sessions with no recorded screen — out of the flow, one
+                  click away (0.17.27) */}
+              {(a11yModel as { orphan?: number }).orphan ? (
                 <button className="flow-sel__b"
                   onClick={openNoTelemetry} disabled={ntel === "loading"}
-                  title="What the sessions without a recorded view are made of — measured, not guessed">
-                  {ntel === "loading" ? "unpacking…" : "what are these? ↗"}
+                  title="Sessions with no recorded screen are left out of the flow — what they are made of, measured">
+                  {ntel === "loading" ? "unpacking…"
+                    : `${fmtN((a11yModel as { orphan?: number }).orphan!)} without a screen ↗`}
                 </button>
-              )}
+              ) : null}
               {picks.length > 0 && onBizScope && (
                 <button className="flow-sel__b"
                   onClick={() => onBizScope(picks)}
@@ -1952,29 +1987,39 @@ export function FlowSankey({
                 <>
                   <section className="rinfo__strip">
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.oneEvent)}</b>
+                      <b className="num" title={fmtN(d.oneEvent)}>{fmtK(d.oneEvent)}</b>
                       <span className="rinfo__kpi-l">one stray beacon</span>
                       <em>a real page, seen for ~{fmtMs(d.p50dur)}</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.reqOnly)}</b>
+                      <b className="num" title={fmtN(d.reqOnly)}>{fmtK(d.reqOnly)}</b>
                       <span className="rinfo__kpi-l">API traffic only</span>
                       <em>requests without any page</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.robots)}</b>
+                      <b className="num" title={fmtN(d.robots)}>{fmtK(d.robots)}</b>
                       <span className="rinfo__kpi-l">robots</span>
                       <em>declared non-human</em>
                     </div>
                     <div className="rinfo__kpi">
-                      <b className="num">{fmtN(d.real)}</b>
+                      <b className="num" title={fmtN(d.real)}>{fmtK(d.real)}</b>
                       <span className="rinfo__kpi-l">real people</span>
                       <em>of the {fmtN(d.sessions)}</em>
+                    </div>
+                    <div className="rinfo__kpi">
+                      <b className="num" title={fmtN(d.named)}>{fmtK(d.named)}</b>
+                      <span className="rinfo__kpi-l">screen known</span>
+                      <em>named on their other events</em>
+                    </div>
+                    <div className="rinfo__kpi">
+                      <b className="num" title={fmtN(d.withActs)}>{fmtK(d.withActs)}</b>
+                      <span className="rinfo__kpi-l">people acting</span>
+                      <em>with a user action or tap</em>
                     </div>
                   </section>
                   {d.pages.length > 0 && (
                     <section className="ntel__pages">
-                      <h3>the pages their beacons name</h3>
+                      <h3>the screens their other events name</h3>
                       {d.pages.map((x) => (
                         <div className="rinfo__bar" key={x.pg} title={`${fmtN(x.n)} sessions`}>
                           <span className="rinfo__bar-l">{x.pg}</span>
@@ -1986,11 +2031,28 @@ export function FlowSankey({
                       ))}
                     </section>
                   )}
-                  <footer className="rinfo__ft">
-                    most of these sessions were on a real page — their navigation simply happened
-                    outside this window (window edges and lone beacons) · they are excluded from
-                    journey percentages so the funnel is not understated
-                  </footer>
+                  {/* THE CONCLUSION FOLLOWS THE NUMBERS (0.17.27). The fixed
+                      sentence said most were "on a real page, outside the
+                      window" while 2.3M of 3.1M were API traffic: the
+                      dominant kind now decides what is said. */}
+                  {(() => {
+                    /* labels on screen, the explanation in the tooltip (0.17.42) */
+                    const pc = (n: number) => `${Math.round((n / Math.max(1, d.sessions)) * 100)}%`;
+                    const [lead, why] = d.named / Math.max(1, d.sessions) >= 0.5
+                      ? [`${pc(d.named)} screen known, no view recorded`,
+                        "The agent knows where these people were and records no view there: enable view (screen) tracking for this app and they become journeys."]
+                      : d.reqOnly >= d.oneEvent
+                      ? [`${pc(d.reqOnly)} API traffic, no user action`,
+                        "Background calls, push or refresh — not a journey."]
+                      : [`${pc(d.oneEvent)} one stray event`,
+                        "Their navigation happened outside this window."];
+                    return (
+                      <footer className="rinfo__ft" title={`${why}${d.sliceMin
+                        ? ` Read from the last ${d.sliceMin} min of the window, counts scaled.` : ""} Left out of the flow and its percentages.`}>
+                        {lead}{d.sliceMin ? ` · sample · last ${d.sliceMin} min` : ""}
+                      </footer>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -2045,6 +2107,7 @@ export function FlowSankey({
               : ["every journey on screen"]}
             key={info === "loading" ? "l" : "d"}
             appName={app?.name ?? ""} cohort={infoCohort} total={all}
+            mobile={isMobileApp(app)}
             biz={infoBiz} vitals={infoVitals} stops={infoStops} approx={infoApprox}
             /* the rule every rate on the poster rests on, from the same source
                the queries compile from — never a list retyped into the view */

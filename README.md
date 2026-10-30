@@ -36,21 +36,28 @@ Deploy: `npm run deploy` (same precedence rules).
 
 | Tab | What it shows | Where the data comes from |
 |---|---|---|
-| **Overview** | One application's health as its users met it: Apdex, sessions, errors and crashes, the forecast, and where in the world they connect from — down to state and city. | `user.events`, `geo.*`, `dt.davis.problems` |
+| **Overview** | One application's health as its users met it: one status from the Apdex Dynatrace computes (Critical under 0.50, Warning under 0.85), sessions, errors and crashes, forecasts from the platform's analyzer, and where in the world they connect from — each country on its own Apdex, down to state. | `dt.frontend.*` metrics, `user.sessions`, Smartscape, `dt.davis.problems` |
 | **Journeys** | Session Sankey: application → furthest stage reached → outcome. Where a ribbon narrows is where the business loses people. | `user.events` (sessions per app) + per-session path mining |
 | **Delivery Chain** | Seven layers — user, network, application, edge, services, runtime, infrastructure — each with its statistics, Davis problems, custom alerts and extension events. | `smartscapeEdges "calls"` and `"runs_on"`, `smartscapeNodes`, `user.events`, `dt.davis.problems`, `dt.davis.events` |
 | **Business Control** | What the experience is worth: conversion, what failure costs, the funnel rung by rung, and the busiest routes. | the mined journeys, plus `user.events` |
 
-Every page carries an **Intelligence** section — questions written against what
-that page can prove, answered inline by Dynatrace Intelligence, grounded in the
-figures on screen and instructed to invent none.
+Every page carries an **Intelligence** section — questions built around the decision that page
+supports, answered inline by Dynatrace Intelligence, grounded in the figures on screen and
+instructed to invent none. The Delivery Chain and Business Control open with **whether the cause
+is inside or outside the customer's own domains** (own code, domain, edge, services, runtime and
+hosts against third-party domains, the users' side and the cloud provider). On the map, an opened
+country or state lists the user actions that cost its Apdex most and **what sets it apart** from
+the rest of the application (operating system, app version or browser, device, network provider,
+how actions ended); each action hands off to Dynatrace Assist with its exact filter.
 
 ## Queries
 
 All of them live in [`ui/app/utils/dql.ts`](ui/app/utils/dql.ts) and were
 validated against a live estate before becoming code. The main ones:
 
-- **Applications**: `user.events` aggregated by `dt.rum.application.id`
+- **Applications and headline figures**: `dt.frontend.*` metrics by the
+  application's Smartscape FRONTEND node (sessions, errors, requests, user
+  actions, experience weights); `user.events` only for breakdowns, within a budget
 - **Journey sequences**: `collectArray` of views per session, with URLs
   normalized (`/product/*`, `/cart/checkout/*`)
 - **Devices**: by `device.screen`, `device.orientation`, `dt.rum.agent.type`
@@ -65,52 +72,69 @@ validated against a live estate before becoming code. The main ones:
 Every query is failure tolerant: if one cannot run (a missing scope, say), the
 screen keeps working and the error shows up in a banner at the top.
 
-## What this app costs to run (DPS)
+## What it costs to run
 
-This app reads Grail, and **Grail bills a query by the bytes it scans**, not by
-the rows it returns. Everything below was measured on a reference estate rather
-than estimated; the accounting lives in
-[`ui/app/utils/cost.ts`](ui/app/utils/cost.ts), which records the
-`scannedBytes` the platform reports for every query the app runs.
+Grail charges a query by **the bytes it scans**, not the rows it returns, so this is stated rather
+than hidden. Every figure below was measured on a production estate (one application of ~4.5
+million sessions an hour, a 1-hour window), not estimated; `ui/app/utils/cost.ts` records the
+`scannedBytes` the platform reports for every query the app runs. Convert to your own bill with
+your contract's Query rate — the figures are volumes, on purpose.
 
-**The timeframe is the biggest lever, and it is linear.** One full tour of a
-2-hour window scanned ~16.9 GB. The same tour over 24 hours is roughly 12× that
-(~200 GB); over 30 days it would be ~6 TB. At the published DPS list rate for
-querying Grail — **$0.0035 per GiB scanned** — that is about $0.06, $0.66 and
-$20 respectively. Your contract may carry a different rate.
+**The headline numbers come from where Dynatrace takes its own.** Sessions, errors by type,
+requests and failed calls, user actions and the experience weights are the `dt.frontend.*`
+metrics, keyed by the application's FRONTEND node in Smartscape — the figures the platform's
+Frontends app shows, coherent with it by construction, and practically free to read. Raw
+`user.events` are read only for what metrics cannot answer, and always inside a budget.
 
-**Filters change the bill; projections do not.** A bare `count()` and an
-eight-column `summarize` scanned the same 5.9 GB of a 2-hour window. Scoping to
-a single application cut that to 2.9 GB, and to a small application to 0.24 GB.
-Each `append` leg pays its own scan.
+### Consumption examples
 
-Three guardrails are built in:
+| What the reader does | Scanned |
+|---|---|
+| Open the Overview | ≈ 8 GiB |
+| Open the Delivery Chain (after the Overview) | ≈ 1–3 GiB |
+| Open Journeys (path mining) | ≈ 8.5 GiB |
+| Open Business Control | ≈ 24 GiB — ≈ 0 when reopened within 10 minutes |
+| Open a country or a state on the map | ≈ 0.5–3 GiB |
+| Open a route portrait | ≈ 20 GiB the first time — ≈ 0 when reopened within 5 minutes |
+| **A full tour of the four screens** | **≈ 40–45 GiB** (the event-counting releases: ≈ 1,500 GiB) |
+| Revisit any screen in the same session | ≈ 0 |
+| **Any single query, worst case** | **≤ ≈ 25 GiB** (≤ ≈ 50 GiB for a sized slice read) |
 
-- **The window length is capped at 24 hours** ([`ui/app/App.tsx`](ui/app/App.tsx)).
-  The end you picked is kept and the start is pulled up to 24h before it, so a
-  careless 30-day selection cannot bill like one. The label says when the cap
-  acted — a silently different window is the one lie this app refuses to tell.
-- **A per-user, per-window cache** ([`ui/app/utils/cache.ts`](ui/app/utils/cache.ts))
-  with a TTL that follows the window (1–10 minutes). Revisiting a screen in the
-  same window scans nothing. The age is always on screen and Refresh always
-  bypasses it. It is *user* app state, not app state: a cached result is scoped
-  to the permissions of whoever ran it, so it cannot leak RUM figures to a
-  reader without RUM scopes.
-- **Truncation is detected, not ignored.** Grail stops a fetch at its 500 GB
-  scan limit, returns state `SUCCEEDED`, and puts the warning in the metadata —
-  so a wide window quietly answers from a partial scan. `isScanLimit()` catches
-  that message and the query is counted as truncated.
+| Usage pattern | Scanned per month |
+|---|---|
+| One person, five full tours a working day | ≈ 4,700 GiB |
+| Ten people, five full tours a working day | ≈ 47,000 GiB |
+| A NOC screen reloading the Overview every 15 minutes, around the clock | ≈ 23,000 GiB |
 
-> **Not surfaced in the UI today.** The header readout that showed the running
-> total was removed in `8cac9b0`, so `scanTotals()`, `fmtBytes()` and
-> `fmtMoney()` currently have no consumer — the app measures its own
-> consumption and prints it nowhere. The counters and the CSS (`.scanb`) are
-> intact if you want to put it back.
+On that estate the app's queries showed **no billed Query usage** in the platform's own billing
+events over seven days — RUM queries issued by apps were not billed there at the time of writing.
+The volumes above are therefore the load the app puts on Grail, and what it would bill if that
+changes; check your own `BILLING_USAGE_EVENT` records rather than assuming either way.
+
+### Guardrails
+
+- **A ceiling on every query.** Each execute carries a scan limit of ≈ 25 GiB, whatever its window
+  or fallback; a read that reaches it answers partially, the page says "Partial data", and the
+  answer is never cached as whole.
+- **The window defaults to 1 hour and is capped at 2.** The label says when the cap acted.
+- **Reads sized by what they actually cost.** Journeys and Business Control read a settled
+  two-minute (or one-minute) probe first; Grail reports what it scanned, and the window is read
+  whole if it fits 25 GiB, or as its last settled minutes, counts scaled and marked "sample · last
+  N min". Click-time breakdowns pick their sampling ratio the same way, inside 3 GiB, and refine
+  it once the first read reports its real cost.
+- **Small places are read exactly.** When a country's user actions fit in a few minutes (the
+  metric store says which), those minutes are read whole instead of sampling the hour.
+- **No estate-wide fallback.** An application filter does not cut the bytes Grail reads, so no
+  screen ever falls back to scanning the whole window of raw events: without the metric store or
+  the session store a figure is shown as not measured.
+- **Caches.** A per-user, per-window cache (Business Control keeps 10 minutes; the age is always on
+  screen; Refresh bypasses it) and an in-page memory, so revisits scan nothing. It is *user* app
+  state: a cached result is scoped to the permissions of whoever ran it.
 
 ## Scopes
 
-Fourteen, all declared with their reason in
-[`app.config.json`](app.config.json). **Thirteen are read or execute; the only
+Fifteen, all declared with their reason in
+[`app.config.json`](app.config.json). **Fourteen are read or execute; the only
 write is the app's own per-user query cache.**
 
 | Scope | Why |
@@ -129,6 +153,7 @@ write is the app's own per-user query cache.**
 | `davis-copilot:conversations:execute` | List and run the conversation skill behind "Explain this page" |
 | `state:user-app-states:read` | Read the per-user query cache |
 | `state:user-app-states:write` | Write the per-user query cache |
+| `environment-api:metrics:read` | The RUM classic Apdex (`builtin:apps.*`) — only for an application the new RUM rates no user action for |
 
 > If the **Delivery** tab shows empty service/runtime layers, it is almost
 > always the `storage:smartscape:read` scope missing or not granted to the

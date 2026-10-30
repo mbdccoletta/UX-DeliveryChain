@@ -496,7 +496,7 @@ svg { shape-rendering: geometricPrecision; }
   color: var(--ink-2); }
 
 /* the outcome strip: four filled tiles */
-.rinfo__strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.rinfo__strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
 .rinfo__kpi { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px;
   border-radius: 12px; background: color-mix(in srgb, var(--ink-hi) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--ink-hi) 8%, transparent); }
@@ -1722,15 +1722,18 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   50% { box-shadow:0 0 18px 2px color-mix(in srgb, var(--bad-fill) 55%, transparent); }
 }
 .gnode--miss .gnode__c { border-style: dashed; opacity: 0.55; background: none; }
-/* A line may route wherever it likes; it may never cross TEXT. The label sits
-   above the edge layer on an opaque plate, so the rule holds by construction —
-   no routing algorithm required to keep it. */
+/* A line may route wherever it likes; the text stays readable over it. No
+   plate behind the label (Marcelo, 2026-10-24: "remover fundo preto do
+   texto") — a halo in the page's own colour, the way the edge labels already
+   carry one (paint-order: stroke), and nothing boxed. */
 .gnode__nm { font: 600 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink); text-align: center;
              max-width: 148px; overflow: hidden; text-overflow: ellipsis;
              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-             background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+             padding: 1px 5px;
+             text-shadow: 0 0 2px var(--bg), 0 0 3px var(--bg), 0 0 4px var(--bg); }
 .gnode__v { font: 500 calc(11px * var(--gs, 1)) var(--mono); color: var(--ink-3); text-align: center;
-             background: var(--bg); padding: 0 5px; border-radius: 4px; }
+             padding: 0 5px;
+             text-shadow: 0 0 2px var(--bg), 0 0 3px var(--bg), 0 0 4px var(--bg); }
 .gnode__fc { font-style: normal; color: var(--warn); }
 .gnode--more .gnode__nm { color: var(--ink-3); }
 
@@ -1931,6 +1934,16 @@ table.dt { width: 100%; border-collapse: collapse; font-size: 12px; }
   text-shadow: 0 0 16px color-mix(in srgb, var(--ink-hi) 35%, transparent); }
 .tk-core__cap { font: 700 9px var(--mono); color: color-mix(in srgb, var(--ink-hi) 70%, transparent);
   text-transform: uppercase; letter-spacing: 0.12em; }
+/* The verdict's reason, under the verdict word — the same sentence the page
+   header prints, so the two can be read as one. */
+/* the deviation beside a place's rate — a figure, not a second verdict */
+.geo__x { color: var(--ink-3); font-weight: 500; }
+.tk-core__why { font: 500 11px var(--mono); color: var(--ink-2); text-align: center;
+  max-width: 300px; line-height: 1.4; margin-top: 2px; }
+/* What the score is made of — three shares and the rated count, under the
+   score it explains. Quiet ink: it is arithmetic, not a second verdict. */
+.tk-core__mix { font: 500 10px var(--mono); color: var(--ink-3);
+  font-variant-numeric: tabular-nums; text-align: center; margin-top: 1px; }
 .tk-core__words { display: block; font: 400 11px var(--mono); color: color-mix(in srgb, var(--ink-hi) 75%, transparent);
   max-width: 320px; margin: 6px auto 0; line-height: 1.5; }
 .tk-core__nm { font: 700 15px var(--sans); color: var(--ink-hi); margin-top: 6px;
@@ -2833,6 +2846,11 @@ a.svcf__row { text-decoration: none; color: inherit; }
 .tk-core__prob { font: 600 10px var(--mono); letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--ink-3); margin-top: 6px; }
 .tk-core__prob--on { color: var(--bad); }
+/* The measured half of the line keeps the quiet ink even when the count is
+   large: errors are a fact, not a verdict — the verdict is the Apdex word
+   above and the Davis half beside it. Colouring it would make a normal error
+   level read as an alarm. */
+.tk-core__prob-err { color: var(--ink-3); text-transform: none; letter-spacing: 0.02em; }
 
 /* ─── the application picker, wide enough to read ─────────────────────────
  * The list came out at a fixed 228px and clipped every name — twelve entries
@@ -3183,6 +3201,11 @@ div:has(> header):has(main) > div {
    nothing overlaps; on hover the one being pointed at wins, because it also
    takes the z-index above. */
 .gpin__lbl--off { display: none; }
+/* measured clash (Pulse geoOvRef): kept in layout so it can be re-measured,
+   invisible until the reader points at its mark */
+.gpin__lbl--clash { visibility: hidden; }
+.gpin:hover .gpin__lbl--clash, .gpin:focus-visible .gpin__lbl--clash,
+.gpin--sel .gpin__lbl--clash { visibility: visible; }
 .gpin:hover .gpin__lbl--off,
 .gpin:focus-visible .gpin__lbl--off,
 .gpin--sel .gpin__lbl--off { display: flex; }
@@ -3190,19 +3213,41 @@ div:has(> header):has(main) > div {
 .gpin__lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   margin-top: 3px; display: flex; align-items: baseline; gap: 5px; white-space: nowrap;
   font: 700 10px var(--sans); color: var(--ink-hi);
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  padding: 1px 7px; border-radius: 999px; }
+  /* haloed, not boxed — the same rule the flow canvas follows: a name on a
+     map is legible by a hairline of ground around the letters, never by a
+     plate behind them. */
+  padding: 1px 2px;
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 2px var(--bg); }
 .gpin__lbl em { font-style: normal; font: 700 10px var(--mono); color: var(--ink-2); }
 /* THEME TOKENS, not the canvas hexes — the HTML pins live in the page and
    must follow the light theme like every other verdict on screen (only the
    canvas DotLayer, which paints outside CSS, resolves the same tokens through
    geoCol()). */
-.gpin--good { background: var(--panel);
-  box-shadow:0 0 10px color-mix(in srgb, var(--good-fill) 45%, transparent); }
-.gpin--warn { background: var(--panel);
-  box-shadow:0 0 12px color-mix(in srgb, var(--warn-fill) 50%, transparent); }
-.gpin--bad { background: var(--panel);
-  box-shadow:0 0 14px color-mix(in srgb, var(--bad-fill) 60%, transparent); }
+/* A MARK IS PAINTED, NOT IMPLIED. The pins were the panel tint — three per
+   cent of ink — with a soft glow around them, which on the dotted ground of
+   the platform's map came out as a faint ring nobody could find: measured in
+   production, Canada, Spain and Argentina were there and invisible. Network
+   Pulse draws its sites the other way round and reads at a glance: the status
+   colour IS the mark, at full strength, with a hairline of ground around it
+   so it separates from the land dots. Same recipe here — the fill carries
+   the tone, a crisp border of the same tone keeps the big marks from reading
+   as blobs, and the ground halo does the separating. Size still encodes
+   sessions; the colour still encodes only the verdict. */
+.gpin { border: 2px solid; }
+.gpin--good { background: color-mix(in srgb, var(--good-fill) 62%, transparent);
+  border-color: var(--good-fill);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 12px color-mix(in srgb, var(--good-fill) 55%, transparent); }
+.gpin--warn { background: color-mix(in srgb, var(--warn-fill) 62%, transparent);
+  border-color: var(--warn-fill);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 14px color-mix(in srgb, var(--warn-fill) 60%, transparent); }
+.gpin--bad { background: color-mix(in srgb, var(--bad-fill) 62%, transparent);
+  border-color: var(--bad-fill);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 0 16px color-mix(in srgb, var(--bad-fill) 65%, transparent); }
+/* measuring: the place is there and sized by its sessions, but unjudged */
+.gpin--wait { background: color-mix(in srgb, var(--ink-3) 30%, transparent);
+  border-color: color-mix(in srgb, var(--ink-3) 70%, transparent);
+  box-shadow: 0 0 0 1.5px var(--bg); }
+.geo__h--wait { color: var(--ink-3); }
 .gpin--bad::before, .gpin--bad::after { content: ""; position: absolute; inset: 0;
   border-radius: 50%; border:2px solid var(--bad-fill); animation: gsonar 2.2s ease-out infinite; }
 .gpin--bad::after { animation-delay: 1.1s; }
@@ -3389,15 +3434,8 @@ div:has(> header):has(main) > div {
 .geo__sub-r--on { border-color: var(--ink-3); color: var(--ink-hi); }
 .geo__sub-r b.num { color: var(--ink-hi); font-weight: 700;
   font-variant-numeric: tabular-nums; }
-.geo__sub-r em.num, .geo__sub-city em.num { font-style: normal;
+.geo__sub-r em.num { font-style: normal;
   font: 400 var(--fs-mini) var(--mono); color: var(--ink-3);
-  font-variant-numeric: tabular-nums; }
-.geo__sub-cities { display: flex; flex-direction: column; gap: 3px;
-  padding-top: 8px; margin-top: 4px; border-top: 1px dashed var(--border); }
-.geo__sub-city { display: flex; align-items: baseline; gap: 8px;
-  font: 400 var(--fs-small) var(--mono); color: var(--ink-2); }
-.geo__sub-city > span:first-child { flex: 1 1 auto; min-width: 0; }
-.geo__sub-city b.num { color: var(--ink-hi); font-weight: 700;
   font-variant-numeric: tabular-nums; }
 .geo__sub-none { font: 400 var(--fs-small) var(--sans); color: var(--ink-3); }
 
@@ -3468,3 +3506,122 @@ div:has(> header):has(main) > div {
 :root:not([data-theme="dark"]) .tk-block::after {
   border-color: color-mix(in srgb, var(--c) 40%, transparent);
 }
+
+/* THE APPLICATION PICKER'S OVERLAY, IN PIXELS. Strato computes its max-height
+   from the iframe's viewport, which the app shell sizes to the page — on a
+   tall page the overlay outgrows the screen. The exported class names are
+   hashed, so the Strato containers are matched by their stable base name;
+   `!important` beats the inline value the floating layer writes. Height only:
+   nothing here touches what the list contains. */
+/* THE REAL CLASS NAMES, READ OFF THE INSTALLED PACKAGE. Strato's runtime
+   classes are opaque hashes — the readable names live only in the .d.ts and
+   the mapping file — so a [class*="selectMenuListWrapper"] selector matched
+   nothing at runtime. These are the hashes strato-components 3.11.3 emits
+   (forms/select/styles/Select.sty.js); a Strato upgrade changes them, and
+   the .app-picker layer below is what still holds then. */
+/* ONE SCROLL CONTAINER, THE ONE THE VIRTUALIZER WATCHES. The option list is
+   virtualized (@tanstack/react-virtual on the menu-list wrapper, _dlenfch):
+   it draws only the rows inside that element's scroll window. Capping the
+   inner virtualization wrapper (_dlenfcg, whose height IS the whole list) and
+   the overlay as well made three nested scroll boxes; the wheel scrolled one
+   the virtualizer does not listen to, the rows below were never drawn, and
+   the list could not be scrolled to its end ("não consigo correr a lista
+   toda com o scroll do mouse"). Only the menu-list wrapper is bounded now;
+   360 px plus the search field stays inside the overlay's 420. */
+._dlenfch-3-11-3 {
+  max-height: min(360px, calc(100vh - 200px)) !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+/* Shadow comparison (?compare=1) — a working table, not a card: mono numbers,
+   hairline rows, the verdict word carries the only colour. */
+.shadow__t { width: 100%; border-collapse: collapse; font: 500 11.5px var(--mono); }
+.shadow__t th { text-align: left; font-weight: 600; color: var(--ink-3); padding: 4px 8px;
+  border-bottom: 1px solid var(--border); }
+.shadow__t td { padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.shadow__t td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.shadow__cost { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px;
+  font: 400 11px var(--mono); color: var(--ink-3); }
+
+/* The map's no-place note: the application is amber or red for a reason
+   that has no location (forecast, Davis problem, anomaly). Neutral ink —
+   the hero already carries the colour; this only says where it came from. */
+.geo__why { padding: 8px 16px; font: 400 12px var(--sans); line-height: 1.45;
+  color: var(--ink-2); border-bottom: 1px solid var(--border); }
+.geo__why b { color: var(--ink-hi); font-weight: 600; }
+
+/* the metric map's hand-off from a country's states to Users & Sessions */
+.geo__drill-go { margin-left: auto; font: 600 11px var(--mono); color: var(--ink-2);
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 3px 8px; cursor: pointer; }
+.geo__drill-go:hover { color: var(--ink-hi); border-color: var(--ink-3); }
+
+/* the Journeys tab read a slice of the window (useJourneys sliceFor) */
+.j-slice { align-self: flex-end; font: 600 10px var(--mono); color: var(--ink-3);
+  letter-spacing: 0.02em; }
+
+/* the opened state, explained in place (Pulse, 0.17.18) */
+.geo__card { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; display: grid; gap: 6px; }
+.geo__card-h { display: flex; align-items: center; gap: 8px; font: 600 12px var(--sans); }
+.geo__card-h span { color: var(--ink-2); }
+.geo__card-h em { margin-left: auto; font: 600 11px var(--mono); color: var(--ink-3); font-style: normal; }
+.geo__card-why { font: 500 11px var(--mono); color: var(--ink-2); line-height: 1.5; }
+.geo__card .geo__drill-go { justify-self: start; }
+
+/* the opened state's costliest user actions (Pulse, 0.17.19) */
+.geo__acts { display: grid; gap: 2px; margin-top: 2px; }
+.geo__act { display: grid; grid-template-columns: minmax(0, 1fr) 56px 52px 64px 72px; gap: 8px;
+  align-items: baseline; font: 500 11px var(--mono); color: var(--ink-2); }
+.geo__act--hd { font: 600 9px var(--mono); color: var(--ink-3); text-transform: uppercase;
+  letter-spacing: 0.04em; }
+.geo__act > :not(:first-child) { text-align: right; }
+.geo__act-nm { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* an action row that hands its investigation to Dynatrace Assist (0.17.25) */
+.geo__act--go { cursor: pointer; border-radius: 4px; }
+.geo__act--go:hover, .geo__act--go:focus-visible { background: var(--panel-2); outline: none; }
+.geo__act--go:hover .geo__act-nm { color: var(--accent); }
+
+/* the picker's rows: name, and the window's sessions beside it (0.17.32) */
+.app-picker__row { display: flex; align-items: baseline; gap: 12px; width: 100%; }
+.app-picker__row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-picker__n { font: 600 11px var(--mono); font-style: normal; color: var(--ink-3); }
+.app-picker__row--idle > span { color: var(--ink-3); }
+
+/* the no-screen breakdown: numbers fit their card, nothing scrolls sideways
+   (0.17.34) — compact figures, the exact one in the tooltip */
+.ntel { overflow-x: hidden; }
+.ntel .rinfo__strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ntel .rinfo__kpi { min-width: 0; }
+.ntel .rinfo__kpi b { font-size: clamp(20px, 3.2vw, 30px); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.ntel .rinfo__bar-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 0.17.42 audit: the highlighted block's pulse dies under reduced motion too */
+@media (prefers-reduced-motion: reduce) {
+  .graph--hl .bsum--spot .bsum__c { animation: none; }
+}
+/* 0.17.42 audit: poster tiles and "only on this route" rows never push past their card */
+.rinfo__kpi { min-width: 0; }
+.rinfo__so-r { grid-template-columns: auto auto auto minmax(0, 1fr); }
+.rinfo__so-r i, .rinfo__so-r em { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* 0.17.43 audit — THE ROUTE POSTER COMPARES, IT DOES NOT JUDGE. Its "1.6×
+   more than everyone else" lines rest on this app's own multiples (1.15×,
+   1.5×, 2×), not on a Dynatrace rule, so they keep their words and their
+   weight but not the status colours. Status colour stays with the Apdex. */
+.rinfo__kpi--bad, .rinfo__kpi--good { border-color: var(--border); }
+.rinfo__kpi--bad .num, .rinfo__kpi--bad em, .rinfo__kpi--good .num { color: var(--ink); }
+.rinfo__bar-fill--up { background: var(--ink-3); box-shadow: none; }
+.rinfo__stop-e--bad, .rinfo__geo-e--bad, .rinfo__geo-v--bad, .rinfo__geo-v--bad b,
+.rinfo__so-e--bad { color: var(--ink); font-weight: 700; }
+
+.bc__seg-h--wait { color: var(--ink-2); }
+
+/* 0.17.48 — what sets the opened place apart: same grid as the action table */
+.geo__why .geo__act-nm em { font-style: normal; color: var(--ink-3); margin-right: 6px; }
+
+/* 0.17.50 — the map rides along a long country list instead of leaving an
+   empty column beside it */
+.geo__wrap > .geo__map { position: sticky; top: 12px; align-self: start; }

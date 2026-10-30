@@ -30,6 +30,40 @@ export interface Forecast {
    *  series in the metric store. The caller decides what to say; it cannot
    *  decide without being told. */
   emptyInput: boolean;
+  /** The measured level the projection starts from: the mean of the last
+   *  three measured points (null when none was measured). */
+  level: number | null;
+  /** The series the analyzer trained on, and when its first bin starts
+   *  (epoch ms; null when the record did not say). */
+  measured: Array<number | null>;
+  start: number | null;
+  /** What it trained on, for the tooltip: the metric store scaled by k to
+   *  the drawn series, or the event history and why the metric was not used. */
+  basis?: { k: number } | { why: string };
+}
+
+/** A projection rescaled by k — point, band, total, slope and level alike. */
+export function calibrate(f: Forecast, k: number): Forecast {
+  const m = (a: number[]) => a.map((v) => v * k);
+  return { ...f, point: m(f.point), lower: m(f.lower), upper: m(f.upper),
+    total: f.total * k, slope: f.slope * k,
+    level: f.level === null ? null : f.level * k,
+    measured: f.measured.map((v) => (v == null ? v : v * k)), basis: { k } };
+}
+
+/** IS THE RISE REAL, or a slope inside the noise?
+ *  The verdict used to warn on any positive slope. Measured on staging: an error
+ *  forecast going from 307 to 343 per bin — inside a band of 151 to 697 —
+ *  turned a healthy application amber. A rise is real only when even the
+ *  forecast's LOWER bound, over the last third of the horizon, sits above
+ *  the level measured now: the analyzer itself is then sure it goes up. */
+export function riseIsReal(f: Forecast | null | undefined): boolean {
+  if (!f || f.emptyInput || f.level === null || !(f.level > 0)) return false;
+  const tail = f.lower.slice(-Math.max(1, Math.ceil(f.lower.length / 3)))
+    .filter((n) => Number.isFinite(n));
+  if (!tail.length) return false;
+  const lowTail = tail.reduce((a, b) => a + b, 0) / tail.length;
+  return lowTail > f.level;
 }
 
 /** Polls until the analysis completes, per the documented execution contract. */
@@ -161,6 +195,10 @@ async function runForecast(expression: string, horizon = 12): Promise<Forecast |
        a measurement, and zero is a legitimate thing to forecast. */
     const emptyInput = measured.length > 0 && measured.every((n) => n == null);
 
+    const seen = measured.filter((n): n is number => n != null && Number.isFinite(n));
+    const last3 = seen.slice(-3);
+    const level = last3.length ? last3.reduce((a, b) => a + b, 0) / last3.length : null;
+
     return {
       point, lower, upper,
       total: point.reduce((a, b) => a + b, 0),
@@ -168,6 +206,11 @@ async function runForecast(expression: string, horizon = 12): Promise<Forecast |
       horizon: point.length,
       intervalMs: Number(rec.interval ?? 0) / 1e6,
       emptyInput,
+      level,
+      measured,
+      start: Number.isFinite(Date.parse(String(
+        (rec.timeframe as { start?: string } | undefined)?.start ?? "")))
+        ? Date.parse(String((rec.timeframe as { start?: string }).start)) : null,
     };
   } catch {
     // no scope, analyzer unavailable, or the query returned nothing usable

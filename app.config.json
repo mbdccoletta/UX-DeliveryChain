@@ -2,7 +2,7 @@
   "environmentUrl": "https://your-environment.apps.dynatrace.com",
   "app": {
     "name": "UX Delivery Chain",
-    "version": "0.13.6",
+    "version": "0.17.53",
     "description": "Every layer a user request crosses, and what each one costs them.",
     "icon": "./assets/icon.png",
     "id": "my.deliverychain.ux",
@@ -62,6 +62,10 @@
       {
         "name": "storage:metrics:read",
         "comment": "Throughput forecast per service rides the metric store — orders cheaper than re-scanning 24h of spans."
+      },
+      {
+        "name": "environment-api:metrics:read",
+        "comment": "The Apdex Dynatrace's application list shows (RUM classic builtin:apps.* metrics), used only when the new RUM rates no user action for an application."
       }
     ]
   }

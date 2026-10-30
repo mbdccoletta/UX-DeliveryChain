@@ -23,9 +23,15 @@ function read<T extends UrlState>(defaults: T): T {
   return out;
 }
 
-/** Serialises state back, dropping the keys that hold their default. */
+/** Serialises state back, dropping the keys that hold their default.
+ *  Parameters this state does not own (a diagnostic switch like compare=1)
+ *  are carried over untouched — rewriting the query from scratch erased them
+ *  on the first state change, before anything had read them. */
 function write<T extends UrlState>(next: T, defaults: T): string {
   const q = new URLSearchParams();
+  for (const [k, v] of new URLSearchParams(window.location.search)) {
+    if (!(k in defaults)) q.set(k, v);
+  }
   for (const [k, v] of Object.entries(next)) {
     if (v === null || v === undefined || v === defaults[k]) continue;
     q.set(k, v);

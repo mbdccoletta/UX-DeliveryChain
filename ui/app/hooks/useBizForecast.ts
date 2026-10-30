@@ -8,7 +8,8 @@
 // figures. Memoised per (window, scope).
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qBizSeries, type OutcomeDefs, type Timeframe } from "../utils/dql";
+import { bizSeriesShape, COHORT_BYTES_PER_SESSION, qBizSeries, type OutcomeDefs, type Timeframe } from "../utils/dql";
+import { OPTIONAL_SCAN_BUDGET_GIB } from "../utils/cost";
 
 export interface Projection { point: number; lower: number; upper: number; quality: string }
 export interface BizForecast { sessions: Projection | null; conversions: Projection | null }
@@ -26,7 +27,10 @@ async function forecastOne(
   defs?: OutcomeDefs,
 ): Promise<Projection | null> {
   try {
-    const horizon = 8; // one window ahead: the series bins the window into 8
+    /* one window ahead, in the bins qBizSeries actually uses — one shape,
+       shared, see bizSeriesShape */
+    const { horizon, ok } = bizSeriesShape(tf);
+    if (!ok) return null;
     const base = `/platform/davis/analyzers/v1/analyzers/${ANALYZER}`;
     let res = await (await fetch(`${base}:execute`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -67,7 +71,20 @@ async function forecastOne(
 }
 
 export function useBizForecast(tf: Timeframe, appId: string | null,
-  defs?: OutcomeDefs): BizForecast | null {
+  defs?: OutcomeDefs,
+  /** AFTER THE BOARD, NEVER BESIDE IT. The analyzer's scan is a full read of
+   *  two windows of RUM; fired with the cube it competed for the same hour
+   *  and the cards waited on it. The caller passes true once the board's own
+   *  figures have landed — the projection is the last thing drawn. */
+  ready = true,
+  /** Sessions in the window, for the scan guardrail (0.17.17): the series is a
+   *  per-session read of the whole history — 28 GiB for two hours measured on
+   *  production — and a projection is never allowed to cost like a fact. */
+  sessions = 0,
+  /** Measured cost of one minute of the same events (Business Control's
+   *  probe). When known it replaces the per-session estimate, which on a
+   *  mobile application was an order of magnitude low. */
+  gibPerMin = 0): BizForecast | null {
   const gen = useMemoGen();
   const key = `${tf.from}|${tf.to}|${appId ?? ""}|${JSON.stringify(defs?.[appId ?? ""] ?? null)}|${gen}`;
   const [out, setOut] = useState<BizForecast | null>(memo.get(key) ?? null);
@@ -76,20 +93,26 @@ export function useBizForecast(tf: Timeframe, appId: string | null,
     const hit = memo.get(key);
     if (hit) { setOut(hit); return; }
     setOut(null);
+    // the guardrail needs the window's size: no projection before it is known
+    if (!ready || !(sessions > 0)) return;
     let live = true;
     (async () => {
       /* ONE analyzer run, not two. The conversion leg projected a predicate
        * the product no longer uses, and each leg is a full Grail scan inside
        * the analyzer — measured as the heaviest in the app. Volume is what is
        * directly projectable, so volume is what is projected. */
-      const sessions = await forecastOne(tf, "sessions", appId, defs);
-      const res = { sessions, conversions: null };
+      const { histMin } = bizSeriesShape(tf);
+      const est = gibPerMin > 0 ? gibPerMin * histMin
+        : (sessions * (histMin / Math.max(1, tf.minutes)) * COHORT_BYTES_PER_SESSION) / 2 ** 30;
+      const proj = est <= OPTIONAL_SCAN_BUDGET_GIB
+        ? await forecastOne(tf, "sessions", appId, defs) : null;
+      const res = { sessions: proj, conversions: null };
       memo.set(key, res);
       if (live) setOut(res);
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, ready, sessions > 0, gibPerMin]);
 
   return out;
 }

@@ -19,3 +19,8 @@ out/
 # macOS
 .DS_Store
 *.log
+
+# Replay scenarios are built from customer captures (HAR): screen names,
+# countries, counts. They stay on this machine — never committed.
+tools/replay/scenarios/
+*.har

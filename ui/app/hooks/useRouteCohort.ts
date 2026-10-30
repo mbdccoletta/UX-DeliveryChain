@@ -1,6 +1,6 @@
 // Business Control, scoped to the routes a reader picked on Journeys.
 //
-// The board's own scan (qBizKpis) is per application: it cannot know about a
+// The board's own scan (qBizCube) is per application: it cannot know about a
 // route, because a route is a mined sequence, not a field. So a route-scoped
 // board is computed the way the poster computes its cohort — per-session facts
 // joined to per-session journeys, in the browser — and it is run TWICE, this
@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
 import {
-  normalizeView, qCohortSessions, qPathSessions, runDql,
+  normalizeView, memoSized, qCohortSessions, qPathSessions, runSized, sampleRate, shiftBack,
   type OutcomeDefs, type Timeframe,
 } from "../utils/dql";
 import { matchesRoutes, type RouteCtx } from "../components/FlowSankey";
@@ -39,11 +39,28 @@ const memo = new Map<string, RouteCohort>();
 async function windowFacts(
   tf: Timeframe, appId: string, picks: string[], ctx: RouteCtx | null,
   defs?: OutcomeDefs,
+  /** Sessions of the window — sizes the session hash inside the read. */
+  sessions = 0,
+  /** The refresh generation — part of the remembered read's key. */
+  gen = 0,
 ): Promise<{ facts: CohortFacts; sampled: boolean }> {
-  const [rows, paths] = await Promise.all([
-    runDql<Record<string, unknown>>(qCohortSessions(tf, appId, defs), 10000),
-    runDql<Record<string, unknown>>(qPathSessions(tf, appId), 10000),
-  ]);
+  /* ONE SAMPLE FOR BOTH SCANS (sampleRate, utils/dql): the same sessions in
+     the facts and the paths, so the join is exact inside the sample. The read
+     is sized by a measured probe (runSized, 0.17.33); every count below is
+     scaled by 1/rate — the slice read times the hash inside it. */
+  /* remembered by window, application and definitions only — the picks and
+     the route context are matched below, client-side, so a new context (a
+     shared link landing before the mine) no longer pays the same read twice;
+     the Journeys poster asks under the same key */
+  const sized = await memoSized(
+    `cohort|${tf.from}|${tf.to}|${appId}|${JSON.stringify(defs?.[appId] ?? null)}|true|${gen}`,
+    () => runSized(tf, [
+      { build: (t, share) => qCohortSessions(t, appId, defs, sampleRate(sessions * share)), max: 10000 },
+      { build: (t, share) => qPathSessions(t, appId, sampleRate(sessions * share)), max: 10000 },
+    ]).then((r) => ({ ...r, hash: sampleRate(sessions * r.share) })));
+  const [rows, paths] = sized.rows;
+  // scaled by the sample the read was made with (it may be a remembered one)
+  const rate = sized.share * sized.hash;
   const inCohort = new Set<string>();
   for (const r of paths) {
     const journey = (Array.isArray(r.path) ? (r.path as string[]) : [])
@@ -56,26 +73,29 @@ async function windowFacts(
   const hurt = real.filter((r) => Number(r.errs) > 0);
   const conv = (rs: Array<Record<string, unknown>>) =>
     rs.filter((r) => Number(r.reached) === 1).length;
+  const k = (n: number) => (rate < 1 ? Math.round(n / rate) : n);
   return {
     facts: {
-      sessions: mine.length,
-      customers: real.length,
-      converted: conv(real),
-      hit: hurt.length,
-      crashed: mine.filter((r) => Number(r.crash) > 0).length,
+      sessions: k(mine.length),
+      customers: k(real.length),
+      converted: k(conv(real)),
+      hit: k(hurt.length),
+      crashed: k(mine.filter((r) => Number(r.crash) > 0).length),
       // the same per-session facts the board's own figures rest on, so a
       // narrowed board keeps every line it had: engagement and failure cost
-      engaged: real.filter((r) => Number(r.views) > 1).length,
-      waited: real.filter((r) => Number(r.waited) > 0).length,
-      cleanN: clean.length, cleanConv: conv(clean), hitConv: conv(hurt),
+      engaged: k(real.filter((r) => Number(r.views) > 1).length),
+      waited: k(real.filter((r) => Number(r.waited) > 0).length),
+      cleanN: k(clean.length), cleanConv: k(conv(clean)), hitConv: k(conv(hurt)),
     },
-    sampled: paths.length >= 10000 || rows.length >= 10000,
+    sampled: rate < 1 || paths.length >= 10000 || rows.length >= 10000,
   };
 }
 
 export function useRouteCohort(
   tf: Timeframe, appId: string, picks: string[] | null, ctx: RouteCtx | null,
   defs?: OutcomeDefs,
+  /** The application's sessions in the window — sizes the shared sample. */
+  appSessions = 0,
 ): RouteCohort | null {
   /* THE CONTEXT IS PART OF THE QUESTION. The cohort is resolved AGAINST ctx
      — the mined routes and their depth — and ctx was in neither the cache key
@@ -104,11 +124,12 @@ export function useRouteCohort(
     let live = true;
     (async () => {
       try {
-        const span = `${Math.max(1, Math.round(tf.minutes))}m`;
-        const prevTf: Timeframe = { ...tf, from: `${tf.from}-${span}`, to: tf.from };
+        const span = Math.max(1, Math.round(tf.minutes));
+        const prevTf: Timeframe = { ...tf, from: shiftBack(tf.from, span), to: tf.from };
+        // each window read inside the budget, sized by a measured probe
         const [a, b] = await Promise.all([
-          windowFacts(tf, appId, picks, ctx, defs),
-          windowFacts(prevTf, appId, picks, ctx, defs),
+          windowFacts(tf, appId, picks, ctx, defs, appSessions, gen),
+          windowFacts(prevTf, appId, picks, ctx, defs, appSessions, gen),
         ]);
         const res: RouteCohort = { cur: a.facts, prev: b.facts, sampled: a.sampled || b.sampled };
         memo.set(key, res);

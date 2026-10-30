@@ -10,51 +10,29 @@
 // first page must not bill twice for being looked at twice.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qPulseBreakdown, qPulseSeries, qSessionSeries, runDql,
+import { qAppMetricSeries, qPulse, qSessionSeries, runDql,
   withinSessionLag, type Timeframe } from "../utils/dql";
 
 export interface PulsePoint {
   t: string; sessions: number; errors: number; actions: number; requests: number;
 }
 
-export interface PulseSlice { label: string; sessions: number; errors: number }
 
 export interface PulseData {
   series: PulsePoint[];
-  /** KPIs only the breakdown scan knows. */
-  appStarts: number;
-  actions: number;
+  /** Requests in the window, and the calls among them that failed — the
+   *  web-requests card's two numbers, counted exactly — the sum of qPulse's
+   *  bins over the whole window (one event, one bin). */
   requests: number;
-  /** Requests answered 4xx/5xx — the web-requests error rate's numerator. */
   reqFail: number;
-  /** Errors whose type is an exception — the closest measurable kin of a
-   *  crash: this RUM schema records no crash classifier at all. */
-  exceptions: number;
-  /** Top slices per dimension, largest first, blanks dropped. */
-  os: PulseSlice[];
-  devices: PulseSlice[];
-  versions: PulseSlice[];
-  countries: PulseSlice[];
-  userTypes: PulseSlice[];
+  /** GiB the window's event scan read — what an event history costs per
+   *  window-length, for the optional-read guardrail. Null when the query
+   *  reported no metadata (a shared in-flight answer): unknown, not free. */
+  scanGiB: number | null;
 }
 
 const memo = new Map<string, PulseData | null>();
 
-/** Rolls the tuple rows up into one dimension's top slices. */
-function rollup(
-  rows: Array<Record<string, unknown>>, label: (r: Record<string, unknown>) => string,
-): PulseSlice[] {
-  const acc = new Map<string, PulseSlice>();
-  for (const r of rows) {
-    const l = label(r).trim();
-    if (!l || l === "null" || l === "—") continue;
-    const hit = acc.get(l) ?? { label: l, sessions: 0, errors: 0 };
-    hit.sessions += Number(r.sessions) || 0;
-    hit.errors += Number(r.errors) || 0;
-    acc.set(l, hit);
-  }
-  return [...acc.values()].sort((a, b) => b.sessions - a.sessions).slice(0, 6);
-}
 
 /**
  * `frontendName` moves the SESSIONS line of the trend onto `user.sessions`,
@@ -82,41 +60,80 @@ export function usePulse(
       try {
         /* The breakdown scan is the slow one on a large application; its
            preview lets the card's bars and KPIs appear while it finishes. */
-        const [series, tuples, sess] = await Promise.all([
-          runDql<Record<string, unknown>>(qPulseSeries(tf!, rumAppId!), 200),
-          runDql<Record<string, unknown>>(qPulseBreakdown(tf!, rumAppId!), 500),
+        /* THE COUNTERS' BARS COME FROM THE SAME SERIES THE FORECAST TRAINS ON.
+           One rule, one source: the forecast band is drawn over these bars,
+           and a band trained on the metric store over bars mined from events
+           would be two populations meeting in the open — the exact
+           incoherence this app spent a morning removing. Sessions keep their
+           base; errors, requests and actions take the metric series when the
+           frontend is known, and the event series otherwise. */
+        const metricP = fe
+          ? runDql<Record<string, unknown>>(qAppMetricSeries(tf!, fe), 1)
+              .catch(() => [] as Record<string, unknown>[])
+          : Promise.resolve([] as Record<string, unknown>[]);
+        /* ONE SCAN FOR THE BARS AND THE TOTALS (qPulse). The cap is far above
+           any bin count (binFor keeps a window near 60 bins); a capped answer
+           would make the totals short, so it is refused rather than summed. */
+        let capped = false;
+        let scanBytes: number | null = null;
+        const [rows, sess, metricRows] = await Promise.all([
+          runDql<Record<string, unknown>>(qPulse(tf!, rumAppId!), 1000, () => { capped = true; },
+            undefined, { onMeta: (mm) => { scanBytes = mm.scannedBytes; } }),
           // not inside the store's lag: there the series would be empty by
           // construction, and the event series is the honest one
           fe && !withinSessionLag(tf!)
             ? runDql<Record<string, unknown>>(qSessionSeries(tf!, fe), 200)
                  .catch(() => [] as Record<string, unknown>[])
              : Promise.resolve([] as Record<string, unknown>[]),
+          metricP,
         ]);
         /* Both legs bin the same window with the same width, so the bin
            label is the join key. A bin the session store has nothing for is
            zero rather than missing — the gap is the fact. */
+        if (capped) throw new Error("pulse series capped");
+        // the drawn series: the bins qPulseSeries returned — those holding at
+        // least one event before the series' own end
+        const series = rows.filter((r) => (Number(r.early) || 0) > 0);
+        const sumOf = (k: string) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
         const byBin = new Map<string, number>();
         for (const r of sess) byBin.set(String(r.t ?? ""), Number(r.sessions) || 0);
+        /* A `timeseries` answer is ONE record: arrays per field, a start and
+           an interval. The i-th value belongs to start + i·interval, so the
+           join with the event series is by timestamp, rounded to the bin —
+           a string compare would break on a stray millisecond. */
+        const m = metricRows[0] as { errors?: number[]; requests?: number[]; actions?: number[];
+          timeframe?: { start?: string }; interval?: number } | undefined;
+        const ivMs = Number(m?.interval ?? 0) / 1e6;
+        const m0 = m?.timeframe?.start ? Date.parse(String(m.timeframe.start)) : NaN;
+        const atBin = (ms: number) => (ivMs > 0 ? Math.round(ms / ivMs) : ms);
+        const byBinM = new Map<number, { errors: number; requests: number; actions: number }>();
+        if (m && Number.isFinite(m0) && ivMs > 0) {
+          const n = Math.max(m.errors?.length ?? 0, m.requests?.length ?? 0, m.actions?.length ?? 0);
+          for (let i = 0; i < n; i++) byBinM.set(atBin(m0 + i * ivMs), {
+            errors: Number(m.errors?.[i]) || 0, requests: Number(m.requests?.[i]) || 0,
+            actions: Number(m.actions?.[i]) || 0 });
+        }
         out = {
-          series: series.map((r) => ({
-            t: String(r.t ?? ""),
-            sessions: byBin.size
-              ? (byBin.get(String(r.t ?? "")) ?? 0)
-              : Number(r.sessions) || 0,
-            errors: Number(r.errors) || 0, actions: Number(r.actions) || 0,
-            requests: Number(r.requests) || 0,
-          })),
-          appStarts: tuples.reduce((a, r) => a + (Number(r.starts) || 0), 0),
-          actions: tuples.reduce((a, r) => a + (Number(r.actions) || 0), 0),
-          requests: tuples.reduce((a, r) => a + (Number(r.requests) || 0), 0),
-          reqFail: tuples.reduce((a, r) => a + (Number(r.reqfail) || 0), 0),
-          exceptions: tuples.reduce((a, r) => a + (Number(r.exceptions) || 0), 0),
-          os: rollup(tuples, (r) => r.os ? `${r.os}${r.osv ? " " + r.osv : ""}` : ""),
-          devices: rollup(tuples, (r) => r.man || r.model
-            ? [r.man, r.model].filter(Boolean).join(" ") : ""),
-          versions: rollup(tuples, (r) => r.ver ? String(r.ver) : ""),
-          countries: rollup(tuples, (r) => r.cc ? String(r.cc) : ""),
-          userTypes: rollup(tuples, (r) => r.ut ? String(r.ut) : ""),
+          series: series.map((r) => {
+            const t = String(r.t ?? ""); const mm = byBinM.get(atBin(Date.parse(t)));
+            return {
+              t,
+              sessions: byBin.size
+                ? (byBin.get(t) ?? 0)
+                : Number(r.sessions) || 0,
+              errors: mm ? mm.errors : Number(r.errors) || 0,
+              actions: mm ? mm.actions : Number(r.actions) || 0,
+              /* REQUESTS STAY ON EVENTS. Measured bin by bin on a production
+                 capture, dt.frontend.request.count runs 22% above the request
+                 events in every interval — a different population, not a lag.
+                 The card's total is counted from events; its bars must be the
+                 same population ("what does not match is not substituted"). */
+              requests: Number(r.requests) || 0,
+            };
+          }),
+          requests: sumOf("reqAll"),
+          reqFail: sumOf("failAll"),
+          scanGiB: scanBytes === null ? null : scanBytes / 1073741824,
         };
       } catch {
         /* the page still renders from the shared data — panels just close */

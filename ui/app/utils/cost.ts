@@ -62,6 +62,38 @@ export const isScanLimit = (message?: string | null) =>
    budget has elapsed are user actions (a drill opened a minute later) and
    keep their own per-query bound instead — see pageBudgetMs. */
 export const PAGE_BUDGET_MS = 10000;
+
+/* THE GUARDRAIL ON WHAT IS OPTIONAL (0.16.27). The cards' projections
+   (sessions, errors, requests — useMetricForecast) are drawn beside the
+   facts; the verdict reads none of them (its own forecast is the error rate,
+   on the metric store) — so they are never allowed to cost like facts on a
+   customer's estate. Measured on production,
+   the event-history fallback of one forecast read 466 GiB. An optional read
+   that would scan more than this is not run; the page shows no projection
+   instead. The estimate is measured, not guessed: the window's own event
+   scan (the pulse) times the history's length over the window's. */
+export const OPTIONAL_SCAN_BUDGET_GIB = 25;
+
+/** What a click-time breakdown of raw events reads per session of the window
+ *  — measured on production, 118–140 GiB for a ~6M-session hour (≈25 KB),
+ *  kept a little above so the estimate errs towards the budget. */
+export const EVENT_BYTES_PER_SESSION = 30e3;
+/* A CLICK WAITS FOR ITS ANSWER (0.17.17). Sampled to the 25 GiB budget, the
+   breakdowns behind a click still took 10–18 s on production; a ranking of
+   eight rows and its percentiles hold on a much smaller sample. Clicks are
+   sized to this tighter budget — faster, and cheaper still. */
+export const CLICK_SCAN_BUDGET_GIB = 3;
+/** The smallest Grail sampling ratio (1, 10, 100…) that keeps a raw-event
+ *  read of a window with `sessions` inside the budget; 1 means exact. */
+/* UNKNOWN IS NOT SMALL (0.17.42): with the census still loading the count
+   is 0, which read as "exact" — a click in the first seconds read the whole
+   window unsampled. An unknown size samples 1:100; runRefined narrows it
+   once the read reports its real cost. */
+export const scanRatio = (sessions: number | null | undefined, budgetGiB = CLICK_SCAN_BUDGET_GIB): number =>
+  sessions === null || sessions === undefined || !Number.isFinite(sessions) ? 100
+  // a KNOWN zero is a tiny application, read exactly
+  : !(sessions > 0) ? 1 : [1, 10, 100, 1000, 10000].find((r) =>
+    (sessions * EVENT_BYTES_PER_SESSION) / 2 ** 30 / r <= budgetGiB) ?? 10000;
 let windowStartedAt = Date.now();
 /** Milliseconds of the page budget still left, or null once the first-load
  *  budget has fully elapsed (later queries are interactions, not the load). */

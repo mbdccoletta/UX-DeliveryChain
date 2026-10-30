@@ -12,21 +12,42 @@
 // that is a fact about the data, not a shortcut.
 import { useEffect, useState } from "react";
 import { useMemoGen } from "../utils/memo";
-import { qGeoCities, qGeoRegions, runDql, type Timeframe } from "../utils/dql";
+import { qGeoRegions, runDql, type Timeframe } from "../utils/dql";
 
 export interface PlaceRow {
   /** ISO 3166-2 for a state ("US-CA"); the plain name for a city. */
   id: string;
+  /** "store": a state read from the session store with the headline
+   *  (sessions with errors, no score); absent: the event scan. */
+  source?: "store";
   name: string;
   sessions: number;
   hit: number;
+  /** The platform's experience rating of the place's user actions, real
+   *  people only — states carry it (qGeoRegions); cities do not. */
+  sat?: number; tol?: number; fru?: number;
+  /** Real people only, as the verdict counts them (states). */
+  realSessions?: number; realHit?: number;
 }
 
-const memo = new Map<string, PlaceRow[]>();
+/** The rows, plus whether they are still a PREVIEW — real, measured, not yet
+ *  whole. Same contract as GeoRows: the panel says "measuring…" while the
+ *  flag is up; the final replaces it; only the final is memoised. */
+export type PlaceRows = PlaceRow[] & { partial?: boolean };
 
-/** One fetch-and-remember, shared by both levels. */
-function usePlaces(key: string, run: () => Promise<PlaceRow[]>): PlaceRow[] | null {
-  const [out, setOut] = useState<PlaceRow[] | null>(key ? memo.get(key) ?? null : null);
+const memo = new Map<string, PlaceRows>();
+
+/** One fetch-and-remember, shared by both levels.
+ *
+ *  PREVIEWS PAINT HERE TOO. Opening a country on a bank's production estate
+ *  is a full scan of the hour's RUM — 15–25 s before the first state showed,
+ *  and the click looked dead. Grail hands back partial rows within a couple
+ *  of seconds; they are the same measurement, incomplete, and the rest of
+ *  the app already paints them marked. Nothing is settled on a timer: the
+ *  final still decides, and only the final is remembered. */
+function usePlaces(key: string,
+  run: (onPartial: (rows: PlaceRows) => void) => Promise<PlaceRows>): PlaceRows | null {
+  const [out, setOut] = useState<PlaceRows | null>(key ? memo.get(key) ?? null : null);
   useEffect(() => {
     if (!key) { setOut(null); return; }
     const hit = memo.get(key);
@@ -35,7 +56,11 @@ function usePlaces(key: string, run: () => Promise<PlaceRow[]>): PlaceRow[] | nu
     let live = true;
     (async () => {
       try {
-        const rows = await run();
+        const rows = await run((early) => {
+          if (!live || !early.length) return;
+          const p: PlaceRows = [...early]; p.partial = true;
+          setOut(p);
+        });
         memo.set(key, rows);
         if (live) setOut(rows);
       } catch {
@@ -51,13 +76,11 @@ function usePlaces(key: string, run: () => Promise<PlaceRow[]>): PlaceRow[] | nu
 
 /** The states of one country, keyed for the choropleth. */
 export function useRegions(tf: Timeframe, appId?: string | null,
-  iso?: string | null): PlaceRow[] | null {
+  iso?: string | null): PlaceRows | null {
   const gen = useMemoGen();
   const key = appId && iso ? `r|${tf.from}|${tf.to}|${appId}|${iso}|${gen}` : "";
-  return usePlaces(key, async () => {
-    const rows = await runDql<Record<string, unknown>>(
-      qGeoRegions(tf, appId as string, iso as string), 40);
-    return rows.map((r) => ({
+  return usePlaces(key, async (onPartial) => {
+    const shape = (rows: Record<string, unknown>[]): PlaceRows => rows.map((r) => ({
       /* THE COUNTRY HAS TO BE PREFIXED. The platform returns the suffix alone —
        * "CA", "NSW", "32" — while ISO 3166-2 is "US-CA", "AU-NSW", "PL-32", and
        * the choropleth keys on the full code. Not tidiness: "CA" on its own is
@@ -66,24 +89,12 @@ export function useRegions(tf: Timeframe, appId?: string | null,
       name: String(r.name ?? r.region ?? "?"),
       sessions: Number(r.sessions) || 0,
       hit: Number(r.hit) || 0,
+      sat: Number(r.sat) || 0, tol: Number(r.tol) || 0, fru: Number(r.fru) || 0,
+      realSessions: Number(r.realSessions) || 0, realHit: Number(r.realHit) || 0,
     }));
-  });
-}
-
-/** The cities of one state. */
-export function useCities(tf: Timeframe, appId?: string | null,
-  iso?: string | null, region?: string | null): PlaceRow[] | null {
-  const gen = useMemoGen();
-  const key = appId && iso && region
-    ? `c|${tf.from}|${tf.to}|${appId}|${iso}|${region}|${gen}` : "";
-  return usePlaces(key, async () => {
     const rows = await runDql<Record<string, unknown>>(
-      qGeoCities(tf, appId as string, iso as string, region as string), 20);
-    return rows.map((r) => ({
-      id: String(r.city ?? "?"),
-      name: String(r.city ?? "?"),
-      sessions: Number(r.sessions) || 0,
-      hit: Number(r.hit) || 0,
-    }));
+      qGeoRegions(tf, appId as string, iso as string), 40, undefined,
+      (early) => onPartial(shape(early)));
+    return shape(rows);
   });
 }

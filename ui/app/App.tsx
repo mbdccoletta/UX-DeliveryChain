@@ -10,8 +10,13 @@ import { AppHeader, HelpMenu, PageLayout, TitleBar } from "@dynatrace/strato-com
 import { Select } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import "./styles/theme.css";
+import { useOrigins } from "./hooks/useOrigins";
+import { useDomains } from "./hooks/useDomains";
+import { useAppActivity } from "./hooks/useAppActivity";
+import { scanRatio } from "./utils/cost";
+import { rememberApp } from "./utils/prefs";
 import { useChainData } from "./hooks/useChainData";
-import { tfFrom } from "./utils/dql";
+import { fmtK, tfFrom } from "./utils/dql";
 import { hasTruncation, subscribeScan, scanTotals, scanByLabel,
   fmtBytes, fmtMoney } from "./utils/cost";
 /* THE FOUR PAGES ARRIVE WHEN THEY ARE OPENED.
@@ -155,29 +160,32 @@ export function App() {
   // Flow (whose step mode now takes custom paths) is the Journeys page.
   // Any window the platform selector can express — presets and custom ranges
   // alike — travels in the URL as the two expressions the queries will use.
-  /* THE 24-HOUR CEILING. Scan cost is linear in the window (measured:
-   * ~16.9 GB for 2h of this estate — a 30-day pick would be ~6 TB), so the
-   * window's LENGTH is capped at 24h: the END the reader chose is kept and
-   * the start is pulled up to 24h before it. Recency is not constrained —
-   * yesterday's 2h window is as valid as today's. The label says when the
-   * cap acted, because a silently different window is the lie this app
-   * refuses to tell. */
+  /* THE 2-HOUR CEILING (Marcelo, 2026-10-23: "utilizar janela de 1 hora e
+   * limitar o máximo para 2 horas"). Scan cost is linear in the window, and
+   * measured on a production application a full scan reads ~265 GB per hour —
+   * at the old 24-hour ceiling one Overview open read ~23 TB. The window's
+   * LENGTH is capped at 2 h: the END the reader chose is kept and the start
+   * is pulled up to 2 h before it. Recency is not constrained — yesterday's
+   * hour is as valid as this one. The label says when the cap acted, because
+   * a silently different window is the lie this app refuses to tell. */
+  const MAX_WINDOW_MIN = 120;
   const tf = React.useMemo(() => {
     const raw = tfFrom(state.from || TF0.from, state.to || TF0.to);
-    if (raw.minutes <= 1440) return raw;
+    if (raw.minutes <= MAX_WINDOW_MIN) return raw;
+    const capNote = "capped at 2h";
     if (/^now\(\)$/i.test(raw.to.trim())) {
-      const capped = tfFrom("-24h", "now");
-      return { ...capped, label: `${capped.label} — capped at 24h` };
+      const capped = tfFrom("-2h", "now");
+      return { ...capped, label: `${capped.label} — ${capNote}` };
     }
     const endIso = raw.to.replace(/"/g, "");
     const end = new Date(endIso);
     if (!Number.isFinite(end.getTime())) {
-      const capped = tfFrom("-24h", "now");
-      return { ...capped, label: `${capped.label} — capped at 24h` };
+      const capped = tfFrom("-2h", "now");
+      return { ...capped, label: `${capped.label} — ${capNote}` };
     }
-    const start = new Date(end.getTime() - 24 * 3600e3);
+    const start = new Date(end.getTime() - MAX_WINDOW_MIN * 60e3);
     const capped = tfFrom(start.toISOString(), end.toISOString());
-    return { ...capped, label: `${capped.label} — capped at 24h` };
+    return { ...capped, label: `${capped.label} — ${capNote}` };
   }, [state.from, state.to]);
   const appId = state.app;
 
@@ -212,6 +220,20 @@ export function App() {
      it — and the banner's advice, "pick a single application", now actually
      changes what is scanned. */
   const d = useChainData(tf, state.session, state.app);
+  /* the origin split is the Delivery Chain's alone, fetched when it opens */
+  const origins = useOrigins(tf, state.session, state.app, tab === "chain");
+  /* the contacted domains too: read by the chain's edge layer, fetched when
+     it opens (the Overview's requests card asks for them itself) */
+  // the chain's domains, inside the click budget like the Overview's (utils/cost)
+  /* …and only once the census has landed: started before it, the ratio was
+     sized on zero sessions, so the read ran unsampled (76 GiB, 13.9 s on
+     production) and then ran again, sampled, when the count arrived. */
+  const domains = useDomains(tf, state.app, tab === "chain" && !d.loading,
+    scanRatio(d.apps.find((a) => a.appId === state.app)?.sessions));
+  const chainData = React.useMemo(() => ({ ...d,
+    ...(origins ? { origins } : {}), ...(domains ? { domains } : {}),
+    originsLoading: tab === "chain" && !!state.app && origins === null }),
+  [d, origins, domains, tab, state.app]);
   // memoised per timeframe; the Journeys funnel reads fragment counts from it
   /* NOBODY PAYS FOR THE ESTATE SCAN BY DEFAULT.
      The first cut had the Overview pay for it, which defeats the point: the
@@ -219,7 +241,15 @@ export function App() {
      truncated it — and it bought one comparison sentence. The sentence is
      gone; every number on the card is still measured, and the card no longer
      claims a comparison it did not pay for. */
-  const uxMap = useUxOverview(tf, state.app, false);
+  const warmJourneys = false;
+  /* and only while Journeys is the page — the one consumer of this map
+     (FlowSankey); every other page was paying a full scan for a prop it
+     never received. Warmed with the journeys, on the tab's hover. */
+  /* NOT READ ANY MORE (0.17.28): this per-session scan of the whole window
+     existed to count "window fragments" for the Journeys denominator — an
+     unbounded read (≈145 GiB on a bank's hour) for a correction the "without
+     a screen" figure now carries, sliced and measured, one click away. */
+  const uxMap = useUxOverview(tf, state.app, false, false);
   /* Users & Sessions filters by frontend.name, not the inventory name —
    * see useFrontendNames for the measured mismatch. */
   const feNames = useFrontendNames(tf.minutes);
@@ -227,9 +257,15 @@ export function App() {
    * Control) — four user.events scans Overview and the chain stopped paying */
   /* warmed the moment the pointer TOUCHES the Journeys/Business Control
    * tab — by the click, the four scans are usually already in flight */
-  const [warmJourneys, setWarmJourneys] = useState(false);
+  /* AN APPLICATION WITH NO SESSIONS HAS NO JOURNEYS (0.17.36). A mobile
+     application can send RUM events with no session at all — the census
+     names it with 0 sessions — and the four mining scans still ran, to draw
+     an empty diagram reading "0 · 0 paths discovered". */
+  const appSessions = d.apps.find((a) => a.appId === state.app)?.sessions ?? 0;
+  const idleApp = !!state.app && !state.session && !d.loading && !(appSessions > 0);
   const jd = useJourneys(tf,
-    warmJourneys || tab === "flow" || tab === "report", state.session, state.app);
+    (warmJourneys || tab === "flow" || tab === "report") && !d.loading && !idleApp,
+    state.session, state.app, appSessions);
   // the customer's own conversion definitions — taught on Journeys, read by
   // every screen that speaks of conversion
   usePageTitle(TABS.find(([id]) => id === tab)?.[1]);
@@ -250,8 +286,22 @@ export function App() {
      So a resolved application counts the moment the census names one, loaded
      or not. While there are no rows at all, the url's own choice stands, so
      the selection does not flicker away and back. */
-  const current = appId && d.apps.some((a) => a.appId === appId)
-    ? appId
+  /* A PICK IS VALID IF THE ESTATE HAS IT, NOT ONLY IF THE CENSUS ON SCREEN
+     DOES (0.17.30). The census is scoped to the application on screen — one
+     row, from the metric store — so the moment the reader picked another,
+     the old row was still the only one, the pick "did not exist", and this
+     fell back to apps[0]: the previous application, which the effect below
+     then wrote back into the url. The inventory (every FRONTEND node, the
+     list the picker itself shows) is what decides; the census only fills
+     the numbers in once it lands. */
+  const known = (id: string | null | undefined) => !!id
+    && (d.apps.some((a) => a.appId === id)
+      || d.inventory.some((a) => a.appId.toLowerCase() === id.toLowerCase()));
+  /* …and while the pass is still partial, an explicit pick is trusted: a
+     classic-only application joins d.apps only on the second landing, and
+     correcting the url before then bounced the reader to the busiest app. */
+  const current = known(appId) || (!!appId && !!d.partial)
+    ? appId!
     : d.apps[0]?.appId ?? (d.loading ? (appId ?? "") : "");
   /* THE AUTO-PICK HAS TO REACH THE SCANS.
    *
@@ -270,6 +320,12 @@ export function App() {
     if (current && state.app !== current) set({ app: current });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
+  /* remembered for the next open (see main.tsx) — only an application the
+     census actually named, never a url's guess */
+  useEffect(() => {
+    if (!current || !d.apps.some((a) => a.appId === current)) return;
+    rememberApp(current);
+  }, [current, d.apps]);
   // the engineer's reading of the same anatomy Business Control speaks in
   // business words — shown on the two technical pages, one scan shared
   // the flow page reads its technical vitals from the INFOGRAPHIC now, where
@@ -310,8 +366,32 @@ export function App() {
     }
     return [...by.values()].sort((x, y) => x.name.localeCompare(y.name));
   }, [d.inventory, d.apps]);
-  const mobileApps = pick.filter(isMobile);
-  const webApps = pick.filter((a) => !isMobile(a));
+  /* DETECTED, UNNAMED FRONTENDS GO LAST, UNDER THEIR OWN HEADING. The
+     inventory lists every FRONTEND Smartscape knows, and the platform
+     creates some of them on its own, named after the address they were
+     seen on — "10.x.x.x". They are real nodes and may carry traffic,
+     so they are not hidden; but a name that is an IP address is not a name
+     a reader is looking for, and sorted alphabetically the digits led the
+     whole list. They sit at the end, labelled for what they are. */
+  const isDetected = (a: { name: string }) =>
+    /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(a.name.trim())
+    || /^[a-z0-9.-]+\.(com|br|net|io|org)(\.[a-z]{2})?$/i.test(a.name.trim());
+  /* A SMARTER PICKER (0.17.32, Marcelo: "separar app mobile de web; separar
+     aplicações que não têm dados das demais"). Sessions per application come
+     from the metric store for every frontend at once (useAppActivity, ≈0
+     GiB): applications with sessions lead, busiest first, each with its
+     count; the ones with none in the window sit together at the end. While
+     the counts are unknown the list keeps its old shape. */
+  const activity = useAppActivity(tf);
+  const sessOf = (a: { appId: string }) => activity?.get(a.appId.toLowerCase()) ?? 0;
+  const live = (a: { appId: string }) => !activity || sessOf(a) > 0;
+  const bySessions = (x: { appId: string; name: string }, y: { appId: string; name: string }) =>
+    sessOf(y) - sessOf(x) || x.name.localeCompare(y.name);
+  const named = pick.filter((a) => !isDetected(a));
+  const detected = pick.filter((a) => isDetected(a) && live(a)).sort(bySessions);
+  const mobileApps = named.filter((a) => isMobile(a) && live(a)).sort(bySessions);
+  const webApps = named.filter((a) => !isMobile(a) && live(a)).sort(bySessions);
+  const idleApps = activity ? pick.filter((a) => !live(a)) : [];
 
   const view = TABS.find(([id]) => id === tab);
 
@@ -331,9 +411,10 @@ export function App() {
             appIcon="/platform/app-engine/registry/v1/app-icons/my.deliverychain.ux"
             onClick={() => setTab("home")} />
           {TABS.map(([id, label]) => (
-            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}
-              onMouseEnter={(id === "flow" || id === "report")
-                ? () => setWarmJourneys(true) : undefined}>
+            /* NO WARM-UP ON HOVER (0.17.11). Passing the pointer over the
+               Journeys tab started its event scans — measured on production,
+               ≈80 GiB for a tab nobody opened. They start on the click. */
+            <AppHeader.NavigationItem key={id} isSelected={tab === id} onClick={() => setTab(id)}>
               {label}
             </AppHeader.NavigationItem>
           ))}
@@ -390,10 +471,12 @@ export function App() {
       <PageLayout>
       <PageLayout.Header>
         <TitleBar>
-          <TitleBar.Title>{view?.[1] ?? "Delivery Chain"}</TitleBar.Title>
-          {(d.loading || view?.[2]) && (
+          <TitleBar.Title><span title={view?.[2] || undefined}>{view?.[1] ?? "Delivery Chain"}</span></TitleBar.Title>
+          {/* labels only on screen (0.17.42): the page's one-line description
+              is the title's tooltip; the subtitle carries state words only */}
+          {d.loading && (
             <TitleBar.Subtitle>
-              {d.loading ? "querying Grail and Smartscape…" : view?.[2]}
+              querying Grail and Smartscape…
             </TitleBar.Subtitle>
           )}
           <TitleBar.Suffix>
@@ -401,12 +484,35 @@ export function App() {
               {/* the estate line (apps · sessions · problems · env alerts)
                   was removed by request — the pages themselves carry their
                   numbers, and the bar keeps only the controls */}
-              {!d.loading && pick.length > 0 && (
+              {/* THE PICKER STAYS WHILE A PICK LOADS (0.17.32): it was hidden for
+                  the whole load, so choosing an application made the menu you
+                  had just used vanish until the numbers came back. */}
+              {pick.length > 0 && (
                 <Select
                   value={current}
                   onChange={(v) => { if (v) setAppId(v as string); }}>
                   <Select.Trigger placeholder="Application" />
-                  <Select.Content>
+                  {/* A LIST OF HUNDREDS IS A SEARCH, NOT A SCROLL. The picker
+                      now lists every frontend the inventory knows — on a
+                      bank's estate, hundreds — and the open list ran past the
+                      frame. Strato's own Select.Filter does client-side
+                      filtering as the reader types; the list collapses to the
+                      matches and the frame is never the problem again. */}
+                  <Select.Filter />
+                  {/* BOUNDED IN PIXELS, NOT IN THE IFRAME'S IDEA OF A VIEWPORT.
+                      Strato sizes this overlay as max(viewportHeight/2, 320)
+                      minus the trigger — and inside the app shell the
+                      "viewport" is an iframe sized to the page's content, so
+                      a tall page makes a tall overlay that runs past what the
+                      reader can see. An absolute bound (theme.css, .app-picker)
+                      is the only one that means the same thing whatever the
+                      frame's height is. */}
+                  {/* WIDE ENOUGH TO READ. `width` defaults to the trigger's,
+                      which clipped "Abertura de Conta Híbrida A…" the moment
+                      the height was bounded. A CSS width is allowed; this one
+                      fits the long names and never exceeds the frame. */}
+                  <Select.Content className="app-picker" style={{ maxHeight: 420 }}
+                    width="min(560px, 92vw)">
                     {/* Web and mobile read differently in the rest of this app —
                         mobile carries no ingress, no third-party requests, and
                         (where RUM never reported) no measured sessions at all —
@@ -414,22 +520,31 @@ export function App() {
                         session count. `entity` is the reliable signal: RUM and
                         the classic-model fallback both key a mobile app's
                         entity as MOBILE_APPLICATION-…, web apps never do. */}
-                    {webApps.length > 0 && (
+                    {([["Mobile", mobileApps], ["Web", webApps],
+                      ["Detected · unnamed", detected]] as const).map(([label, list]) => (
+                      list.length > 0 && (
+                        <Select.Group key={label}>
+                          <Select.GroupLabel>{label}</Select.GroupLabel>
+                          {list.map((a) => (
+                            <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
+                              <span className="app-picker__row">
+                                <span>{a.name}</span>
+                                {activity && <em className="app-picker__n">{fmtK(sessOf(a))}</em>}
+                              </span>
+                            </Select.Option>
+                          ))}
+                        </Select.Group>
+                      )
+                    ))}
+                    {idleApps.length > 0 && (
                       <Select.Group>
-                        <Select.GroupLabel>Web</Select.GroupLabel>
-                        {webApps.map((a) => (
+                        <Select.GroupLabel>{`No sessions · ${tf.label}`}</Select.GroupLabel>
+                        {idleApps.map((a) => (
                           <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
-                            {a.name}
-                          </Select.Option>
-                        ))}
-                      </Select.Group>
-                    )}
-                    {mobileApps.length > 0 && (
-                      <Select.Group>
-                        <Select.GroupLabel>Mobile</Select.GroupLabel>
-                        {mobileApps.map((a) => (
-                          <Select.Option key={a.appId} value={a.appId} textValue={a.name}>
-                            {a.name}
+                            <span className="app-picker__row app-picker__row--idle">
+                              <span>{a.name}</span>
+                              <em className="app-picker__n">{isMobile(a) ? "mobile" : "web"}</em>
+                            </span>
                           </Select.Option>
                         ))}
                       </Select.Group>
@@ -441,16 +556,13 @@ export function App() {
               <TimeframeSelector
                 value={{ from: state.from || TF0.from, to: state.to || TF0.to }}
                 onChange={(v) => setTf(v?.from.value ?? TF0.from, v?.to.value ?? TF0.to)}>
-                {/* only windows the 24h ceiling allows — the platform's
-                    default list offers 7/30/90 days, which the cap above
-                    would silently shrink; better not to offer them */}
+                {/* only windows the 2h ceiling allows — longer presets would
+                    be silently shrunk by the cap above, so they are not
+                    offered; 1 hour stays the default (TF0) */}
                 <TimeframeSelector.Presets>
                   <TimeframeSelector.PresetItem value={{ from: "-30m", to: "now" }}>Last 30 minutes</TimeframeSelector.PresetItem>
                   <TimeframeSelector.PresetItem value={{ from: "-1h", to: "now" }}>Last 1 hour</TimeframeSelector.PresetItem>
                   <TimeframeSelector.PresetItem value={{ from: "-2h", to: "now" }}>Last 2 hours</TimeframeSelector.PresetItem>
-                  <TimeframeSelector.PresetItem value={{ from: "-6h", to: "now" }}>Last 6 hours</TimeframeSelector.PresetItem>
-                  <TimeframeSelector.PresetItem value={{ from: "-12h", to: "now" }}>Last 12 hours</TimeframeSelector.PresetItem>
-                  <TimeframeSelector.PresetItem value={{ from: "-24h", to: "now" }}>Last 24 hours</TimeframeSelector.PresetItem>
                 </TimeframeSelector.Presets>
               </TimeframeSelector>
             </div>
@@ -462,21 +574,19 @@ export function App() {
 
       {state.session && (
         <div className="banner banner--info">
-          <b>One session only:</b> <span className="num">{state.session}</span> — every figure on
-          this screen describes that single session, so the mined path can be read against the raw
-          events. <button className="flow-sel__b" onClick={() => set({ session: null })}>
+          <b title="Every figure on this screen describes that single session, so the mined path can be read against the raw events.">
+            One session only:</b> <span className="num">{state.session}</span>{" "}
+          <button className="flow-sel__b" onClick={() => set({ session: null })}>
             show everything
           </button>
         </div>
       )}
 
       {truncatedScan && (
-        <div className="banner">
-          <b>Partial data:</b> at least one query on this screen reached Grail's 500 GB scan
-          limit and answered from part of the window. Grail reports that as a success with a
-          warning, so the figures below are real but <em>incomplete</em> — they can only be
-          lower than the truth. Narrow the window, or pick a single application, and they
-          become whole again.
+        <div className="banner" title={"At least one query on this screen reached the scan limit and "
+          + "answered from part of the window. The figures are real but incomplete — they can only be "
+          + "lower than the truth. Narrow the window to make them whole."}>
+          <b>Partial data</b>
         </div>
       )}
 
@@ -496,10 +606,7 @@ export function App() {
             {retired.length > 0 && (
               <>
                 <b>Not available on this environment ({retired.length}):</b>{" "}
-                {retired.map(label).slice(0, 4).join(" · ")} — these read the classic
-                entity model, which a live estate has retired. Everything Smartscape
-                and Grail can answer is on screen; only the classic fallbacks are
-                missing.{other.length > 0 ? " " : ""}
+                {retired.map(label).slice(0, 4).join(" · ")}{other.length > 0 ? " · " : ""}
               </>
             )}
             {other.length > 0 && (() => {
@@ -545,7 +652,16 @@ export function App() {
         <Boundary label="No RUM application"><NoRumState /></Boundary>
       ) : (
         <>
-          {tab === "home" && current && (
+          {/* A PICK IN FLIGHT IS SHOWN AS ONE (0.17.31). The census is scoped
+              to the application on screen, so a fresh pick has no row until
+              its own census lands — and the Overview drew nothing at all in
+              between, which read as broken. */}
+          {tab === "home" && current && !d.apps.some((a) => a.appId === current) && (
+            d.loading
+              ? <div className="loading"><i />measuring this application…</div>
+              : <div className="loading">no sessions for this application in {tf.label}</div>
+          )}
+          {tab === "home" && current && d.apps.some((a) => a.appId === current) && (
             <Boundary label="Overview">
               <Pulse data={d} appId={current}
                 onOpenChain={() => { setAppId(current); setTab("chain"); }}
@@ -570,14 +686,27 @@ export function App() {
             </Boundary>
           )}
 
-          {tab === "flow" && !jd && (
+          {(tab === "flow" || tab === "report") && idleApp && (
+            <div className="loading">no sessions for this application in {tf.label}</div>
+          )}
+          {tab === "flow" && !jd && !idleApp && (
             <div className="loading"><i />mining the journeys…</div>
           )}
-          {tab === "flow" && jd && (
+          {tab === "flow" && jd?.failed && (
+            <div className="loading" title="The journey mining query failed — refresh to read it again.">query failed</div>
+          )}
+          {tab === "flow" && jd && !jd.failed && (
             <div className="stack">
+              {jd.sliceMin ? (
+                <div className="j-slice" title={`To stay inside the app's scan budget, the journeys were mined from `
+                  + `the last ${jd.sliceMin} settled minutes of the window; counts are scaled to the whole window, `
+                  + `paths, rankings and shares are those minutes'.`}>
+                  {`sample · last ${jd.sliceMin} min`}
+                </div>) : null}
               {/* friction/onOpen retired with the audit: the prop was never
                   read and the hand-off callback had no consumer */}
               <Boundary label="Flow"><FlowSankey apps={d.apps} seqs={jd.sequences} appId={current || null}
+                sliceMin={jd.sliceMin}
                 transitions={jd.transitions} views={jd.views} ux={uxMap}
                 tf={tf}
                 cohort={state.coh === "unconverted" ? "unconverted" : null}
@@ -589,24 +718,25 @@ export function App() {
 
           {tab === "chain" && current && (
             <Boundary label="Delivery chain">
-              <DeliveryChain data={d} appId={current}
+              <DeliveryChain data={chainData} appId={current}
                 sel={state.sel} onSel={(v) => set({ sel: v })}
                 highlight={state.hl === "anomalies" ? "anomalies" : null}
                 onHighlightClear={() => set({ hl: null }, false)} />
             </Boundary>
           )}
-          {tab === "report" && !jd && (
+          {tab === "report" && !jd && !idleApp && (
             <div className="loading"><i />mining the journeys…</div>
           )}
           {/* MOUNTED even while journeys mine — hidden. Gating the mount on
               jd serialised the board: 2.9s of journeys THEN 3.3s of its own
               KPI scans (measured, 6.2s total). Mounted hidden, both waves
               run in parallel and the board appears in the slower one. */}
-          {tab === "report" && (
+          {tab === "report" && !idleApp && (
             <div style={jd ? undefined : { display: "none" }}>
             <Boundary label="Report">
               <ReportView data={{ ...d, views: jd?.views ?? [], sequences: jd?.sequences ?? [],
                   transitions: jd?.transitions ?? [], friction: jd?.friction ?? [] }} scopeApp={current}
+                journeySliceMin={jd?.sliceMin}
                 routePicks={state.rt ? state.rt.split("\t").filter(Boolean) : null}
                 onClearRoutes={() => set({ rt: null }, false)}
                 cov={state.cov ?? ""} onCov={(v) => set({ cov: v || null }, false)}
